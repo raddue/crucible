@@ -305,7 +305,7 @@ Non-`fix(*)` PRs record nothing. See `skills/grudge/SKILL.md`.
 
 **Force-merging past branch protection**
 - **Problem:** Bypass safety rules, merge broken or unreviewed code
-- **Fix:** Never use `--admin` flag. Report the protection rule and let the user resolve it properly.
+- **Fix:** Never bypass branch protection on your own initiative — see "Merging PRs (branch protection)" in the root instruction file for the one case it permits. Otherwise report the protection rule and let the user resolve it properly.
 
 **Deleting branches without confirmation**
 - **Problem:** Lose branch reference before user is ready
@@ -319,7 +319,7 @@ Non-`fix(*)` PRs record nothing. See `skills/grudge/SKILL.md`.
 - Skip the repo safety check on public repos
 - Move on after merge without checking post-merge CI
 - Delete branches without confirmation
-- Use `--admin` to bypass branch protection
+- Use `--admin` (or bypass branch protection by any other means) except under the conditions in "Merging PRs (branch protection)" in the root instruction file
 - Retry a failed merge automatically without user input
 
 **Always:**
