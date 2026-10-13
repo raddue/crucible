@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Manifest Builder depth agent. Primary consumer: `/audit`. Produces a structured file roster with roles, boundaries, and dependency graph for the `## Subsystem Manifest` section.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: Explore, model: sonnet):
   description: "Manifest Builder: produce file roster for [subsystem]"

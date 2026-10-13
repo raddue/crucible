@@ -258,6 +258,16 @@ run python3 scripts/test_compass.py
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
+# --- Layer 3 cairn Phase Entry Check + Reconciliation Pass (#643) ---
+run python3 scripts/test_cairn.py
+
+# --- Dispatch manifest bookkeeping (#643) ---
+run python3 scripts/test_dispatch.py
+run python3 scripts/check_gate_provenance.py --selftest
+
+# --- Ambient pipeline status writer (#643) ---
+run python3 scripts/test_pipeline_status.py
+
 # --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
 
@@ -341,6 +351,7 @@ run python3 scripts/test_aacr_bench_measure.py
 
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
+run python3 eval/memory/test_memory.py
 
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh

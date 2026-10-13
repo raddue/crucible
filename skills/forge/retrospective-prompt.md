@@ -5,6 +5,8 @@
 
 Dispatch a Sonnet subagent after task completion using this template.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Task tool (general-purpose, model: sonnet):
   description: "Forge retrospective for [task name]"

@@ -17,6 +17,17 @@ test -f scripts/compass.py && python scripts/compass.py read --compact 2>/dev/nu
 
 If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this skill — getting-started reads only.
 
+## Repo Memory
+
+Read committed decisions and rules after compass state. This is L2 context, not authority over `CLAUDE.md`/`AGENTS.md` or accepted ADRs.
+
+```bash
+plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+python3 "$plugin_root/scripts/memory.py" read --limit 30 2>/dev/null \
+  || { test -f docs/memory.md && grep -E '^- \[(decision|rule)\] ' docs/memory.md | tail -30; } \
+  || true
+```
+
 ## The Rule
 
 **Invoke relevant skills BEFORE taking action or responding.** Skills encode hard-won process discipline — skipping them loses that value.

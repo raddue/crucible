@@ -9,6 +9,8 @@ The Consistency lens uses a two-agent protocol. The orchestrator dispatches Agen
 
 Receives the Tier 1 overview and cartographer conventions. Identifies files that may contain inconsistencies.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Audit consistency lens (Agent A: pattern scan)"
@@ -127,6 +129,8 @@ Task tool (general-purpose, model: opus):
 ## Agent B: Deep Inspection
 
 Receives full source for Agent A's flagged files. Confirms or rejects suspected inconsistencies.
+
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
 
 ```
 Task tool (general-purpose, model: opus):

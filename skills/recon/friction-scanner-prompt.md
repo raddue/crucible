@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Friction Scanner depth agent. Primary consumer: `/prospector`. Produces friction points with severity, frequency, and file locations for the `## Friction Scan` section.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Agent tool (subagent_type: Explore, model: opus):
   description: "Friction Scanner: identify architectural friction in [scope]"

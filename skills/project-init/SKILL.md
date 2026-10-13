@@ -24,6 +24,8 @@ Eliminate cold-start penalty by proactively mapping the current repo and its nei
 
 **Coverage distinction:** All output is tagged `<!-- project-init:structural -->`, marking it as breadth-first structural mapping. This is distinct from task-verified content produced by cartographer record mode during real work. Task-verified content is always preserved over structural content.
 
+**Models:** Scanners, explorers, and recorders request `standard`. The Claude Code examples use the current reference alias `model: sonnet`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
 **Announce at start:** "I'm using the project-init skill to map this codebase and its neighborhood."
 
 ---

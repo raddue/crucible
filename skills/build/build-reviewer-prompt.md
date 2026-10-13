@@ -6,6 +6,8 @@
 
 Use this template when dispatching a reviewer teammate in Phase 3. The reviewer performs TWO passes: code review then test review.
 
+Requested profile: high or standard — lead decides per task complexity. Claude Code call-level model mapping: high -> `model: opus`, standard -> `model: sonnet`.
+
 ```
 Task tool (general-purpose, model: opus or sonnet — lead decides per task complexity, team_name: "<team-name>", name: "reviewer-N"):
   description: "Review Task N: [task name]"
