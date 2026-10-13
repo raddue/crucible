@@ -84,6 +84,8 @@ run() {
 run python3 scripts/check_canonical_drift.py
 run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
+run python3 scripts/check_qg_closure_modes.py --selftest
+run python3 scripts/check_qg_closure_modes.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
@@ -165,6 +167,13 @@ run python3 scripts/test_qg_fix_pin.py
 
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
+
+# --- orchestrator fleet-file CRUD (skills/orchestrator step 2) ---
+run python3 scripts/test_orchestrator_fleet.py
+
+# --- orchestrator passive liveness detector (skills/orchestrator scan) ---
+run python3 scripts/test_orchestrator_scan.py
+run python3 scripts/test_orchestrator_ping.py
 
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
