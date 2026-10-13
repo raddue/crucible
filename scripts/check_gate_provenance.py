@@ -8,9 +8,11 @@ Stdlib only. Exit 0 when provenance is complete, 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -20,11 +22,13 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
     violations = []
     manifest_path = dispatch_dir / "manifest.jsonl"
     if not manifest_path.is_file():
-        return ["GATE-NOT-RUN:manifest"]
+        return ["BLOCKED: DISPATCH-UNAVAILABLE", "missing manifest.jsonl"]
     try:
         rows = [json.loads(line) for line in manifest_path.read_text().splitlines() if line.strip()]
     except (OSError, ValueError) as exc:
         return [f"invalid manifest: {exc}"]
+    if not rows:
+        return ["BLOCKED: DISPATCH-UNAVAILABLE", "empty manifest.jsonl"]
     if marker is not None:
         try:
             marker_text = marker.read_text()
@@ -43,14 +47,22 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
             return [f"DISPATCH-UNMAPPED:{role}" for role in roles if role not in mappings]
     else:
         roles = sorted({r.get("role") for r in rows if r.get("status") != "skipped" and r.get("role")})
+    if not roles:
+        return ["BLOCKED: DISPATCH-UNAVAILABLE", "no required dispatch legs"]
     ledger_path = dispatch_dir / "receipt-ledger.jsonl"
-    ledger_ids = set()
     try:
-        for line in ledger_path.read_text().splitlines():
-            if line.strip():
-                ledger_ids.add(json.loads(line).get("dispatch_id"))
-    except (OSError, ValueError):
-        pass
+        ledger = [json.loads(line) for line in ledger_path.read_text().splitlines() if line.strip()]
+        if not ledger or any(
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("dispatch_id"), str)
+            or not isinstance(entry.get("phase"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entry.get("rcpt_sha256", ""))
+            or entry.get("verdict") not in {"PASS", "FAIL", "BLOCKED"}
+            for entry in ledger
+        ):
+            raise ValueError("empty or invalid receipt-ledger row")
+    except (OSError, ValueError, TypeError) as exc:
+        return [f"GATE-NOT-RUN:receipt-ledger ({exc})"]
     for role in roles:
         matches = [r for r in rows if r.get("role") == role and r.get("status") == "completed"]
         if not matches:
@@ -67,10 +79,42 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
         if mapped and row.get("actual_model") != mapped:
             violations.append(f"GATE-NOT-RUN:{role} (actual_model differs from mapped model)")
         dispatch_id = pathlib.Path(row.get("file", "")).stem
-        if dispatch_id not in ledger_ids:
-            violations.append(f"GATE-NOT-RUN:{role} (receipt not bound)")
-    if not ledger_path.is_file():
-        violations.append("GATE-NOT-RUN:receipt-ledger")
+        receipts = sorted(p for p in dispatch_dir.iterdir() if p.is_file()
+                          and p.name != row.get("file")
+                          and (p.name.startswith(dispatch_id + "-") or p.name.startswith(dispatch_id + ".")))
+        if not receipts:
+            violations.append(f"GATE-NOT-RUN:{role} (receipt unavailable for {dispatch_id})")
+            continue
+        errors = []
+        for receipt in receipts:
+            try:
+                text = receipt.read_text()
+            except (OSError, UnicodeError) as exc:
+                errors.append(f"cannot read receipt: {exc}")
+                continue
+            normalized = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").splitlines()).rstrip("\n") + "\n"
+            digest = hashlib.sha256(normalized.encode()).hexdigest()
+            if not any(entry["dispatch_id"] == dispatch_id and entry["rcpt_sha256"] == digest
+                       and entry["verdict"] == "PASS" for entry in ledger):
+                errors.append(f"receipt not bound to PASS ledger row: {receipt.name}")
+                continue
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts/rcpt_verify.py"), "--tier2", "--strict",
+                     "--root", str(dispatch_dir), "--ledger", str(ledger_path), str(receipt)],
+                    capture_output=True, text=True)
+            except OSError as exc:
+                errors.append(f"receipt verifier unavailable: {exc}")
+                continue
+            if result.returncode:
+                errors.append(f"receipt verification failed: {result.stderr.strip()}")
+                continue
+            if not re.match(rf"^RCPT v1(?:\.1)? \S+/{re.escape(dispatch_id)}\s*$", text.split("\n", 1)[0]):
+                errors.append(f"receipt dispatch ID mismatch: {receipt.name}")
+                continue
+            break
+        else:
+            violations.append(f"GATE-NOT-RUN:{role} ({'; '.join(errors)})")
     return violations
 
 
@@ -79,9 +123,11 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         d = pathlib.Path(tmp)
         result = check(d)
-        assert result, "missing manifest (self-review) must fail"
+        assert result[0] == "BLOCKED: DISPATCH-UNAVAILABLE", "missing manifest must block"
         (d / "manifest.jsonl").write_text(json.dumps({"seq": 1, "role": "crucible-red-team", "status": "completed", "file": "1-red-team.md", "dispatch_ref": "run-1", "actual_model": "provider/model", "harness": "pi"}) + "\n")
-        (d / "receipt-ledger.jsonl").write_text('{"dispatch_id":"1-red-team","phase":"quality-gate:round/1","rcpt_sha256":"' + "0" * 64 + '","verdict":"PASS"}\n')
+        receipt = "RCPT v1.1 quality-gate/1-red-team\nVERDICT  PASS  conf=0.90\nARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\nWITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\nSUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\nTRIPWIRE-CHILD: none\n"
+        (d / "1-red-team-receipt.md").write_text(receipt)
+        (d / "receipt-ledger.jsonl").write_text(json.dumps({"dispatch_id": "1-red-team", "phase": "quality-gate:round/1", "rcpt_sha256": hashlib.sha256(receipt.encode()).hexdigest(), "verdict": "PASS"}) + "\n")
         marker = d / "gate-verdict.md"
         marker.write_text("Harness: pi\nVerdict: PASS\nRequired-Legs: crucible-red-team\nMapped-Model: crucible-red-team=provider/model\n")
         assert not check(d, marker), f"full Pi leg set must pass: {check(d, marker)}"
@@ -110,7 +156,7 @@ def main() -> int:
     errors = check(args.dispatch_dir, args.marker)
     if errors:
         for error in errors:
-            print(f"- {error}")
+            print(error if error.startswith("BLOCKED: ") else f"- {error}")
         return 1
     print("PASS — gate dispatch provenance valid")
     return 0
