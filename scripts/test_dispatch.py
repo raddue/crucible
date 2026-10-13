@@ -4,9 +4,11 @@
 Pure stdlib unittest. Run: python3 scripts/test_dispatch.py (registered in run_tests.sh).
 """
 
+import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -218,6 +220,119 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(dispatch.cmd_cleanup(_Args(self.ddir, scratch=scratch, failed=True)), 0)
         self.assertTrue(os.path.isdir(os.path.join(scratch, "crucible-dispatch-123")))
         self.assertTrue(os.path.exists(self.ddir))
+
+
+class GateProvenanceTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ddir = self.tmp.name
+        self.marker = os.path.join(self.ddir, "gate-verdict.md")
+        with open(self.marker, "w", encoding="utf-8") as f:
+            f.write("Harness: pi\nVerdict: PASS\nRequired-Legs: crucible-red-team\n"
+                    "Mapped-Model: crucible-red-team=provider/model\n")
+        self.row = {"seq": 1, "file": "1-crucible-red-team.md", "role": "crucible-red-team",
+                    "status": "completed", "dispatch_ref": "run-1", "actual_model": "provider/model",
+                    "harness": "pi"}
+
+    def run_checker(self):
+        return subprocess.run([sys.executable, os.path.join(HERE, "check_gate_provenance.py"),
+                               self.ddir, "--marker", self.marker],
+                              capture_output=True, text=True)
+
+    def write_manifest(self):
+        with open(os.path.join(self.ddir, "manifest.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(self.row) + "\n")
+
+    def write_ledger(self, raw=None):
+        with open(os.path.join(self.ddir, "receipt-ledger.jsonl"), "w", encoding="utf-8") as f:
+            f.write(raw if raw is not None else json.dumps({
+                "dispatch_id": "1-crucible-red-team", "phase": "quality-gate:round/1",
+                "rcpt_sha256": "0" * 64, "verdict": "PASS"}) + "\n")
+
+    def write_receipt(self, text=None):
+        text = text if text is not None else (
+            "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
+            "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+            "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+            "TRIPWIRE-CHILD: none\n"
+        )
+        with open(os.path.join(self.ddir, "1-crucible-red-team-receipt.md"), "w", encoding="utf-8") as f:
+            f.write(text)
+        self.write_ledger(json.dumps({"dispatch_id": "1-crucible-red-team",
+                                      "phase": "quality-gate:round/1",
+                                      "rcpt_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                                      "verdict": "PASS"}) + "\n")
+
+    def test_empty_dispatch_reports_unavailable(self):
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertTrue(result.stdout.startswith("BLOCKED: DISPATCH-UNAVAILABLE\n"), result.stdout)
+
+    def test_no_required_legs_cannot_pass(self):
+        self.write_manifest()
+        with open(self.marker, "w", encoding="utf-8") as f:
+            f.write("Harness: pi\nVerdict: PASS\nRequired-Legs: ,\n")
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("BLOCKED: DISPATCH-UNAVAILABLE", result.stdout)
+
+    def test_fabricated_ledger_cannot_pass_without_receipt(self):
+        self.write_manifest()
+        self.write_ledger()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt", result.stdout.lower())
+
+    def test_malformed_receipt_fails_even_when_ledger_hash_matches(self):
+        self.write_manifest()
+        self.write_receipt("not an RCPT v1.1 receipt\n")
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt verification failed", result.stdout)
+
+    def test_verified_receipt_passes(self):
+        self.write_manifest()
+        self.write_receipt()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_malformed_ledger_cannot_pass(self):
+        self.write_manifest()
+        self.write_receipt()
+        self.write_ledger('{"dispatch_id":"1-crucible-red-team"}\n{broken\n')
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt-ledger", result.stdout)
+
+    def test_unrelated_receipt_with_correct_hash_cannot_cover_dispatch(self):
+        self.write_manifest()
+        text = ("RCPT v1.1 quality-gate/2-other\nVERDICT  PASS  conf=0.90\n"
+                "ARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
+                "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+                "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+                "TRIPWIRE-CHILD: none\n")
+        self.write_receipt(text)
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt dispatch ID mismatch", result.stdout)
+
+    def test_ledger_hash_must_match_receipt(self):
+        self.write_manifest()
+        self.write_receipt()
+        self.write_ledger()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt not bound", result.stdout)
+
+    def test_ledger_must_cover_dispatch(self):
+        self.write_manifest()
+        self.write_ledger(json.dumps({"dispatch_id": "other", "phase": "quality-gate:round/1",
+                                      "rcpt_sha256": "0" * 64, "verdict": "PASS"}) + "\n")
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("receipt", result.stdout.lower())
 
 
 class _Args:
