@@ -26,7 +26,7 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
   live in `docs/evals.md`.
 - Install for live use: symlink skills into your harness's skills dir —
   `ln -sf "$PWD"/skills/* ~/.claude/skills/` (Claude Code) or
-  `ln -sf "$PWD"/skills/* ~/.Codex/skills/` (Codex). Editing a skill's `SKILL.md`
+  `ln -sf "$PWD"/skills/* ~/.codex/skills/` (Codex). Editing a skill's `SKILL.md`
   changes its behavior immediately on next activation.
 - Catalog + architecture: `docs/skills.md`, `docs/architecture.md`.
 
@@ -47,8 +47,10 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 - **Find-and-report-only skills don't edit code.** `red-team`, `audit`,
   `code-review` report findings; they must not modify the artifact under review.
 - **The calibration ledger is the epistemic backbone.** Tier-A gate verdicts
-  append to the machine-local central store — `~/.claude/crucible/ledger/runs.jsonl`
-  for Claude Code, `~/.Codex/crucible/ledger/runs.jsonl` for Codex
+  append to the machine-local central store — a single path for every harness,
+  `~/.claude/crucible/ledger/runs.jsonl` (`default_ledger_dir()` in
+  `scripts/ledger_append.py` has no harness switch, so there is no separate
+  Codex store to point at)
   (never committed — this repo is public; not to be confused with the deliberate
   11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl` — as of
   #460 it has no in-repo reader (its former readers moved to `raddue/crucible-eval`),
@@ -108,7 +110,7 @@ dogfood.)
 
 Baseline coding guidelines (think-before-coding, simplicity, surgical changes,
 goal-driven execution) live in each harness's global instruction file
-(`~/.claude/CLAUDE.md` for Claude Code, `~/.Codex/AGENTS.md` for Codex —
+(`~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex —
 Karpathy rules) and apply here too.
 
 ## Using Crucible
