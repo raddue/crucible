@@ -63,6 +63,7 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
             raise ValueError("empty or invalid receipt-ledger row")
     except (OSError, ValueError, TypeError) as exc:
         return [f"GATE-NOT-RUN:receipt-ledger ({exc})"]
+    seen_dispatch = {}
     for role in roles:
         matches = [r for r in rows if r.get("role") == role and r.get("status") == "completed"]
         if not matches:
@@ -83,6 +84,10 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
             violations.append(f"GATE-NOT-RUN:{role} (invalid manifest file: expected string)")
             continue
         dispatch_id = pathlib.Path(filename).stem
+        if dispatch_id in seen_dispatch:
+            violations.append(f"GATE-NOT-RUN:{role} (dispatch_id {dispatch_id} already covers role {seen_dispatch[dispatch_id]})")
+            continue
+        seen_dispatch[dispatch_id] = role
         receipts = sorted(p for p in dispatch_dir.iterdir() if p.is_file()
                           and p.name != row.get("file")
                           and (p.name.startswith(dispatch_id + "-") or p.name.startswith(dispatch_id + ".")))
