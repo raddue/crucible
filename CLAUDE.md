@@ -47,7 +47,8 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 - **Find-and-report-only skills don't edit code.** `red-team`, `audit`,
   `code-review` report findings; they must not modify the artifact under review.
 - **The calibration ledger is the epistemic backbone.** Tier-A gate verdicts
-  append to the machine-local central store `~/.claude/crucible/ledger/runs.jsonl`
+  append to the machine-local central store — `~/.claude/crucible/ledger/runs.jsonl`
+  for Claude Code, `~/.Codex/crucible/ledger/runs.jsonl` for Codex
   (never committed — this repo is public; not to be confused with the deliberate
   11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl` — as of
   #460 it has no in-repo reader (its former readers moved to `raddue/crucible-eval`),
@@ -90,6 +91,11 @@ Bypassing it with `gh pr merge --admin` is possible, but tightly constrained.
   last action before merging, append a truthful note to the PR body naming the
   protection rules bypassed. If you abort after disclosing, or the merge fails,
   edit that note to say no bypass merge occurred.
+- **No lane gates its own PR.** A gate verdict is independent evidence only when
+  it comes from something other than the session that wrote the change. A lane
+  reporting its own `quality-gate PASS` is a self-attestation, not a gate result:
+  treat it as unverified, and get a review from a different model family, told
+  not to edit and to try to make the change fail.
 
 ## Quality gate (non-negotiable)
 
