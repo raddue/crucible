@@ -14,6 +14,10 @@ Usage:
   rcpt_verify.py --selftest
   rcpt_verify.py --eval FILE.jsonl
 
+The installed wrapper supports receipt linting only. --selftest and --eval use
+repo-local eval/ledger-return-protocol relative to this source file; run those
+modes from the checkout, not the installed copy.
+
 --ledger PATH (Tier-2 part-3): bind each DISPATCHED TRACE line to a receipt-ledger.jsonl
 entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a receipt that
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).

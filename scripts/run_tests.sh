@@ -213,6 +213,7 @@ run python3 scripts/check_change_bundling.py
 # --- Receipt-verify (rcpt_verify) ---
 run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
+run python3 scripts/test_install_rcpt_verify.py
 
 # --- CHAIN-1 confusables table drift (#567) ---
 run python3 scripts/check_chain1_confusables_drift.py --selftest
@@ -373,6 +374,7 @@ run bash hooks/tests/test-session-index.sh
 run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 run bash hooks/tests/test-grudge-resolution-guard.sh
+run python3 hooks/tests/test-grudge-warden.py
 
 # --- Grudge eval suite (first eval/ wirings; #559) ---
 run python3 eval/grudge/test-grudge-core.py
