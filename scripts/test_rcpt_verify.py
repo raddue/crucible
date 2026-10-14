@@ -11225,6 +11225,21 @@ class TestWardenGateRound2Finding1Residual567(_InqBase):
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("before NEXT", out.stderr)
 
+    def test_pre_next_scan_splits_on_every_unicode_line_boundary(self):
+        """Warden PR #714: the pre-NEXT scan split on `\\n` only, so a
+        hidden keyword line separated by U+2028 / NEL / FF exited 0."""
+        rv = _import_rv()
+        for sep in ("\u2028", "\x85", "\x0c"):
+            with self.subTest(sep=repr(sep)):
+                body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                body = body.replace(
+                    "SUSPICION  0.10",
+                    f"SUSPICION  0.10{sep}SUPERSEDES: {self.HIDDEN}")
+                text = body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+                with self.assertRaises(rv.LintError) as ctx:
+                    rv.parse_v11_sections(text)
+                self.assertIn("before NEXT", str(ctx.exception))
+
     # -- N1 false positives (round-2 report table): ordinary v1.1 prose
     # merely mentioning "supersedes:" must now exit 0 -- dissolved, not
     # merely failing differently. -----------------------------------

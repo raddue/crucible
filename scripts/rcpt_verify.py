@@ -1304,7 +1304,7 @@ def parse_v11_sections(text):
         head, tail = text.split("\nNEXT", 1)
     else:
         head, tail = text, ""
-    for pre_line in (l for l in head.split("\n") if l.strip()):
+    for pre_line in (l for l in head.splitlines() if l.strip()):
         pre_skeleton_upper = _confusables_skeleton(pre_line)[0].upper()
         if (pre_skeleton_upper.startswith(_TRIPWIRE_CHILD_KEYWORD)
                 or pre_skeleton_upper.startswith(_TRIPWIRE_KEYWORD)
