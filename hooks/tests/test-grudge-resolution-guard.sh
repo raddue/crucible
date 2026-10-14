@@ -2790,6 +2790,30 @@ check 410 "the _overlap linearity fence runs and holds — contract:hook:inv-t28
 check 411 "the warden suite runs its full pinned test count — contract:hook:inv-t28" 0 \
   "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" >/dev/null 2>&1; echo $?)"
 
+# INV-T30 — diff-tree failure must not advance candidate checkpoint.
+hook_case t30
+printf 'VALUE = 0\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+printf 'VALUE = 1\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): preserve checkpoint on diff failure"
+T30_FIX="$(sha_of "$HC_REPO" HEAD)"
+run_hook s30
+check 412 "control: candidate blocks before injected failure" 2 "$RC"
+T30_CHECKPOINT="$(st "$HC_REPO" s30 '.last_checked_sha')"
+T30_FILES="$(guard_dir "$HC_REPO")/$T30_FIX.files"
+cp "$T30_FILES" "$HC_ROOT/original.files"
+mkdir -p "$HC_ROOT/bin"
+REAL_GIT="$(command -v git)"
+cat > "$HC_ROOT/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == *"diff-tree"* ]]; then printf 'partial.py\\0'; exit 1; fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$HC_ROOT/bin/git"
+HOOK_ENV="PATH=$HC_ROOT/bin:$PATH"
+run_hook s30 true
+HOOK_ENV=""
+check 413 "failed diff-tree allows without advancing checkpoint" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
+check 414 "partial diff-tree output does not replace persisted paths" yes "$(cmp -s "$HC_ROOT/original.files" "$T30_FILES" && echo yes || echo no)"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2802,7 +2826,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=416
+EXPECTED_CHECKS=419
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

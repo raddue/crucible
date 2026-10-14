@@ -364,14 +364,23 @@ _load_files() {
   # Re-derive ONLY the SHA needed for this candidate/overlap from git. An
   # oversized persisted <sha>.files must not restart an eager read on every
   # Stop before candidate scanning (#603/S4); git supplies the same raw paths.
-  local sha="$1" p _files=()
+  local sha="$1" p tmp _files=()
   _sha_key_ok "$sha" || return 1
   # A finite per-commit cap avoids the same prefix exhausting the clock on
   # every Stop. This is a loud, durable give-up, never a silent clearance.
+  tmp="$(mktemp)" || return 1
+  if ! _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$sha" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
   while IFS= read -r -d '' p; do
     _files+=("$p")
-    [ "${#_files[@]}" -le 4096 ] || return 3
-  done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$sha")
+    if [ "${#_files[@]}" -gt 4096 ]; then
+      rm -f "$tmp"
+      return 3
+    fi
+  done < "$tmp"
+  rm -f "$tmp"
   _sha_array_set "$sha" "${_files[@]}"
 }
 
@@ -780,7 +789,7 @@ _has_non_md() {
   return 1
 }
 
-IS_SHA=(); IS_AT=()
+IS_SHA=(); IS_AT=(); LOAD_FAILED=0
 # A capped SHA can recur while an older unresolved commit keeps the scan floor
 # behind it. Consult its durable GIVEUP once rather than re-reading all paths.
 _journal_pass
@@ -830,7 +839,10 @@ while IFS= read -r line; do
       echo "grudge-resolution-guard: candidate $c_sha has too many paths (>4096); retiring without grudge enforcement, NOT enforced. Subsequent Stops continue past it." >&2
       continue
     fi
-    [ "$load_rc" -eq 0 ] || continue
+    if [ "$load_rc" -ne 0 ]; then
+      LOAD_FAILED=1
+      continue
+    fi
     declare -n _cp="F_$c_sha"
     c_paths=("${_cp[@]}")
     unset -n _cp
@@ -850,6 +862,10 @@ while IFS= read -r line; do
   fi
   IS_SHA+=("$c_sha"); IS_AT+=("$c_at")
 done < <(printf '%s\n' "$LOG")
+if [ "$LOAD_FAILED" -eq 1 ]; then
+  echo "grudge-resolution-guard: git diff-tree failed while reading candidate paths; allowing Stop without advancing checkpoint, grudge compliance NOT enforced" >&2
+  exit 0
+fi
 
 # ── 12. Grouping / join / merge / re-arm ────────────────────────────────
 _overlap() {
