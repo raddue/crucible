@@ -175,7 +175,9 @@ KNOWN_RESIDUE = {
 # sanity_check_alphabet_coverage() below is a positive-coverage check
 # instead: it does not need a source codepoint, only confirmation that these
 # two values remain absent from what the table can ever produce.
-CURRENTLY_UNCOVERED_VALUES = {"0", "1"}
+# PR #714: capital "I" joins them -- UTS #39 routes every I-lookalike
+# (U+0406, U+0399, ...) to lowercase 'l', which _v11_keyword_end accepts for I.
+CURRENTLY_UNCOVERED_VALUES = {"0", "1", "I"}
 
 
 def sanity_check_known_mappings(mapping) -> list:
@@ -348,6 +350,17 @@ def sanity_check_reachability(mapping) -> list:
             line = keyword + " " + src + "one"
         elif target.lower() == "o":
             line = keyword + " n" + src + "ne"
+        elif target.upper() in "TRIPWIRE-CHILD:" or target == "l":
+            # PR #714 review (High 2): T/I/W/H/L exist for the v1.1
+            # TRIPWIRE-CHILD: keyword, matched by rcpt_verify._v11_keyword_end
+            # (UTS #39 maps capital I to 'l', so 'l' stands for I).
+            kw = "TRIPWIRE-CHILD:"
+            pos = kw.index("I" if target == "l" else target.upper())
+            if rv._v11_keyword_end(kw[:pos] + src + kw[pos + 1:] + " none", kw) is None:
+                problems.append(
+                    f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
+                    f"CONFUSABLE_MAP but UNREACHABLE through _v11_keyword_end")
+            continue
         else:
             problems.append(
                 f"U+{ord(src):04X} ({src!r} -> {target!r}) maps to a target "

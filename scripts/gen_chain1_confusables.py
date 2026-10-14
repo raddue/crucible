@@ -78,7 +78,14 @@ END_MARKER = "# --- END GENERATED CONFUSABLE_MAP ---"
 # docs/plans/2026-09-01-567-chain1-homoglyph-scanscope-design.md:478-481,
 # "every *value* should be one of `SUPERDTNXdiceonhx0123456789abcdef:` or
 # the equivalent").
-TARGET_ALPHABET = set("SUPERSEDES:") | set("none") | set("0123456789abcdef")
+# PR #714 review (High 2): the v1.1 Layer-2 keywords TRIPWIRE:/TRIPWIRE-CHILD:
+# are matched through the SAME table (parse_v11_sections), so their letters
+# must be in the alphabet too -- without T/I/W/H/L a homoglyph'd TRIPWIRE line
+# skeletonized to a non-keyword. The hyphen is deliberately excluded: the
+# skeleton drops ASCII punctuation, so a '-' target would add a char no
+# keyword skeleton contains.
+TARGET_ALPHABET = (set("SUPERSEDES:") | set("none") | set("0123456789abcdef")
+                   | set("TRIPWIRECHILD"))
 
 # round-2 quality-gate F3: TARGET_ALPHABET above is case-mixed (uppercase
 # SUPERDT..., lowercase none/hex), so a case-SENSITIVE `in` test against it

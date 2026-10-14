@@ -11294,5 +11294,104 @@ class TestWardenGateRound2Finding1Residual567(_InqBase):
         self.assertEqual(step2.returncode, 0, step2.stderr)
 
 
+class TestPR714ReviewRound3_567(_InqBase):
+    """PR #714 independent review (BLOCK): TRIPWIRE/TRIPWIRE-CHILD homoglyphs
+    and table-missing colons slipped past parse_v11_sections; ordinary
+    continuation lines false-positived the pre-NEXT scan."""
+
+    PREFIX = TestWardenGateRound2Finding1Residual567.PREFIX
+    HIDDEN = TestWardenGateRound2Finding1Residual567.HIDDEN
+    _base_body = TestWardenGateRound2Finding1Residual567._base_body
+    _run = TestWardenGateRound2Finding1Residual567._run
+
+    def _v11(self, extra_tail="", trip_child=None):
+        body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        tail = "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+        if trip_child:
+            tail += f"TRIPWIRE-CHILD: {trip_child}\n"
+        return body + tail + extra_tail
+
+    def _assert_lint(self, text, needle):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError) as ctx:
+            rv.parse_v11_sections(text)
+        self.assertIn(needle, str(ctx.exception))
+
+    # -- High 2 / Medium 1: TRIPWIRE / TRIPWIRE-CHILD homoglyphs --
+    def test_hidden_tripwire_homoglyph_post_next_is_duplicate(self):
+        for hidden in (chr(0x0422) + "RIPWIRE:  none",          # Cyrillic TE
+                       "TR" + chr(0x0406) + "PWIRE:  none"):     # Cyrillic I
+            with self.subTest(hidden=hidden):
+                self._assert_lint(self._v11(hidden + "\n"), "TRIPWIRE duplicated")
+
+    def test_hidden_tripwire_child_homoglyph_post_next_is_duplicate(self):
+        hidden = "TRIPWIRE-C" + chr(0x041D) + chr(0x0406) + "LD: none\n"
+        self._assert_lint(self._v11(hidden, trip_child="claims-touch(x/**)"),
+                          "TRIPWIRE-CHILD duplicated")
+
+    def test_hidden_tripwire_child_homoglyph_fills_absent_child(self):
+        rv = _import_rv()
+        hidden = chr(0x0422) + "RIPWIRE-CHILD: none\n"
+        self.assertEqual(rv.parse_v11_sections(self._v11(hidden))["trip_child"], "none")
+
+    def test_hidden_tripwire_homoglyph_pre_next_hard_fails(self):
+        body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1).replace(
+            "SUSPICION  0.10", chr(0x0422) + "RIPWIRE:  none\nSUSPICION  0.10")
+        self._assert_lint(body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n",
+                          "before NEXT")
+
+    # -- High 1 / Medium 1: colons missing from the confusables table --
+    def test_table_missing_colon_post_next_is_duplicate(self):
+        for colon in (0x2982, 0x1804):
+            with self.subTest(colon=hex(colon)):
+                self._assert_lint(
+                    self._v11("SUPERSEDES" + chr(colon) + f" {self.HIDDEN}\n"),
+                    "SUPERSEDES duplicated")
+
+    def test_table_missing_colon_pre_next_hard_fails(self):
+        for colon in (0x2982, 0x1804):
+            with self.subTest(colon=hex(colon)):
+                body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1).replace(
+                    "SUSPICION  0.10",
+                    "SUPERSEDES" + chr(colon) + f" {self.HIDDEN}\nSUSPICION  0.10")
+                self._assert_lint(
+                    body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n",
+                    "before NEXT")
+
+    def test_table_missing_colon_cli_exits_1(self):
+        out = self._run(self._v11("SUPERSEDES" + chr(0x2982) + f" {self.HIDDEN}\n"),
+                        "r3-missing-colon.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+
+    # -- Medium 2: ordinary continuation lines are not keyword lines --
+    def test_pre_next_continuation_lines_do_not_false_positive(self):
+        rv = _import_rv()
+        for line in ("  Supersedes: earlier note", "# tripwire: x",
+                     "- supersedes: y", "  tripwire-child: z"):
+            with self.subTest(line=line):
+                body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1).replace(
+                    "SUSPICION  0.10", line + "\nSUSPICION  0.10")
+                text = body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+                self.assertEqual(rv.parse_v11_sections(text)["supersedes"], "none")
+
+    # -- Low 1: tail loop must not treat case-/separator-variants as sections --
+    def test_tail_case_and_separator_variants_are_not_sections(self):
+        rv = _import_rv()
+        out = rv.parse_v11_sections(self._v11(
+            "  tripwire: a note\nTRIPWIRE CHILD: prose\nSupersedes: prose\n"))
+        self.assertEqual(out["tripwire"], "claims-touch(auth/**)")
+        self.assertEqual(out["supersedes"], "none")
+        self.assertIsNone(out["trip_child"])
+
+    # -- Low 2: NEXT located with the same splitlines() parse_receipt uses --
+    def test_next_after_unicode_line_break_splits_like_parse_receipt(self):
+        rv = _import_rv()
+        body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        body = body.replace("SUSPICION  0.10\nNEXT", "SUSPICION  0.10\u2028NEXT")
+        out = rv.parse_v11_sections(
+            body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n")
+        self.assertEqual(out["supersedes"], "none")
+
+
 if __name__ == "__main__":
     unittest.main()
