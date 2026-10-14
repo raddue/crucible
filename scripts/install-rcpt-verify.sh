@@ -1,4 +1,5 @@
 #!/bin/sh
+# Requires POSIX sh and GNU coreutils (stat -c, install, readlink -f, mktemp).
 # Install rcpt_verify.py to a non-subagent-writable location and emit the pinned,
 # isolated invocation wrapper. This is the separate-uid/write-boundary for the
 # receipt linter: the review-target (subagent) uid runs non-root, so a root-owned
@@ -28,24 +29,44 @@ fi
 
 [ -f "$SRC" ] || { echo "verifier not found: $SRC" >&2; exit 1; }
 
-parent=$(dirname -- "$TARGET")
-while :; do
-    [ -d "$parent" ] && [ ! -L "$parent" ] || {
-        echo "target ancestor must be a real directory: $parent" >&2
-        exit 1
-    }
-    owner_mode=$(stat -c '%u:%a' "$parent")
-    owner=${owner_mode%%:*}
-    mode=${owner_mode#*:}
-    [ "$owner" = 0 ] && [ $((0$mode & 022)) -eq 0 ] || {
-        echo "target ancestor must be root-owned and not group/world-writable: $parent" >&2
-        exit 1
-    }
-    [ "$parent" = / ] && break
-    parent=$(dirname -- "$parent")
-done
+check_ancestors() {
+    label=$1
+    parent=$(dirname -- "$2")
+    while :; do
+        [ -d "$parent" ] && [ ! -L "$parent" ] || {
+            echo "$label ancestor must be a real directory: $parent" >&2
+            exit 1
+        }
+        owner_mode=$(stat -c '%u:%a' "$parent")
+        owner=${owner_mode%%:*}
+        mode=${owner_mode#*:}
+        [ "$owner" = 0 ] && [ $((0$mode & 022)) -eq 0 ] || {
+            echo "$label ancestor must be root-owned and not group/world-writable: $parent" >&2
+            exit 1
+        }
+        [ "$parent" = / ] && break
+        parent=$(dirname -- "$parent")
+    done
+}
+check_ancestors target "$TARGET"
+check_ancestors python "$PY"
+# The system python path can be a symlink; validate its resolved destination too.
+PY=$(readlink -f -- "$PY")
+[ -n "$PY" ] && [ -f "$PY" ] && [ -x "$PY" ] && [ ! -L "$PY" ] || {
+    echo "python must resolve to an executable regular file" >&2
+    exit 1
+}
+case "$PY" in *[!A-Za-z0-9_./-]*) echo "resolved python path has unsafe characters: $PY" >&2; exit 1 ;; esac
+check_ancestors python "$PY"
+owner_mode=$(stat -c '%u:%a' "$PY")
+owner=${owner_mode%%:*}
+mode=${owner_mode#*:}
+[ "$owner" = 0 ] && [ $((0$mode & 022)) -eq 0 ] || {
+    echo "python must be root-owned and not group/world-writable: $PY" >&2
+    exit 1
+}
 
-if [ -e "$TARGET" ]; then
+if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
     [ -d "$TARGET" ] && [ ! -L "$TARGET" ] || {
         echo "target must be a real directory: $TARGET" >&2
         exit 1
@@ -57,20 +78,23 @@ if [ -e "$TARGET" ]; then
 else
     install -d -o root -g root -m 0755 "$TARGET"
 fi
-install -o root -g root -m 0755 "$SRC" "$TARGET/rcpt_verify.py"
-
+# Stage both files before replacing live paths; do not leave partial writes.
+tmp_src=$(mktemp "$TARGET/.rcpt_verify.py.XXXXXX")
+tmp_wrapper=$(mktemp "$TARGET/.rcpt-verify.XXXXXX")
+trap 'rm -f -- "$tmp_src" "$tmp_wrapper"' EXIT HUP INT TERM
+install -o root -g root -m 0755 "$SRC" "$tmp_src"
 printf '%s\n' \
     '#!/bin/sh' \
     "exec '$PY' -I '$TARGET/rcpt_verify.py' \"\$@\"" \
-    > "$TARGET/rcpt-verify"
-chown root:root "$TARGET/rcpt-verify"
-chmod 0755 "$TARGET/rcpt-verify"
-
-( cd "$TARGET" && sha256sum "rcpt_verify.py" ) > "$TARGET/rcpt_verify.sha256"
+    > "$tmp_wrapper"
+chown root:root "$tmp_wrapper"
+chmod 0755 "$tmp_wrapper"
+mv -f -- "$tmp_src" "$TARGET/rcpt_verify.py"
+mv -f -- "$tmp_wrapper" "$TARGET/rcpt-verify"
+trap - EXIT HUP INT TERM
 
 echo "installed verifier: $TARGET/rcpt_verify.py"
 echo "wrapper:            $TARGET/rcpt-verify"
-echo "sha256:             $(cat "$TARGET/rcpt_verify.sha256")"
 echo
 echo "Mandated lint invocation (receipt on stdin, the '-' positional):"
 echo "  $TARGET/rcpt-verify --tier2 --strict --root <dispatch-root> --root <findings-root> --ledger <dispatch-root>/receipt-ledger.jsonl -"
