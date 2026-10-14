@@ -366,5 +366,10 @@ def _run_with_count_guard():
              + [(t, "unexpected success") for t in result.unexpectedSuccesses])
     executed = result.testsRun - len(inert)
     if executed != EXPECTED_TESTS:
+        print(f"ERROR: expected {EXPECTED_TESTS} warden tests, "
+              f"ran {executed}", file=sys.stderr)
+        rc = 1
+    return rc
 
-[125 more lines in file]
+if __name__ == "__main__":
+    sys.exit(_run_with_count_guard())

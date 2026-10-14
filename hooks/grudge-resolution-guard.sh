@@ -616,6 +616,7 @@ _journal_ordinal() {
   local m line f1 f2 f3 f4 mx=0 rows=0 read_calls=0
   for m in "$@"; do want["k$m"]=1; done
   while IFS= read -r line || [ -n "$line" ]; do
+    IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
     rows=$((rows + 1))
     read_calls=$((read_calls + 1))
     _budget_ok || { echo BUDGET; return 0; }
