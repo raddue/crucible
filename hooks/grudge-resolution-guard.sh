@@ -384,7 +384,9 @@ _load_files() {
 # affect a block/allow verdict. C-k decides the remedy from what landed.
 _write_state_files() {
   local target="$1"; shift
-  timeout 1 bash -c 't="$1"; shift; printf "%s\0" "$@" >> "$t" || :' \
+  # Temp + rename: stale bytes or a planted FIFO are replaced, never opened.
+  timeout 1 bash -c 't="$1"; shift; tmp=$(mktemp "$t.XXXXXX") || exit 0
+    if printf "%s\0" "$@" > "$tmp"; then mv -f "$tmp" "$t"; else rm -f "$tmp"; fi' \
     _ "$target" "$@" || :
 }
 
@@ -669,7 +671,7 @@ _journal_quarantine() {
 # ABSENT/UNMEASURABLE to 0).
 _display_count() {
   _journal_pass "$@"
-  if [ "$JR_BUDGET" -eq 1 ]; then echo "${DISPLAY_ORDINAL:-0}"; return 0; fi
+  if [ "$JR_BUDGET" -eq 1 ]; then echo "${BLOCK_COUNTS[$g]:-0}"; return 0; fi
   local m mx=0
   for m in "$@"; do
     [ "${JB[$m]:-0}" -gt "$mx" ] && mx="${JB[$m]:-0}"
@@ -822,13 +824,9 @@ while IFS= read -r line; do
     # `$STATE_DIR/<sha>.files` artifact (§5/S-2/S6) — never a delimited JSON
     # field. Bounded write (SIEGE-R2-H3): a mkfifo'd target holds the open for
     # the 1s timeout, never for the hook's own timeout ceiling. The artifact is
-    # content-addressed. A fresh session recomputes paths from git but must
-    # NOT append a second copy — guard on existence.
-    if [ -e "$STATE_DIR/$c_sha.files" ]; then
-      :  # artifact already persisted (previous session), content is correct
-    else
-      _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
-    fi
+    # content-addressed, but the hook reads paths from git, so refresh it from
+    # the same paths: a stale artifact must not diverge from prefill (#603).
+    _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
   else
     declare -n _cf="F_$c_sha"
     _has_non_md "${_cf[@]}" || continue

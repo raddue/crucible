@@ -171,6 +171,32 @@ wc -l < "$trace"
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "1")
 
+    def test_budget_display_refresh_keeps_verified_ordinal(self):
+        r = shell(functions("_nonce_batch", "_display_count") + '''
+MAX_BLOCKS=3; BLOCKING=(); declare -A BLOCK_COUNTS=() LAST_BLOCK_NONCE=()
+_journal_nonce() { echo aaaaaaaaaaaaaaaa; }
+_journal_append_group() { APPEND_OK=1; }
+_journal_ordinal() { echo 2; }
+_budget_ok() { return 0; }
+_journal_pass() { JR_BUDGET=1; }
+_witness_outcome() { :; }
+_nonce_batch g b
+printf '%s' "${BLOCK_COUNTS[g]}"
+''')
+        self.assertEqual(r.stdout, "2", r.stderr)
+
+    def test_stale_files_artifact_is_replaced_by_git_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = HookFixture(d)
+            fx.ensure_store()
+            sha = fx.commit(["app.py"])
+            artifact = Path(fx.guard_dir, f"{sha}.files")
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_bytes(b"unrelated.py\0")
+            r = fx.run("sess")
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertEqual(artifact.read_bytes(), b"app.py\0")
+
     def test_append_stops_when_budget_expires(self):
         r = shell(functions("_journal_append_group") + '''
 attempts=0
@@ -350,7 +376,7 @@ printf '%s %s' "$JR_UNMEASURABLE" "${{#JBLAST[@]}}"
 ''')
             self.assertEqual(r.stdout, "1 0", r.stderr)
 
-EXPECTED_TESTS = 15
+EXPECTED_TESTS = 17
 
 
 def _run_with_count_guard():
