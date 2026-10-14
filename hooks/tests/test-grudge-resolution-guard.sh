@@ -2505,6 +2505,119 @@ check 364 "a zero-padded budget spends nothing and prints no budget note — con
   no "$(has "$ERR" "budget")"
 HOOK_ENV=""
 
+# The budget is checked BETWEEN steps; journal row-work counts are the primary
+# fence, while wall-time limits remain host-relative backstops. The journal-pass count
+# of one Stop must NOT grow with the candidate count. Before the fix the step
+# 14b display refresh, the step 16 checkpoint and the ordinal re-read each did
+# one full journal pass PER candidate (3n+3; 27 s for 500 candidates at an 8 s
+# budget, all of it after the last budget check).
+# contract:hook:inv-t28 checks=6
+t28_passes() {
+  # t28_passes <n-candidates> -> T28_PASSES, T28_ORD and RC in the caller shell
+  hook_case "t28p$1"
+  echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+  local i
+  for (( i=1; i<=$1; i++ )); do
+    echo "VALUE = $i" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): fix $i"
+  done
+  HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE=$HC_ROOT/trace"
+  run_hook "s28p$1"
+  HOOK_ENV=""
+  T28_PASSES="$(grep -c '^pass ' "$HC_ROOT/trace" 2>/dev/null || true)"
+  T28_PASS_WORK="$(awk '/^pass-work / { total=$2 } END { print total+0 }' "$HC_ROOT/trace" 2>/dev/null || true)"
+  T28_ORD_READ_WORK="$(awk '/^ordinal-read-rows / { total=$2 } END { print total+0 }' "$HC_ROOT/trace" 2>/dev/null || true)"
+    T28_JOURNAL="$(wc -l < "$(guard_dir "$HC_REPO")/s28p$1.journal" | tr -d ' ')"
+  T28_JOURNAL_BYTES="$(wc -c < "$(guard_dir "$HC_REPO")/s28p$1.journal" | tr -d ' ')"
+  # Row metrics count consumed work, distinct from the two producer markers.
+  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" 2>/dev/null || true)"
+}
+T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_ORD="$T28_ORD"; T28P2_RC="$RC"
+T28P2_PASS_WORK="$T28_PASS_WORK"; T28P2_ORD_READ_WORK="$T28_ORD_READ_WORK"; T28P2_JOURNAL="$T28_JOURNAL"; T28P2_JOURNAL_BYTES="$T28_JOURNAL_BYTES"
+T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_ORD="$T28_ORD"; T28P12_RC="$RC"
+T28P12_PASS_WORK="$T28_PASS_WORK"; T28P12_ORD_READ_WORK="$T28_ORD_READ_WORK"; T28P12_JOURNAL="$T28_JOURNAL"; T28P12_JOURNAL_BYTES="$T28_JOURNAL_BYTES"
+check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
+check 389 "journal passes for one group do not grow with member count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
+  "$T28P2" "$T28P12"
+check 412 "pass scan reached journal EOF (work bytes vs file bytes: $T28P2_PASS_WORK vs $T28P2_JOURNAL_BYTES) — contract:hook:inv-t28" \
+  "$T28P2_JOURNAL_BYTES" "$T28P2_PASS_WORK"
+# 398 pins marker presence; row metrics independently pin work.
+check 398 "premise: ordinal marker fired for 2-member group — contract:hook:inv-t28" \
+  1 "$T28P2_ORD"
+check 399 "ordinal scan has counted work for 2-member journal — contract:hook:inv-t28" \
+  yes "$(if [ "$T28P2_ORD_READ_WORK" -gt 0 ]; then echo yes; else echo no; fi)"
+check 414 "ordinal scan row reads equal journal rows at 2 and 12 members — contract:hook:inv-t28" \
+  yes "$(if [ "$T28P2_ORD_READ_WORK" -eq "$T28P2_JOURNAL" ] && [ "$T28P12_ORD_READ_WORK" -eq "$T28P12_JOURNAL" ]; then echo yes; else echo no; fi)"
+
+# End-to-end clocked check is supplementary host-relative backstop; row counts
+# pin journal complexity independent of host speed.
+# contract:hook:inv-t28 checks=3
+hook_case t28wide
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+mkdir -p "$HC_REPO/a" "$HC_REPO/b"
+for (( i=0; i<4000; i++ )); do : > "$HC_REPO/a/$i.py"; done
+commit_all "$HC_REPO" "fix(a): wide a"
+for (( i=0; i<4000; i++ )); do : > "$HC_REPO/b/$i.py"; done
+commit_all "$HC_REPO" "fix(b): wide b"
+HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=60"
+T28_WIDE_STARTED=$EPOCHREALTIME
+run_hook s28wide
+T28_WIDE_SECONDS="$(python3 -c 'import sys; print(f"{float(sys.argv[2]) - float(sys.argv[1]):.3f}")' "$T28_WIDE_STARTED" "$EPOCHREALTIME")"
+HOOK_ENV=""
+check 390 "two 4000-file disjoint candidates are grouped inside the test budget and block — contract:hook:inv-t28" 2 "$RC"
+check 391 "the wide-candidate Stop never degrades on the budget — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
+check 413 "the end-to-end overlap wall-time backstop stays under 8 seconds — contract:hook:inv-t28" \
+  yes "$(python3 -c 'import sys; print("yes" if float(sys.argv[1]) < 8 else "no")' "${T28_WIDE_SECONDS:-999}")"
+
+# ========================================================================
+# #582 — concurrent Stops must not break the MAX_BLOCKS bound. A Stop that
+# reads COUNT>=MAX appends GIVEUP while a racing Stop is still appending its
+# BLOCK line; when GIVEUP RESET the per-member count, that late BLOCK read
+# ordinal 1 and blocked again, re-arming the member (measured 5-7 blocks in
+# one round of 8, up to 9 total). GIVEUP retires; only CLEAR resets. Lock-free
+# on purpose: a lock that cannot be taken must still allow (never fail closed).
+# ========================================================================
+# Deterministic shape: the journal a lost race leaves behind — 3 BLOCKs, the
+# give-up, then one racing Stop's late BLOCK. The next Stop must not block.
+# contract:hook:inv-t23 checks=4
+hook_case t582late
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+T582="$(sha_of "$HC_REPO" HEAD)"
+mkdir -p "$(guard_dir "$HC_REPO")"
+printf '1\tBLOCK\t%s\t%s\n2\tBLOCK\t%s\t%s\n3\tBLOCK\t%s\t%s\n4\tGIVEUP\t%s\n5\tBLOCK\t%s\t%s\n' \
+  "$T582" aaaaaaaaaaaaaaaa "$T582" bbbbbbbbbbbbbbbb "$T582" cccccccccccccccc \
+  "$T582" "$T582" dddddddddddddddd > "$(guard_dir "$HC_REPO")/s582late.journal"
+run_hook s582late true
+check 392 "a BLOCK landing after GIVEUP does not re-arm the member: the Stop allows — contract:hook:inv-t23" 0 "$RC"
+check 393 "it prints no fresh block attempt — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+
+# Live race: rounds of 8 concurrent Stops on one group. Total blocks across
+# every round stay <= MAX_BLOCKS, and the last round allows every Stop (the
+# session terminates — the bound is not bought with a wedge).
+hook_case t582race
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+T582_BLOCKS=0; T582_LAST=0; T582_VALID=0
+for (( r=1; r<=4; r++ )); do
+  T582_ACTIVE=false; [ "$r" -gt 1 ] && T582_ACTIVE=true
+  printf '{"session_id":"s582race","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":%s}' \
+    "$HC_TRANSCRIPT" "$HC_CWD" "$T582_ACTIVE" > "$HC_ROOT/p582.json"
+  for (( i=1; i<=8; i++ )); do
+    ( cd "$HC_CWD" && env HOME="$HC_HOME" CLAUDE_PROJECT_DIR="$REPO_ROOT" CRUCIBLE_GRUDGE_DIR="$HC_STORE" \
+        timeout --kill-after=2 20 bash "$HOOK" <"$HC_ROOT/p582.json" >"$HC_ROOT/out.$r.$i" 2>&1 && rc=0 || rc=$?; echo "$rc" > "$HC_ROOT/rc.$r.$i" ) &
+  done
+  wait
+  T582_LAST="$(cat "$HC_ROOT"/rc."$r".* | grep -c '^2$' || true)"
+  T582_BLOCKS=$(( T582_BLOCKS + T582_LAST ))
+  T582_VALID=$(( T582_VALID + $(cat "$HC_ROOT"/rc."$r".* | grep -cE '^(0|2)$' || true) ))
+  echo "INFO: #582 round $r: $T582_LAST blocks"
+done
+echo "INFO: #582 concurrent blocks over 4x8 Stops = $T582_BLOCKS"
+check 394 "8-way concurrent Stops over 4 rounds block at most MAX_BLOCKS times in total — contract:hook:inv-t23" \
+  yes "$(if [ "$T582_VALID" -eq 32 ] && [ "$T582_BLOCKS" -le 3 ] && [ "$T582_BLOCKS" -ge 1 ]; then echo yes; else echo "no ($T582_BLOCKS blocks, $T582_VALID valid exits)"; fi)"
+check 395 "the final concurrent round allows every Stop (no wedge) — contract:hook:inv-t23" 8 \
+  "$(cat "$HC_ROOT"/rc.4.* | grep -c '^0$' || true)"
+
 # ========================================================================
 # INV-T29 (#608) — a by-files clearance must not persist a counter reset
 #
@@ -2653,6 +2766,54 @@ check 386 "the shadowed worktree candidate clears — contract:group:inv-t29" 0 
 check 387 "a transient by-files hit cannot shadow the SAME member's by-commit evidence — contract:group:inv-t29" 0 \
   "$(st "$T608C_WT" s608c ".block_counts[.sha_group[\"$T608C_FIX\"]]")"
 
+# #581: failed/partial GIVEUP must not claim terminal retirement in witness or
+# message; #603: oversized mapped file lists must not starve successive Stops.
+# Both subprocess fixtures use deterministic clock/append failures, not wall time.
+# contract:hook:inv-t23 checks=1
+check 396 "failed/partial GIVEUP keeps witness and message non-terminal — contract:hook:inv-t23" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_failed_giveup_matches_journal_witness_and_message >/dev/null 2>&1; echo $?)"
+# contract:hook:inv-t28 checks=1
+check 397 "mapped oversized files do not starve repeated Stops — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_oversized_active_mapped_artifact_advances_on_repeated_stops Warden.test_oversized_retired_mapped_artifact_does_not_starve_new_candidate Warden.test_real_oversized_candidate_retires_loudly_and_advances >/dev/null 2>&1; echo $?)"
+# The #603 _overlap linearity fence is named here so deleting that one test
+# method is a red diff instead of a silently smaller suite. Its own
+# EXPECTED_TESTS count guard in test-grudge-warden.py is the second lock; a
+# deleted test fails both, neither alone is load-bearing.
+# contract:hook:inv-t28 checks=1
+check 410 "the _overlap linearity fence runs and holds — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_overlap_has_linear_work >/dev/null 2>&1; echo $?)"
+# The whole python suite must report the pinned test count. Guards against a
+# deletion of any test that no other check names (the count guard inside the
+# suite is bypassed when tests are named on argv, so this is the argv-free
+# path).
+# contract:hook:inv-t28 checks=1
+check 411 "the warden suite runs its full pinned test count — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" >/dev/null 2>&1; echo $?)"
+
+# INV-T30 — diff-tree failure must not advance candidate checkpoint.
+hook_case t30
+printf 'VALUE = 0\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+printf 'VALUE = 1\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): preserve checkpoint on diff failure"
+T30_FIX="$(sha_of "$HC_REPO" HEAD)"
+run_hook s30
+check 412 "control: candidate blocks before injected failure" 2 "$RC"
+T30_CHECKPOINT="$(st "$HC_REPO" s30 '.last_checked_sha')"
+T30_FILES="$(guard_dir "$HC_REPO")/$T30_FIX.files"
+cp "$T30_FILES" "$HC_ROOT/original.files"
+mkdir -p "$HC_ROOT/bin"
+REAL_GIT="$(command -v git)"
+cat > "$HC_ROOT/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == *"diff-tree"* ]]; then printf 'partial.py\\0'; exit 1; fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$HC_ROOT/bin/git"
+HOOK_ENV="PATH=$HC_ROOT/bin:$PATH"
+run_hook s30 true
+HOOK_ENV=""
+check 413 "failed diff-tree allows without advancing checkpoint" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
+check 414 "partial diff-tree output does not replace persisted paths" yes "$(cmp -s "$HC_ROOT/original.files" "$T30_FILES" && echo yes || echo no)"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2665,7 +2826,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=399
+EXPECTED_CHECKS=419
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
