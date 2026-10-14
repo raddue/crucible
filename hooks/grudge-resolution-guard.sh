@@ -384,8 +384,12 @@ _load_files() {
 # affect a block/allow verdict. C-k decides the remedy from what landed.
 _write_state_files() {
   local target="$1" p i=0 same=1; shift
-  [ -d "$target" ] && return 0   # mv would drop the temp INSIDE a directory
-  if [ -f "$target" ] && [ ! -L "$target" ]; then
+  # Only a regular file is refreshed. A directory would swallow the temp via mv;
+  # a FIFO/symlink/other planted target stays as-is so C-k degrades the remedy.
+  if [ -L "$target" ] || { [ -e "$target" ] && [ ! -f "$target" ]; }; then
+    return 0
+  fi
+  if [ -f "$target" ]; then
     # Builtin read only, at most $#+1 records: an unchanged artifact costs no
     # subprocess per Stop, and a planted huge file is not read to EOF.
     local -a want=("$@")
@@ -396,7 +400,7 @@ _write_state_files() {
     # read fails on an unterminated tail but still fills $p: junk is not equal.
     [ "$same" -eq 1 ] && [ "$i" -eq "$#" ] && [ -z "$p" ] && return 0
   fi
-  # Temp + rename: stale bytes or a planted FIFO are replaced, never opened.
+  # Temp + rename: stale regular-file bytes are replaced atomically.
   timeout 1 bash -c 't="$1"; shift; tmp=$(mktemp "$t.XXXXXX") || exit 0
     if printf "%s\0" "$@" > "$tmp"; then mv -f "$tmp" "$t"; else rm -f "$tmp"; fi' \
     _ "$target" "$@" || :
