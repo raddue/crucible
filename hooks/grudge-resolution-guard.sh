@@ -70,7 +70,11 @@ MAX_SECONDS=$(( 10#$MAX_SECONDS ))
 # being asked about arrives as an argument.
 _git() {
   local d="$1"; shift
-  env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
+  if [ "${_GIT_DIAGNOSTIC:-0}" = 1 ]; then
+    env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@"
+  else
+    env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
+  fi
 }
 
 # ── Per-Stop wall-clock budget (issue #603) ─────────────────────────────
@@ -516,7 +520,7 @@ _journal_pass() {
     JR_UNMEASURABLE=1
     return 0
   fi
-  local n=0 line f1 f2 f3 f4
+  local n=0 line f1 f2 f3 f4 read_bytes=0
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     # Check inside the scan, not just between groups. Never publish a partial
@@ -528,6 +532,10 @@ _journal_pass() {
     if [ "$n" -gt "$JOURNAL_QUARANTINE_LINES" ]; then
       JR_UNMEASURABLE=1; JB=(); JBLAST=()
       return 0
+    fi
+    read_bytes=$((read_bytes + ${#line} + 1))
+    if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+      printf "pass-work %s\\n" "$read_bytes" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
     fi
     IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
     case "$f2" in
@@ -594,6 +602,7 @@ _journal_read_group() {
 # locate it), that member is UNMEASURABLE (§3.2) — echo UNMEASURABLE.
 _journal_ordinal() {
   local nonce="$1"; shift
+  [ "$#" -gt 0 ] || { echo UNMEASURABLE; return 0; }
   # #603: ONE validity pass + ONE scan for the whole group, never two full-log
   # passes per member — member count is attacker-multiplied.
   _journal_pass "$@"
@@ -604,11 +613,11 @@ _journal_ordinal() {
   # Per member: BLOCK lines since its last CLEAR, up to and including
   # the line carrying this Stop's own nonce (ORD, "" = nonce line not found).
   local -A want=() cnt=() ord=()
-  local m line f1 f2 f3 f4 mx=0 rows=0
+  local m line f1 f2 f3 f4 mx=0 rows=0 read_calls=0
   for m in "$@"; do want["k$m"]=1; done
   while IFS= read -r line || [ -n "$line" ]; do
-    IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
     rows=$((rows + 1))
+    read_calls=$((read_calls + 1))
     _budget_ok || { echo BUDGET; return 0; }
     [ "$rows" -le "$JOURNAL_QUARANTINE_LINES" ] || { echo UNMEASURABLE; return 0; }
     if [ -n "${want["k$f3"]:-}" ] && [ -z "${ord["k$f3"]:-}" ]; then
@@ -633,6 +642,9 @@ _journal_ordinal() {
     [ -n "${ord["k$m"]:-}" ] || { echo UNMEASURABLE; return 0; }
     [ "${ord["k$m"]}" -gt "$mx" ] && mx="${ord["k$m"]}"
   done
+  if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+    printf "ordinal-read-rows %s\n" "$read_calls" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
+  fi
   echo "$mx"
 }
 
@@ -656,7 +668,7 @@ _journal_quarantine() {
 # ABSENT/UNMEASURABLE to 0).
 _display_count() {
   _journal_pass "$@"
-  if [ "$JR_BUDGET" -eq 1 ]; then echo "${ordinal:-0}"; return 0; fi
+  if [ "$JR_BUDGET" -eq 1 ]; then echo "${DISPLAY_ORDINAL:-0}"; return 0; fi
   local m mx=0
   for m in "$@"; do
     [ "${JB[$m]:-0}" -gt "$mx" ] && mx="${JB[$m]:-0}"
@@ -854,13 +866,23 @@ _overlap() {
     # historical list. Verify exact equality: git's literal directory pathspec
     # also selects descendants. No persisted artifact scan before every Stop.
     local specs=()
-    for a in "${_aa[@]}"; do specs+=(":(literal)$a"); done
-    while IFS= read -r -d '' b; do
-      if [ -n "${_seen["k$b"]:-}" ]; then
-        unset -n _aa
-        return 0
+    for a in "${_aa[@]}"; do
+      [ -n "$a" ] || continue
+      specs+=(":(literal)$a")
+      if [ "${#specs[@]}" -eq 128 ]; then
+        _budget_ok || _budget_out
+        while IFS= read -r -d '' b; do
+          if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
+        done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+        specs=()
       fi
-    done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+    done
+    if [ "${#specs[@]}" -gt 0 ]; then
+      _budget_ok || _budget_out
+      while IFS= read -r -d '' b; do
+        if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
+      done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+    fi
     _budget_ok || _budget_out
   fi
   unset -n _aa
@@ -1196,7 +1218,7 @@ BLOCKING=()
 declare -A GIVEUP_SHAS
 _nonce_batch() {
   local g="$1"; shift
-  local nonce APPEND_OK ordinal
+  local nonce APPEND_OK _ordinal_result
   nonce="$(_journal_nonce)"
   if [ -z "$nonce" ]; then
     echo "grudge-resolution-guard: nonce generation failed (M-6) — journal append treated as failed; loud allow" >&2
@@ -1207,23 +1229,23 @@ _nonce_batch() {
     echo "grudge-resolution-guard: journal append failed for at least one member of group $g — an unwritable \$STATE_DIR is a bound the hook cannot honour; loud allow ($STATE_DIR)" >&2
     return 1
   fi
-  ordinal="$(_journal_ordinal "$nonce" "$@")"
-  if [ "$ordinal" = "BUDGET" ]; then
+  _ordinal_result="$(_journal_ordinal "$nonce" "$@")"
+  if [ "$_ordinal_result" = "BUDGET" ]; then
     echo "grudge-resolution-guard: budget reached during ordinal arbitration — allowing; retained journal lines may over-count attempts, never authorize an unverified block" >&2
     return 1
   fi
-  if [ -z "$ordinal" ] || [ "$ordinal" = "UNMEASURABLE" ]; then
+  if [ -z "$_ordinal_result" ] || [ "$_ordinal_result" = "UNMEASURABLE" ]; then
     echo "grudge-resolution-guard: could not locate this Stop's own nonce in group $g's BLOCK history — UNMEASURABLE; loud allow" >&2
     return 1
   fi
-  if [ "$ordinal" -gt "$MAX_BLOCKS" ]; then
+  if [ "$_ordinal_result" -gt "$MAX_BLOCKS" ]; then
     # §3.4: this Stop's batch lost the ordinal race (a concurrent Stop already
     # used this ordinal); its BLOCK lines are retained (C-a) and it allows.
-    echo "grudge-resolution-guard: lost the ordinal race for group $g (max $ordinal > $MAX_BLOCKS) — loud allow; retained BLOCK lines are an over-count, not a reset" >&2
+    echo "grudge-resolution-guard: lost the ordinal race for group $g (max $_ordinal_result > $MAX_BLOCKS) — loud allow; retained BLOCK lines are an over-count, not a reset" >&2
     return 1
   fi
   BLOCKING+=("$g")
-  BLOCK_COUNTS["$g"]="$ordinal"
+  BLOCK_COUNTS["$g"]="$_ordinal_result"
   if _budget_ok; then
     BLOCK_COUNTS["$g"]="$(_display_count "$@")"
   fi
@@ -1236,10 +1258,16 @@ _giveup_loud() {
   # blocks(m) >= MAX_BLOCKS this Stop; only those retire. Under-MAX co-members
   # stay in scope (FATAL-2 / §3.6 with per-member done(m)).
   local g="$1"; shift
-  local m
+  local m reason=""
   local -A retiring=()
   _journal_pass "$@"
-  [ "$JR_BUDGET" -eq 0 ] && [ "$JR_UNMEASURABLE" -eq 0 ] && [ "$JR_ABSENT" -eq 0 ] || return 0
+  [ "$JR_BUDGET" -eq 1 ] && reason="budget"
+  [ "$JR_UNMEASURABLE" -eq 1 ] && reason="unmeasurable"
+  [ "$JR_ABSENT" -eq 1 ] && reason="absent"
+  if [ -n "$reason" ]; then
+    echo "grudge-resolution-guard: give-up arbitration could not read a trustworthy journal for group $g ($reason); allowing without retirement" >&2
+    return 0
+  fi
   for m in "$@"; do
     [ "${JB[$m]:-0}" -ge "$MAX_BLOCKS" ] || continue
     retiring[$m]="${JB[$m]}"
