@@ -1278,25 +1278,72 @@ def parse_v11_sections(text):
     swallows them — the tail scan recovers them as their own post-NEXT lines).
     Returns None for an RCPT v1 header (version-dispatch: v1 skips the extension).
     Enforces presence of TRIPWIRE + SUPERSEDES and the TRIPWIRE-CHILD-required-when-
-    DISPATCHED rule; value checks live in lint_v11_local."""
+    DISPATCHED rule; value checks live in lint_v11_local.
+
+    warden-gate finding 1 (GH #567 round 2) residual — hardening the tail
+    loop below to be confusables-aware (so a hidden homoglyph'd SECOND
+    occurrence of one of these keywords WITHIN the tail trips the
+    duplicate-section `LintError`) closes a hidden claim placed anywhere
+    AFTER `NEXT`, but a keyword-shaped line hidden BEFORE `NEXT` (the
+    header, or any SECTIONS body — TRACE, WITNESS, CLAIMS, …) sits outside
+    this function's tail scan by construction and would otherwise still
+    read as `absent`, silently missing it — this is the exact shape a
+    round-1 fix's now-deleted cross-check partially covered (only when the
+    tail's own field read `"none"`) and a live regression to reopen
+    unconditionally, confirmed by this fix's own re-verification before
+    shipping. Closed below by scanning the pre-`NEXT` head for the SAME
+    three keywords with the SAME narrow, line-start-anchored confusables
+    skeleton the tail loop uses — not `_legacy_supersedes_claim`'s
+    whole-body, substring-anywhere oracle, whose over-approximation on
+    ordinary prose is what caused warden-gate finding N1 (GH #567 round 2)
+    when an earlier fix wired that oracle into this path instead."""
     if not re.match(r"^RCPT v1\.1 ", text.splitlines()[0] if text.splitlines() else ""):
         return None
     sections = parse_receipt(text)
-    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    if "\nNEXT" in text:
+        head, tail = text.split("\nNEXT", 1)
+    else:
+        head, tail = text, ""
+    for pre_line in (l for l in head.split("\n") if l.strip()):
+        pre_skeleton_upper = _confusables_skeleton(pre_line)[0].upper()
+        if (pre_skeleton_upper.startswith(_TRIPWIRE_CHILD_KEYWORD)
+                or pre_skeleton_upper.startswith(_TRIPWIRE_KEYWORD)
+                or pre_skeleton_upper.startswith(_SUPERSEDES_KEYWORD)):
+            raise LintError(
+                "v1.1 TRIPWIRE:/SUPERSEDES:/TRIPWIRE-CHILD: keyword found "
+                "before NEXT — these are Layer-2 declarations and may only "
+                "appear as their own line after NEXT")
     tripwire = supersedes = trip_child = None
     for line in (l for l in tail.splitlines()[1:] if l.strip()):
-        if line.startswith("TRIPWIRE-CHILD:"):
+        # warden-gate finding 1 (GH #567 round 2) — confusables-resolve the
+        # line BEFORE keyword-matching, instead of the byte-exact
+        # `line.startswith(...)` this replaces: a hidden homoglyph'd second
+        # `SUPERSEDES:`/`TRIPWIRE:`/`TRIPWIRE-CHILD:` line now reads as a
+        # genuine second occurrence of that section and trips the
+        # duplicate-section `LintError` below, the same way a plain-ASCII
+        # duplicate always has. `skeleton_upper` is matched case-
+        # insensitively against each keyword (see `_legacy_supersedes_claim`
+        # for why the table itself is already case-mixed); the value is
+        # sliced from the RAW line via `positions[]`, not
+        # `line[len(keyword):]`, because a confusable's NFKD expansion or a
+        # dropped wildcard character inside the keyword means the raw-line
+        # byte offset immediately after the keyword is not simply
+        # `len(keyword)` bytes in anymore (same index bookkeeping
+        # `_legacy_supersedes_claim` already does for the same reason).
+        skeleton, positions, _tokens, _tok_idx = _confusables_skeleton(line)
+        skeleton_upper = skeleton.upper()
+        if skeleton_upper.startswith(_TRIPWIRE_CHILD_KEYWORD):
             if trip_child is not None:
                 raise LintError("v1.1 section TRIPWIRE-CHILD duplicated")
-            trip_child = line[len("TRIPWIRE-CHILD:"):].strip()
-        elif line.startswith("TRIPWIRE:"):
+            trip_child = line[positions[len(_TRIPWIRE_CHILD_KEYWORD) - 1] + 1:].strip()
+        elif skeleton_upper.startswith(_TRIPWIRE_KEYWORD):
             if tripwire is not None:
                 raise LintError("v1.1 section TRIPWIRE duplicated")
-            tripwire = line[len("TRIPWIRE:"):].strip()
-        elif line.startswith("SUPERSEDES:"):
+            tripwire = line[positions[len(_TRIPWIRE_KEYWORD) - 1] + 1:].strip()
+        elif skeleton_upper.startswith(_SUPERSEDES_KEYWORD):
             if supersedes is not None:
                 raise LintError("v1.1 section SUPERSEDES duplicated")
-            supersedes = line[len("SUPERSEDES:"):].strip()
+            supersedes = line[positions[len(_SUPERSEDES_KEYWORD) - 1] + 1:].strip()
     if tripwire is None:
         raise LintError("v1.1 receipt missing TRIPWIRE: line (own line after NEXT)")
     if supersedes is None:
@@ -2112,6 +2159,109 @@ CONFUSABLE_MAP = {
 # --- END GENERATED CONFUSABLE_MAP ---
 
 
+def _confusables_skeleton(raw_line):
+    """Per-character confusables/NFKD skeleton of ONE line -- the single
+    shared building block behind both `parse_v11_sections`'s structural
+    TRIPWIRE/TRIPWIRE-CHILD/SUPERSEDES line recognition and
+    `_legacy_supersedes_claim`'s whole-body scan (extracted GH #567
+    warden-gate round 2; previously duplicated inline in the latter only,
+    now the ONE place that does this per-character resolution).
+
+    Returns `(skeleton, positions, tokens, tok_idx_for_skel)`:
+      - `skeleton`: the map-or-keep-or-drop ASCII skeleton of `raw_line` --
+        each source character is NFKD-decomposed, then each decomposed
+        piece is kept if it is already `[A-Za-z0-9:]`, else replaced by its
+        `CONFUSABLE_MAP` target if that piece (or, failing that, the whole
+        source character) is a table key, else dropped. Note this means a
+        character outside `[A-Za-z0-9:]` with no table entry -- e.g. an
+        ASCII hyphen -- contributes NOTHING to `skeleton`, not even a
+        placeholder: a caller matching a keyword containing such a
+        character (e.g. `TRIPWIRE-CHILD:`) must match against the SAME
+        skeletonization of that literal keyword, not the keyword string
+        itself.
+      - `positions[s]`: the `raw_line` index `skeleton[s]` came from (a
+        multi-piece NFKD expansion, e.g. `№` -> `No`, records the SAME
+        source index against every piece it produces).
+      - `tokens`: a SUPERSET of skeleton characters that also carries a
+        WILDCARD entry `(None, False)` for a dropped, non-ASCII,
+        non-mapped source character, so a keyword-letter-position
+        substitution using an untabled codepoint is still visible as a
+        candidate substitute to a caller that composes over `tokens`
+        (`_keyword_reachable_by_dropping_optionals`). Each entry is
+        `(char_or_None, mandatory)`, where `mandatory` is True only for a
+        character that was already plain ASCII `[A-Za-z0-9:]` in
+        `raw_line`.
+      - `tok_idx_for_skel[s]`: the `tokens[]` index of `skeleton[s]`, i.e.
+        the map from skeleton coordinates to `tokens[]` coordinates.
+
+    See `_legacy_supersedes_claim`'s own docstring (CHAIN-1 fix (HOMOGLYPH)
+    paragraph onward) for the full design rationale behind this
+    construction -- this function is exactly that per-character step,
+    unchanged, just named and shared."""
+    skeleton_chars = []
+    positions = []
+    tokens = []
+    tok_idx_for_skel = []
+    for i, ch in enumerate(raw_line):
+        mandatory = ord(ch) < 128 and bool(re.match(r"[A-Za-z0-9:]", ch))
+        produced_any = False
+        for dch in unicodedata.normalize("NFKD", ch):
+            if re.match(r"[A-Za-z0-9:]", dch):
+                skeleton_chars.append(dch)
+                positions.append(i)
+                tok_idx_for_skel.append(len(tokens))
+                tokens.append((dch, mandatory))
+                produced_any = True
+            elif dch in CONFUSABLE_MAP:
+                mapped = CONFUSABLE_MAP[dch]
+                skeleton_chars.append(mapped)
+                positions.append(i)
+                tok_idx_for_skel.append(len(tokens))
+                tokens.append((mapped, False))
+                produced_any = True
+            # else: this NFKD piece is dropped (ASCII-but-not-
+            # alphanumeric, or non-ASCII-but-not-a-table-key) -- handled
+            # below, once per SOURCE character, not per piece.
+        if not produced_any and ch in CONFUSABLE_MAP:
+            # The source's own NFKD pieces produced NOTHING above (`ch`'s
+            # NFKD expansion is entirely ASCII characters outside
+            # [A-Za-z0-9:], or entirely non-ASCII characters that are not
+            # themselves table keys) -- consult CONFUSABLE_MAP on the
+            # SOURCE codepoint itself before treating it as a
+            # dropped/wildcard character. A per-NFKD-piece-only lookup
+            # never reaches a source-level table entry whose own NFKD
+            # decomposition doesn't happen to reproduce its mapped target
+            # -- U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER is
+            # the measured case (NFKD is two ASCII periods, neither kept
+            # nor table-mapped as a piece, but the SOURCE is itself a
+            # documented confusable for ':'). Only reached when the
+            # per-piece loop above produced nothing, so a codepoint whose
+            # NFKD piece IS independently keepable (e.g. the seven
+            # digit-0/1 confusables that also NFKD-fold to their own
+            # digit) is unaffected -- that piece-level result still wins.
+            mapped = CONFUSABLE_MAP[ch]
+            skeleton_chars.append(mapped)
+            positions.append(i)
+            tok_idx_for_skel.append(len(tokens))
+            tokens.append((mapped, False))
+            produced_any = True
+        if not produced_any and ord(ch) > 127:
+            # A WILDCARD token for any non-ASCII codepoint that produced
+            # no real character above. Gating this on the SOURCE
+            # character and on "produced nothing above" -- rather than on
+            # `ord(dch) > 127` for each individual NFKD PIECE -- matters
+            # because 104 codepoints have an NFKD expansion that is
+            # entirely ASCII-outside-[A-Za-z0-9:] (including the
+            # CONFUSABLE_MAP entry above); gating per-piece would miss
+            # those. Gating on the source character means every
+            # non-ASCII codepoint yields either a kept/mapped character
+            # or exactly one WILDCARD, never nothing.
+            tokens.append((None, False))
+        # else: either produced a real token above, or `ch` is plain
+        # ASCII outside [A-Za-z0-9:] (e.g. punctuation) -- dropped.
+    return "".join(skeleton_chars), positions, tokens, tok_idx_for_skel
+
+
 # A single module-level constant for the literal keyword, so it does not
 # appear separately as this helper's own default argument AND as a literal
 # in _legacy_supersedes_claim's own skeleton_upper.find(...)/len(...) calls
@@ -2119,6 +2269,19 @@ CONFUSABLE_MAP = {
 # could silently drift apart.
 _SUPERSEDES_KEYWORD = "SUPERSEDES:"
 _SUPERSEDES_VALUE_RE = re.compile(r"none|[0-9a-f]{12}")
+
+# warden-gate finding 1 (GH #567 round 2) -- `parse_v11_sections`'s
+# TRIPWIRE-CHILD:/TRIPWIRE: line recognition needs the SAME confusables
+# skeleton as SUPERSEDES:, but `_confusables_skeleton` drops any character
+# outside `[A-Za-z0-9:]` with no CONFUSABLE_MAP entry (e.g. the ASCII
+# hyphen in "TRIPWIRE-CHILD:") without a placeholder -- so the skeleton of
+# an ordinary, unhomoglyphed "TRIPWIRE-CHILD:" line never contains a
+# hyphen either. These constants are derived by running the literal
+# keyword through the SAME skeleton function a candidate line is checked
+# against, rather than hand-transcribing the hyphen-dropped spelling, so
+# the two can never silently drift apart.
+_TRIPWIRE_CHILD_KEYWORD = _confusables_skeleton("TRIPWIRE-CHILD:")[0].upper()
+_TRIPWIRE_KEYWORD = _confusables_skeleton("TRIPWIRE:")[0].upper()
 
 
 def _classify_supersedes_value(remainder_is_empty, value_match, empty_is_claim):
@@ -2807,79 +2970,19 @@ def _legacy_supersedes_claim(text):
     tail = text
     claim = None
     for raw_line in (l for l in tail.split("\n") if l.strip()):
-        # skeleton_chars/positions/tokens/tok_idx_for_skel are built together
-        # in one pass over raw_line: skeleton_chars is the map-or-keep-or-drop
-        # ASCII skeleton the keyword/value search below runs against;
-        # positions[s] is skeleton_chars[s]'s index in raw_line (used by the
-        # glued-value check); tokens is a SUPERSET of skeleton_chars that
-        # also carries a WILDCARD entry (`(None, False)`) for a dropped,
-        # non-ASCII, non-mapped codepoint, so
-        # _keyword_reachable_by_dropping_optionals below can still see it as
-        # a candidate keyword-letter substitute; tok_idx_for_skel[s] is the
-        # tokens[] index of skeleton_chars[s], used to translate a
+        # skeleton/positions/tokens/tok_idx_for_skel: see
+        # `_confusables_skeleton`'s own docstring for the full construction
+        # (shared with `parse_v11_sections`, GH #567 warden-gate round 2).
+        # skeleton is the map-or-keep-or-drop ASCII skeleton the
+        # keyword/value search below runs against; positions[s] is
+        # skeleton[s]'s index in raw_line (used by the glued-value check);
+        # tokens is a SUPERSET of skeleton that also carries a WILDCARD
+        # entry for a dropped, non-ASCII, non-mapped codepoint, so
+        # _keyword_reachable_by_dropping_optionals below can still see it
+        # as a candidate keyword-letter substitute; tok_idx_for_skel[s] is
+        # the tokens[] index of skeleton[s], used to translate a
         # skeleton-coordinate span into tokens[]-coordinates.
-        skeleton_chars = []
-        positions = []
-        tokens = []
-        tok_idx_for_skel = []
-        for i, ch in enumerate(raw_line):
-            mandatory = ord(ch) < 128 and bool(re.match(r"[A-Za-z0-9:]", ch))
-            produced_any = False
-            for dch in unicodedata.normalize("NFKD", ch):
-                if re.match(r"[A-Za-z0-9:]", dch):
-                    skeleton_chars.append(dch)
-                    positions.append(i)
-                    tok_idx_for_skel.append(len(tokens))
-                    tokens.append((dch, mandatory))
-                    produced_any = True
-                elif dch in CONFUSABLE_MAP:
-                    mapped = CONFUSABLE_MAP[dch]
-                    skeleton_chars.append(mapped)
-                    positions.append(i)
-                    tok_idx_for_skel.append(len(tokens))
-                    tokens.append((mapped, False))
-                    produced_any = True
-                # else: this NFKD piece is dropped (ASCII-but-not-
-                # alphanumeric, or non-ASCII-but-not-a-table-key) -- handled
-                # below, once per SOURCE character, not per piece.
-            if not produced_any and ch in CONFUSABLE_MAP:
-                # The source's own NFKD pieces produced NOTHING above (`ch`'s
-                # NFKD expansion is entirely ASCII characters outside
-                # [A-Za-z0-9:], or entirely non-ASCII characters that are not
-                # themselves table keys) -- consult CONFUSABLE_MAP on the
-                # SOURCE codepoint itself before treating it as a
-                # dropped/wildcard character. A per-NFKD-piece-only lookup
-                # never reaches a source-level table entry whose own NFKD
-                # decomposition doesn't happen to reproduce its mapped target
-                # -- U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER is
-                # the measured case (NFKD is two ASCII periods, neither kept
-                # nor table-mapped as a piece, but the SOURCE is itself a
-                # documented confusable for ':'). Only reached when the
-                # per-piece loop above produced nothing, so a codepoint whose
-                # NFKD piece IS independently keepable (e.g. the seven
-                # digit-0/1 confusables that also NFKD-fold to their own
-                # digit) is unaffected -- that piece-level result still wins.
-                mapped = CONFUSABLE_MAP[ch]
-                skeleton_chars.append(mapped)
-                positions.append(i)
-                tok_idx_for_skel.append(len(tokens))
-                tokens.append((mapped, False))
-                produced_any = True
-            if not produced_any and ord(ch) > 127:
-                # A WILDCARD token for any non-ASCII codepoint that produced
-                # no real character above. Gating this on the SOURCE
-                # character and on "produced nothing above" -- rather than on
-                # `ord(dch) > 127` for each individual NFKD PIECE -- matters
-                # because 104 codepoints have an NFKD expansion that is
-                # entirely ASCII-outside-[A-Za-z0-9:] (including the
-                # CONFUSABLE_MAP entry above); gating per-piece would miss
-                # those. Gating on the source character means every
-                # non-ASCII codepoint yields either a kept/mapped character
-                # or exactly one WILDCARD, never nothing.
-                tokens.append((None, False))
-            # else: either produced a real token above, or `ch` is plain
-            # ASCII outside [A-Za-z0-9:] (e.g. punctuation) -- dropped.
-        skeleton = "".join(skeleton_chars)
+        skeleton, positions, tokens, tok_idx_for_skel = _confusables_skeleton(raw_line)
         # Search case-insensitively -- see parse()'s TARGET_ALPHABET_LOWER
         # filter. `.upper()` is length-preserving on this pure-ASCII
         # skeleton, so every index found below still lines up with
@@ -8448,25 +8551,6 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         "one — were not evaluated, and a supersession cannot be granted "
                         "by the header format that opts out of checking it; declare "
                         "`RCPT v1.1` and satisfy the rule, or return `SUPERSEDES: none`)")
-                # warden-gate finding 1 (GH #567 round 1) — `parse_v11_sections`'s own
-                # `SUPERSEDES:` extraction (a byte-exact `line.startswith` predating
-                # CONFUSABLE_MAP) has NO homoglyph/confusables defense: a v1.1 receipt
-                # with a compliant `SUPERSEDES: none` line plus a homoglyph'd second
-                # `SUPERSEDES:` line elsewhere leaves `v11["supersedes"] == "none"`
-                # while the hardened oracle above sees a real claim. Sited HERE,
-                # immediately beside the v1 check, for the same reason that check is
-                # sited here: a v1 claim and this v1.1 disagreement fail at the same
-                # point in the run and render the same census.
-                if v11 is not None and v11["supersedes"] == "none" \
-                        and _legacy_supersedes_claim(text) not in (None, "none"):
-                    raise LintError(
-                        "SUPERSEDES: none disagrees with the CHAIN-1-hardened raw-text "
-                        "scan, which finds a real supersedes claim elsewhere on this "
-                        "receipt (this receipt declares `RCPT v1.1`, but its own "
-                        "structural SUPERSEDES: field and the hardened scan disagree — "
-                        "the v1.1 parser's SUPERSEDES: extraction has no homoglyph "
-                        "defense of its own; fix whichever SUPERSEDES: line does not "
-                        "reflect the intended value)")
                 if v11 is not None and v11["supersedes"] != "none" \
                         and not wit_probe.get("unsourced") \
                         and (not wit_probe.get("evaluated")

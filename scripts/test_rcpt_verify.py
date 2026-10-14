@@ -10049,12 +10049,32 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
     # `"none"` but this same hardened oracle finds a real claim anywhere in
     # the body, `v1.1` now hard-FAILs too, closing this asymmetry rather
     # than leaving `v1.1` silently exempt from an oracle already trusted to
-    # gate `v1`. That cross-check does not distinguish a genuine
-    # homoglyph'd claim from the oracle's own pre-existing accepted false
-    # positives (the whole-body scan, the case-insensitive search) on these
-    # two shapes, so both now resolve `(v1, v1.1) == (1, 1)` -- no longer a
-    # one-way divergence, kept here (name retained for history) as the
-    # regression pin for the NOW-CLOSED asymmetry.
+    # gate `v1`. That cross-check did not distinguish a genuine homoglyph'd
+    # claim from the oracle's own pre-existing accepted false positives
+    # (the whole-body scan, the case-insensitive search) on these two
+    # shapes, so round 1 left both resolving `(v1, v1.1) == (1, 1)`.
+    #
+    # WARDEN-GATE FINDING 1 RESIDUAL (GH #567 round 2): that cross-check is
+    # GONE -- it only ever closed half of finding 1 and it is what caused
+    # the false positive above (round-2 finding N1). `parse_v11_sections`
+    # itself is now confusables-aware, both for its post-`NEXT` tail (a
+    # hidden homoglyph'd SECOND occurrence there trips its own duplicate-
+    # section `LintError` directly) and for a keyword-shaped line found
+    # anywhere BEFORE `NEXT` (a NEW, narrower, line-start-anchored check --
+    # see `parse_v11_sections`'s own docstring). Re-deriving each shape
+    # under this replacement, not assuming round 1's `(1, 1)` still holds:
+    #   - `pre_next_claim_plus_post_next_none` embeds its claim as a
+    #     well-formed, line-start `SUPERSEDES: <prefix>` line before `NEXT`
+    #     -- exactly the new pre-`NEXT` check's target shape -- so it STAYS
+    #     `(1, 1)`, now via that check rather than the deleted cross-check.
+    #   - `lowercase_prose_supersedes` embeds its mention mid-line (`"...
+    #     evidence.log  # this supersedes: the old note"`, `supersedes:`
+    #     is not the first thing on the line), which the new pre-`NEXT`
+    #     check's line-start anchor does not match -- that is precisely
+    #     what dissolves it as an N1 false positive. It REVERTS to `(1, 0)`,
+    #     the original pre-round-1 one-way divergence this dict's own name
+    #     describes: `v1`'s whole-body oracle is stricter here, and this
+    #     shape was never a real supersession claim.
     #
     # Evidence-base caveat (round-7 quality-gate MINOR 4): the whole-body
     # scan, the case-insensitive search, and the composition guard each
@@ -10266,14 +10286,22 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
         bypass, not a documented divergence) would pass every other test
         in this class.
 
-        WARDEN-GATE FINDING 1 (GH #567 round 1): the new `RCPT v1.1`
-        cross-check (`v11["supersedes"] == "none"` disagreeing with this
-        same hardened oracle) does not distinguish a genuine homoglyph'd
-        claim from the oracle's own pre-existing whole-body/case-
-        insensitive false positives, so both of these shapes now resolve
-        `(v1, v1.1) == (1, 1)` -- no longer a divergence at all, which is
-        still consistent with "v1 must never be MORE permissive than
-        v1.1" (equally strict is not more permissive)."""
+        ROUND-2 UPDATE (GH #567 warden-gate round 2): round 1's cross-check
+        made both shapes resolve `(1, 1)`; that cross-check is now deleted
+        (replaced by `parse_v11_sections`'s own confusables-aware
+        recognition -- see the class comment above
+        `ACCEPTED_ONE_WAY_DIVERGENCES` for the full re-derivation), and the
+        two shapes no longer agree with each other: `EXPECTED` below
+        re-derives each one under the new fix rather than assuming round
+        1's `(1, 1)` still holds for both. Either expected outcome is
+        consistent with "v1 must never be MORE permissive than v1.1"
+        (`(1, 1)`: equally strict; `(1, 0)`: v1 strictly stricter) -- only
+        a flip to `v1 -> 0` on either shape would be a genuine bypass."""
+        EXPECTED = {
+            "pre_next_claim_plus_post_next_none": (1, 1),
+            "lowercase_prose_supersedes": (1, 0),
+        }
+        self.assertEqual(set(EXPECTED), set(self.ACCEPTED_ONE_WAY_DIVERGENCES))
         for label, build in self.ACCEPTED_ONE_WAY_DIVERGENCES.items():
             with self.subTest(label=label):
                 text_v1 = build(self.PREFIX)
@@ -10281,7 +10309,8 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
                 text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
                 out_v1 = self._run(text_v1, f"v1-divergence-{label}.rcpt")
                 out_v11 = self._run(text_v11, f"v11-divergence-{label}.rcpt")
-                self.assertEqual((out_v1.returncode, out_v11.returncode), (1, 1),
+                self.assertEqual((out_v1.returncode, out_v11.returncode),
+                                  EXPECTED[label],
                                   (out_v1.stderr, out_v11.stderr))
 
     def test_supersedes_none_prefix_glued_to_a_trailing_hex_value_bypasses_v1_documented_gap(self):
@@ -10899,6 +10928,68 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
                           "assertion; a new fixture ADDING to the count is "
                           "expected and fine")
 
+    # These 9 committed `v11-inject/shape-*.jsonl` fixtures are DELIBERATE
+    # negative fixtures -- each one's own filename names the unrelated,
+    # intentional reason `parse_v11_sections` rejects it (a missing,
+    # duplicated, or empty section), confirmed by direct inspection to be
+    # the exact, unchanged set `parse_v11_sections` still raises on before
+    # and after this ticket's round-2 fix. Excluded by name (not by
+    # directory -- `v11-inject/` also holds OTHER shapes, e.g.
+    # `shape-supersedes-justification`, that parse cleanly through
+    # `parse_v11_sections` and belong in the clean population below).
+    KNOWN_V11_INJECT_PARSE_FAILURES = {
+        "shape-dup-supersedes.jsonl", "shape-dup-tripchild.jsonl",
+        "shape-dup-tripwire.jsonl", "shape-supersedes-empty.jsonl",
+        "shape-supersedes-missing.jsonl", "shape-tripchild-empty.jsonl",
+        "shape-tripchild-required.jsonl", "shape-tripwire-empty.jsonl",
+        "shape-tripwire-missing.jsonl",
+    }
+
+    def test_no_committed_rcpt_v11_receipt_in_the_corpus_newly_hard_fails(self):
+        """GH #567 warden-gate round 2, N3: the test above only ever
+        scanned `RCPT v1` (legacy-header) receipts -- the population this
+        ticket's round-2 fix can newly affect is `RCPT v1.1` receipts
+        (confusables-aware keyword recognition in `parse_v11_sections`,
+        both its post-`NEXT` tail loop and the new pre-`NEXT` anomaly
+        scan), which had no corpus regression guard at all. Sibling test:
+        every committed `RCPT v1.1` receipt, EXCLUDING
+        `KNOWN_V11_INJECT_PARSE_FAILURES` above (deliberate negative
+        fixtures, unrelated to this fix), must still parse cleanly through
+        `parse_v11_sections` (round-2 report measured 0 of 39 newly
+        hard-failing at HEAD `a1f4bcf`, before this fix; confirmed still 0
+        of 30 non-excluded receipts after it -- pinned here as a real
+        regression guard against future drift, not merely printed)."""
+        rv = _import_rv()
+        total = 0
+        for corpus in (REPO / "eval/ledger-return-protocol",
+                       REPO / "eval/invariant-cairn/fixtures"):
+            for p in corpus.rglob("*.jsonl"):
+                if p.name in self.KNOWN_V11_INJECT_PARSE_FAILURES:
+                    continue
+                for line in p.read_text(errors="replace").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        continue
+                    r = d.get("receipt")
+                    if isinstance(r, str) and r.startswith("RCPT v1.1 "):
+                        total += 1
+                        try:
+                            rv.parse_v11_sections(r)
+                        except rv.LintError as e:
+                            self.fail(f"{p}: newly hard-fails: {e}")
+        print(f"[test_no_committed_rcpt_v11_receipt...] scanned {total} "
+              f"RCPT v1.1 receipts (30 non-excluded at round-2 "
+              f"warden-gate time)")
+        self.assertGreaterEqual(total, 30,
+                          "corpus receipt count DROPPED below the round-2 "
+                          "baseline -- investigate before loosening this "
+                          "assertion; a new fixture ADDING to the count is "
+                          "expected and fine")
+
 
 class TestWardenGateRound1Findings567(_InqBase):
     """Warden-gate round-1 findings on GH #567's CHAIN-1 fix
@@ -10943,22 +11034,28 @@ class TestWardenGateRound1Findings567(_InqBase):
     }
 
     def test_v11_supersedes_none_disagreeing_with_a_homoglyphd_line_hard_fails(self):
+        """ROUND-2 UPDATE (GH #567 warden-gate round 2): the cross-check
+        this test originally pinned (`v11["supersedes"] == "none"`
+        disagreeing with the whole-body oracle `_legacy_supersedes_claim`)
+        was deleted -- it only closed HALF of finding 1 (see
+        `TestWardenGateRound2Finding1Residual567` below) and introduced a
+        new false-positive class (N1). Replaced by `parse_v11_sections`
+        itself recognizing the homoglyph'd line as a genuine SECOND
+        `SUPERSEDES:` occurrence (post-`NEXT`, same as the compliant line)
+        and raising its own pre-existing duplicate-section `LintError`
+        directly -- so `parse_v11_sections` now raises before ever
+        returning a dict, and the CLI's failure message is the parser's
+        own, not the deleted cross-check's."""
         rv = _import_rv()
         for label, extra in self.FINDING1_DISAGREEING_LINES.items():
             with self.subTest(label=label):
                 text = self._v11_receipt(extra)
-                v11 = rv.parse_v11_sections(text)
-                # Fixture sanity: this finding only exists while the
-                # official v1.1 channel and the hardened oracle disagree --
-                # confirm both sides of that disagreement directly before
-                # trusting the CLI-level assertion below.
-                self.assertEqual(v11["supersedes"], "none")
-                self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
+                with self.assertRaises(rv.LintError) as ctx:
+                    rv.parse_v11_sections(text)
+                self.assertIn("SUPERSEDES duplicated", str(ctx.exception))
                 out = self._run(text, f"v11-finding1-{label}.rcpt")
                 self.assertEqual(out.returncode, 1, out.stderr)
-                self.assertIn(
-                    "disagrees with the CHAIN-1-hardened raw-text scan",
-                    out.stderr)
+                self.assertIn("SUPERSEDES duplicated", out.stderr)
 
     # -- Finding 2 (Important): a CONFUSABLE_MAP entry resolving to a REAL
     # character that is not the letter needed at that position could only
@@ -11017,6 +11114,169 @@ class TestWardenGateRound1Findings567(_InqBase):
         rv = _import_rv()
         text = f"RCPT v1 skill=x\nTRACE\nNEXT\nSUPERSEDES{chr(0xFE30)} {self.PREFIX}\n"
         self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
+
+
+class TestWardenGateRound2Finding1Residual567(_InqBase):
+    """Warden-gate round-2 re-verification of GH #567's CHAIN-1 fix
+    (fix-round2-dispatch, 2026-09-09): round 1's fix for Finding 1
+    (`TestWardenGateRound1Findings567` above) was itself found
+    architecturally wrong -- a bolt-on cross-check that closed only half
+    the gap (`v11["supersedes"] == "none"` disagreeing with the whole-body
+    oracle) and introduced a new false-positive class (N1: ordinary v1.1
+    prose mentioning "supersedes:" now hard-failing, with a dead-end
+    remedy). This round replaces the cross-check with two things inside
+    `parse_v11_sections` itself: its existing post-`NEXT` tail loop made
+    confusables-aware (closes a hidden homoglyph'd SECOND occurrence
+    anywhere in the tail), and a NEW narrow, line-start-anchored scan of
+    the pre-`NEXT` head for the same three keywords (closes a hidden
+    occurrence embedded in the SECTIONS body, e.g. under SUSPICION or in
+    TRACE -- a shape outside the tail loop's scan region by construction,
+    which round 1's cross-check partially covered via its whole-body
+    oracle and which deleting that cross-check without this addition would
+    have reopened; confirmed live via the CLI against a1f4bcf before
+    writing this class)."""
+
+    PREFIX = "21a1b2c3d4e5"
+    HIDDEN = "deadbeefcafe"
+
+    def _base_body(self):
+        return _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+
+    def _run(self, text, name):
+        p = self.base / name
+        p.write_text(text)
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    # -- Finding 1, STILL-GATING rows (round-2 report table, rows 2-4):
+    # structural SUPERSEDES carries a REAL prefix (not "none") PLUS a
+    # hidden homoglyph'd SECOND claim with a DIFFERENT value elsewhere on
+    # the receipt. Round 1's cross-check never fired here (gated on
+    # `== "none"`); this round's fix must reject all three. -------------
+
+    def test_hidden_duplicate_after_the_real_line_hard_fails(self):
+        """Row 2: hidden homoglyph'd second SUPERSEDES: line placed AFTER
+        the real declared line, both post-NEXT (within the tail) --
+        closed by the tail loop's own confusables-aware duplicate
+        detection."""
+        text = (self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                + "TRIPWIRE:  claims-touch(auth/**)\n"
+                + f"SUPERSEDES: {self.PREFIX}\n"
+                + chr(0x0405) + f"UPERSEDES: {self.HIDDEN}\n")
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError) as ctx:
+            rv.parse_v11_sections(text)
+        self.assertIn("SUPERSEDES duplicated", str(ctx.exception))
+        out = self._run(text, "r2-finding1-postnext.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+
+    def test_hidden_duplicate_before_the_real_line_pre_next_hard_fails(self):
+        """Row 3: hidden homoglyph'd second SUPERSEDES: line embedded
+        BEFORE NEXT (under SUSPICION, i.e. genuinely outside the tail),
+        real declared line stays post-NEXT -- closed only by the NEW
+        pre-NEXT anomaly scan; the tail loop alone cannot see this line at
+        all. This is the shape that regresses to exit 0 if the cross-check
+        is deleted with no pre-NEXT replacement (confirmed against a
+        pre-this-class build before adding the scan)."""
+        body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        body = body.replace(
+            "SUSPICION  0.10",
+            chr(0x0405) + f"UPERSEDES: {self.HIDDEN}\nSUSPICION  0.10")
+        text = body + f"TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: {self.PREFIX}\n"
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError) as ctx:
+            rv.parse_v11_sections(text)
+        self.assertIn("before NEXT", str(ctx.exception))
+        out = self._run(text, "r2-finding1-prenext.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+
+    def test_hidden_duplicate_fullwidth_colon_variant_hard_fails(self):
+        """Row 4: same as row 2 (post-NEXT placement), but the hidden
+        line's colon is the homoglyph (FULLWIDTH COLON, U+FF1A) rather
+        than the leading letter."""
+        text = (self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                + "TRIPWIRE:  claims-touch(auth/**)\n"
+                + f"SUPERSEDES: {self.PREFIX}\n"
+                + "SUPERSEDES" + chr(0xFF1A) + f" {self.HIDDEN}\n")
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError) as ctx:
+            rv.parse_v11_sections(text)
+        self.assertIn("SUPERSEDES duplicated", str(ctx.exception))
+        out = self._run(text, "r2-finding1-fullwidth.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+
+    def test_none_structural_plus_hidden_pre_next_claim_still_hard_fails(self):
+        """Regression pin distinct from the three rows above: round 1's
+        cross-check ALSO covered `SUPERSEDES: none` (compliant) plus a
+        hidden claim embedded genuinely before NEXT -- confirmed via the
+        CLI at a1f4bcf to exit 1. Deleting that cross-check without the
+        new pre-NEXT scan silently reopens exactly this shape (confirmed:
+        it exits 0 without the scan). Pinned here so a future refactor
+        cannot drop the pre-NEXT scan without this test catching it."""
+        body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        body = body.replace(
+            "SUSPICION  0.10",
+            chr(0x0405) + f"UPERSEDES: {self.PREFIX}\nSUSPICION  0.10")
+        text = body + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+        out = self._run(text, "r2-finding1-none-plus-prenext.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("before NEXT", out.stderr)
+
+    # -- N1 false positives (round-2 report table): ordinary v1.1 prose
+    # merely mentioning "supersedes:" must now exit 0 -- dissolved, not
+    # merely failing differently. -----------------------------------
+
+    def test_trace_prose_mentioning_supersedes_no_longer_hard_fails(self):
+        text = (_receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log  # this supersedes: the old note"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+            .replace("RCPT v1 ", "RCPT v1.1 ", 1)
+            + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n")
+        out = self._run(text, "r2-n1-trace-prose.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_trailing_note_mentioning_supersedes_no_longer_hard_fails(self):
+        text = (self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+                + "# reviewed the SUPERSEDES: parsing path\n")
+        out = self._run(text, "r2-n1-trailing-note.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_em_dash_heading_mentioning_supersedes_no_longer_hard_fails(self):
+        text = (self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+                + "# SUPERSEDES" + chr(0x2014) + " the old ruling\n")
+        out = self._run(text, "r2-n1-em-dash.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    # -- N1's dead-end remedy sequence: the v1 check's own error text says
+    # "declare RCPT v1.1 and satisfy the rule, or return SUPERSEDES: none"
+    # -- following that verbatim must work again. -------------------
+
+    def test_the_v1_error_remedy_is_no_longer_a_dead_end(self):
+        base = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log  # this supersedes: the old note"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        # STEP 1: RCPT v1, prose "supersedes:" in TRACE -- must exit 1
+        # with the documented remedy.
+        step1 = self._run(base, "r2-deadend-step1.rcpt")
+        self.assertEqual(step1.returncode, 1, step1.stderr)
+        self.assertIn("declare `RCPT v1.1`", step1.stderr)
+        self.assertIn("SUPERSEDES: none", step1.stderr)
+        # STEP 2: follow the remedy verbatim -- RCPT v1.1 + compliant
+        # SUPERSEDES: none -- must now exit 0 (the escape hatch works
+        # again; at round-1 HEAD this exited 1 with a dead-end message).
+        step2_text = (base.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                      + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n")
+        step2 = self._run(step2_text, "r2-deadend-step2.rcpt")
+        self.assertEqual(step2.returncode, 0, step2.stderr)
 
 
 if __name__ == "__main__":
