@@ -197,6 +197,25 @@ printf '%s' "${BLOCK_COUNTS[g]}"
             self.assertEqual(r.returncode, 2, r.stderr)
             self.assertEqual(artifact.read_bytes(), b"app.py\0")
 
+    def test_state_files_write_skips_equal_or_directory_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            same, folder = Path(d, "same.files"), Path(d, "dir.files")
+            same.write_bytes(b"a.py\0b c.py\0")
+            folder.mkdir()
+            r = shell(functions("_write_state_files") + f'''
+timeout() {{ echo spawned; }}
+_write_state_files {str(same)!r} a.py "b c.py"
+_write_state_files {str(folder)!r} a.py
+''')
+            self.assertEqual(r.stdout, "", r.stderr)
+            self.assertEqual(list(folder.iterdir()), [])
+            same.write_bytes(b"a.py\0junk")
+            r = shell(functions("_write_state_files") + f'''
+timeout() {{ echo spawned; }}
+_write_state_files {str(same)!r} a.py
+''')
+            self.assertEqual(r.stdout, "spawned\n", r.stderr)
+
     def test_append_stops_when_budget_expires(self):
         r = shell(functions("_journal_append_group") + '''
 attempts=0
@@ -376,7 +395,7 @@ printf '%s %s' "$JR_UNMEASURABLE" "${{#JBLAST[@]}}"
 ''')
             self.assertEqual(r.stdout, "1 0", r.stderr)
 
-EXPECTED_TESTS = 17
+EXPECTED_TESTS = 18
 
 
 def _run_with_count_guard():

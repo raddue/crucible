@@ -383,7 +383,19 @@ _load_files() {
 # write), and `timeout`'s 124 is absorbed outside — the write must never
 # affect a block/allow verdict. C-k decides the remedy from what landed.
 _write_state_files() {
-  local target="$1"; shift
+  local target="$1" p i=0 same=1; shift
+  [ -d "$target" ] && return 0   # mv would drop the temp INSIDE a directory
+  if [ -f "$target" ] && [ ! -L "$target" ]; then
+    # Builtin read only, at most $#+1 records: an unchanged artifact costs no
+    # subprocess per Stop, and a planted huge file is not read to EOF.
+    local -a want=("$@")
+    while IFS= read -r -d '' p; do
+      [ "$i" -lt "$#" ] && [ "$p" = "${want[$i]}" ] || { same=0; break; }
+      i=$((i + 1))
+    done < "$target"
+    # read fails on an unterminated tail but still fills $p: junk is not equal.
+    [ "$same" -eq 1 ] && [ "$i" -eq "$#" ] && [ -z "$p" ] && return 0
+  fi
   # Temp + rename: stale bytes or a planted FIFO are replaced, never opened.
   timeout 1 bash -c 't="$1"; shift; tmp=$(mktemp "$t.XXXXXX") || exit 0
     if printf "%s\0" "$@" > "$tmp"; then mv -f "$tmp" "$t"; else rm -f "$tmp"; fi' \
