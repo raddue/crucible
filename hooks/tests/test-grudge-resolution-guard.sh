@@ -2505,14 +2505,13 @@ check 364 "a zero-padded budget spends nothing and prints no budget note — con
   no "$(has "$ERR" "budget")"
 HOOK_ENV=""
 
-# The budget is checked BETWEEN steps, so any step whose cost is superlinear
-# in an attacker-chosen input can still run past it. Work bound, not wall time
-# (a timing assertion would flake on a loaded CI box): the journal-pass count
+# The budget is checked BETWEEN steps; journal row-work counts are the primary
+# fence, while wall-time limits remain host-relative backstops. The journal-pass count
 # of one Stop must NOT grow with the candidate count. Before the fix the step
 # 14b display refresh, the step 16 checkpoint and the ordinal re-read each did
 # one full journal pass PER candidate (3n+3; 27 s for 500 candidates at an 8 s
 # budget, all of it after the last budget check).
-# contract:hook:inv-t28 checks=5
+# contract:hook:inv-t28 checks=6
 t28_passes() {
   # t28_passes <n-candidates> -> T28_PASSES, T28_ORD and RC in the caller shell
   hook_case "t28p$1"
@@ -2524,32 +2523,33 @@ t28_passes() {
   HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE=$HC_ROOT/trace"
   run_hook "s28p$1"
   HOOK_ENV=""
-  T28_PASSES="$(wc -l < "$HC_ROOT/trace" 2>/dev/null | tr -d ' ' || true)"
-  # The ordinal scan is a second read after _journal_pass; read-attached trace
-  # makes pass metric detect per-member rescans (#603).
+  T28_PASSES="$(grep -c '^pass ' "$HC_ROOT/trace" 2>/dev/null || true)"
+  T28_PASS_WORK="$(awk '/^pass-work / { total=$2 } END { print total+0 }' "$HC_ROOT/trace" 2>/dev/null || true)"
+  T28_ORD_READ_WORK="$(awk '/^ordinal-read-rows / { total=$2 } END { print total+0 }' "$HC_ROOT/trace" 2>/dev/null || true)"
+    T28_JOURNAL="$(wc -l < "$(guard_dir "$HC_REPO")/s28p$1.journal" | tr -d ' ')"
+  T28_JOURNAL_BYTES="$(wc -c < "$(guard_dir "$HC_REPO")/s28p$1.journal" | tr -d ' ')"
+  # Row metrics count consumed work, distinct from the two producer markers.
   T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" 2>/dev/null || true)"
 }
 T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_ORD="$T28_ORD"; T28P2_RC="$RC"
-T28P2_PASS_TRACE="$T28P2"
+T28P2_PASS_WORK="$T28_PASS_WORK"; T28P2_ORD_READ_WORK="$T28_ORD_READ_WORK"; T28P2_JOURNAL="$T28_JOURNAL"; T28P2_JOURNAL_BYTES="$T28_JOURNAL_BYTES"
 T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_ORD="$T28_ORD"; T28P12_RC="$RC"
+T28P12_PASS_WORK="$T28_PASS_WORK"; T28P12_ORD_READ_WORK="$T28_ORD_READ_WORK"; T28P12_JOURNAL="$T28_JOURNAL"; T28P12_JOURNAL_BYTES="$T28_JOURNAL_BYTES"
 check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
 check 389 "journal passes for one group do not grow with member count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
   "$T28P2" "$T28P12"
-check 412 "premise: pass trace fired for 2-member group (metric is not vacuous) — contract:hook:inv-t28" \
-  8 "$T28P2_PASS_TRACE"
-# 389 alone is vacuous if the trace point it counts is never reached (the
-# `#603` regressor once passed every check for exactly that reason). Pin the
-# ordinal scan's own trace point: it must fire, and it must fire ONCE for the
-# group — one read of the log for the whole group, never one per member. Both
-# the 2- and the 12-member Stop must read once, so a per-member rescan of the
-# ordinal scan (12 reads for 12 members) fails 399.
-check 398 "premise: the ordinal scan really traced for a 2-member group (its metric is not vacuous) — contract:hook:inv-t28" \
+check 412 "pass scan reached journal EOF (work bytes vs file bytes: $T28P2_PASS_WORK vs $T28P2_JOURNAL_BYTES) — contract:hook:inv-t28" \
+  "$T28P2_JOURNAL_BYTES" "$T28P2_PASS_WORK"
+# 398 pins marker presence; row metrics independently pin work.
+check 398 "premise: ordinal marker fired for 2-member group — contract:hook:inv-t28" \
   1 "$T28P2_ORD"
-check 399 "the ordinal scan reads the journal once per group, not once per member (2 vs 12 members: $T28P2_ORD vs $T28P12_ORD reads) — contract:hook:inv-t28" \
-  1 "$T28P12_ORD"
+check 399 "ordinal scan has counted work for 2-member journal — contract:hook:inv-t28" \
+  yes "$(if [ "$T28P2_ORD_READ_WORK" -gt 0 ]; then echo yes; else echo no; fi)"
+check 414 "ordinal scan row reads equal journal rows at 2 and 12 members — contract:hook:inv-t28" \
+  yes "$(if [ "$T28P2_ORD_READ_WORK" -eq "$T28P2_JOURNAL" ] && [ "$T28P12_ORD_READ_WORK" -eq "$T28P12_JOURNAL" ]; then echo yes; else echo no; fi)"
 
-# End-to-end clocked backstop measures the full 4000x4000 candidate pair;
-# Warden clock fixture covers one `_overlap` call in isolation.
+# End-to-end clocked check is supplementary host-relative backstop; row counts
+# pin journal complexity independent of host speed.
 # contract:hook:inv-t28 checks=3
 hook_case t28wide
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
@@ -2802,7 +2802,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=415
+EXPECTED_CHECKS=416
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

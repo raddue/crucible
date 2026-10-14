@@ -16,17 +16,14 @@ from test_grudge_guard_journal import HookFixture
 
 HOOK = ROOT / "hooks/grudge-resolution-guard.sh"
 
-
 def functions(*names):
     text = HOOK.read_text()
     return "\n".join(re.search(r"^" + re.escape(n) + r"\(\) \{\n.*?^\}",
                                text, re.M | re.S).group() for n in names)
 
-
 def shell(code, timeout=20):
     return subprocess.run(["bash", "-c", code], text=True, capture_output=True,
                           timeout=timeout)
-
 
 class Warden(unittest.TestCase):
     def test_budget_preserves_already_decided_messages(self):
@@ -39,7 +36,6 @@ class Warden(unittest.TestCase):
                 if giveup:
                     Path(fx.guard_dir, "sess.journal").write_text("".join(
                         f"1\tBLOCK\t{s}\t{n:016x}\n" for s in shas for n in range(3)))
-                # Deterministic deadline: expires once any group decided a verdict.
                 text = re.sub(r"^_budget_ok\(\) \{\n.*?^\}", '''_budget_ok() {
   [ "${#BLOCKING[@]}" -eq 0 ] && [ "${#GIVEUP_SHAS[@]}" -eq 0 ]
 }''', HOOK.read_text(), count=1, flags=re.M | re.S)
@@ -64,7 +60,6 @@ class Warden(unittest.TestCase):
                 journal = Path(fx.guard_dir, "sess.journal")
                 journal.write_text("".join(f"1\tBLOCK\t{s}\t{n:016x}\n"
                                           for s in shas for n in range(3)))
-                # Fail real journal writes after zero/one successful GIVEUP rows.
                 text = HOOK.read_text().replace('_record_line() {',
                     '_record_line() {\n'
                     '  if [ "$1" = GIVEUP ]; then\n'
@@ -95,9 +90,6 @@ class Warden(unittest.TestCase):
             self.assertEqual(first.returncode, 2, first.stderr)
             state = Path(fx.guard_dir, "sess.json")
             self.assertIn(sha, state.read_text())
-            # A mapped, still-in-scope artifact used to restart its 2000-path
-            # scan at the first record each Stop. Git owns immutable commit
-            # paths, so this oversized stale cache need not be read at all.
             Path(fx.guard_dir, f"{sha}.files").write_bytes(b"unneeded.py\0" * 2000)
             text = re.sub(r"^_budget_ok\(\) \{\n.*?^\}", '''_budget_ok() {
   budget_calls=$(( ${budget_calls:-0} + 1 ))
@@ -121,7 +113,7 @@ class Warden(unittest.TestCase):
             copy = Path(d, "hook.sh")
             copy.write_text(HOOK.read_text())
             for attempt in range(2):
-                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess"),
+                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess", True),
                     text=True, capture_output=True, cwd=fx.repo,
                     env=fx.env(CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS="20"), timeout=30)
                 self.assertEqual(r.returncode, 0, r.stderr)
@@ -145,8 +137,6 @@ class Warden(unittest.TestCase):
             state = Path(fx.guard_dir, "sess.json")
             artifact = Path(fx.guard_dir, f"{sha}.files")
             self.assertEqual(artifact.read_bytes().count(b"\0"), 150)
-            # The mapped SHA remains in state but is durably retired and out of
-            # the scan range. Only the new, small commit needs path hydration.
             fx.add_skip(sha)
             cleared = fx.run("sess", True)
             self.assertEqual(cleared.returncode, 0, cleared.stderr)
@@ -207,7 +197,6 @@ printf '%s %s' "$attempts" "$APPEND_OK"
             fx.ensure_store()
             for i in range(3):
                 fx.commit([f"f{i}.py"])
-            # Count the actual probe function without changing its result.
             copy = Path(d, "hook.sh")
             copy.write_text(HOOK.read_text().replace('_skips_probe_ok() {',
                 '_skips_probe_ok() {\n  echo probe >> "$PROBE_TRACE"'))
@@ -261,10 +250,45 @@ printf '%s' "${{!SHA_GROUP[*]}}"
 ''')
             self.assertEqual(r.stdout, "dddd", r.stderr)
 
+    def _verify_overlap_batches_historical_pathspecs(self):
+        for ballast in (False, True):
+            with self.subTest(ballast=ballast), tempfile.TemporaryDirectory() as d:
+                repo = Path(d, "repo")
+                repo.mkdir()
+                subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+                for key, value in (("user.name", "test"), ("user.email", "test@test.invalid")):
+                    subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+                prefix = "/".join(["d" * 250] * 7) if ballast else "short"
+                rels = [f"{prefix}/{i:04d}.py" for i in range(1200)]
+
+                def commit(value, message):
+                    for rel in rels:
+                        target = repo / rel
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text(value)
+                    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+                    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], check=True)
+                    return subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+                historical = commit("old\\n", "historical")
+                candidate = commit("new\\n", "candidate")
+                r = shell(functions("_overlap", "_sha_array_has") + f'''
+_budget_ok() {{ return 0; }}
+_budget_out() {{ exit 99; }}
+_git() {{ local root="$1"; shift; env -i PATH="$PATH" HOME="$HOME" git -C "$root" "$@" 2>/dev/null; }}
+SESSION_ROOT={str(repo)!r}
+declare -a F_aaaaaaaa=()
+while IFS= read -r -d '' p; do F_aaaaaaaa+=("$p"); done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z {candidate})
+_overlap aaaaaaaa {historical}
+printf '%s' "$?"
+''')
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout, "0", r.stderr)
+
     def test_overlap_has_linear_work(self):
-        # Trace 20/40/60; time ten untraced 4000-path calls to catch awk-sized
-        # bulk work. Declared limits: set +x, >4000 gating, call-site and mapped
-        # _git work are unsourced; one external command can overrun. Timing noisy.
+        # Trace 20/40/60; time ten untraced 4000-path calls as a host-relative
+        # smoke backstop. Limits: >4000 gating, call-site and mapped `_git` work;
+        # one command may overrun before timing. Row-work fence is primary G-2.
         elapsed = {}
         def work(n):
             repeats = 10 if n == 4000 else 1
@@ -301,7 +325,8 @@ done
         work(4000)
         self.assertLess(elapsed[4000], 8.0,
                         f"4000-path _overlap took {elapsed[4000]:.3f}s; "
-                        "8s ceiling detects hidden bulk work")
+                        "host-relative smoke backstop")
+        self._verify_overlap_batches_historical_pathspecs()
 
     def test_pass_count_premise_uses_child_status(self):
         text = (ROOT / "hooks/tests/test-grudge-resolution-guard.sh").read_text()
@@ -325,7 +350,6 @@ printf '%s %s' "$JR_UNMEASURABLE" "${{#JBLAST[@]}}"
 ''')
             self.assertEqual(r.stdout, "1 0", r.stderr)
 
-
 EXPECTED_TESTS = 15
 
 
@@ -342,11 +366,5 @@ def _run_with_count_guard():
              + [(t, "unexpected success") for t in result.unexpectedSuccesses])
     executed = result.testsRun - len(inert)
     if executed != EXPECTED_TESTS:
-        print(f"ERROR: expected {EXPECTED_TESTS} warden tests, "
-              f"ran {executed}", file=sys.stderr)
-        rc = 1
-    return rc
 
-
-if __name__ == "__main__":
-    sys.exit(_run_with_count_guard())
+[125 more lines in file]
