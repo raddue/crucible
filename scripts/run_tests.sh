@@ -214,6 +214,10 @@ run python3 scripts/check_change_bundling.py
 run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
 run python3 scripts/test_install_rcpt_verify.py
+
+# --- CHAIN-1 confusables table drift (#567) ---
+run python3 scripts/check_chain1_confusables_drift.py --selftest
+run python3 scripts/check_chain1_confusables_drift.py
 run python3 scripts/measure_474_denominators.py
 run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
