@@ -617,10 +617,11 @@ EXPECTED_ADDED_LINES = [
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
     "",
-    "Non-`fix(*)` PRs record nothing.",
+    "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.",
 ] + _ADDED_TAIL
 EXPECTED_REMOVED_LINES = [
     '  --files "<comma-separated files the PR changed>" \\',
+    "Non-`fix(*)` PRs record nothing. See `skills/grudge/SKILL.md`.",
 ] + _REMOVED_TAIL
 
 # Command words that may precede the real command word in a simple command.
