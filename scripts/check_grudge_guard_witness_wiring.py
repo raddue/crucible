@@ -1,7 +1,7 @@
 """R5 outcome-witness wiring fence (design §9 T-x, §10 criterion 8).
 
 The outcome witness (§5b) is write-only from the hook and is surfaced by an
-explicit `grudge_guard_doctor --grudge-guard` invocation that `/handoff` and
+explicit `grudge_guard_doctor --grudge-guard` invocation that handoff (`getting-started/handoff.md`) and
 `/finish` call — or it does not ship (criterion 8). This check forbids the
 round-2 shape T-x replaced: a wired-nothing pair satisfiable by a flag that
 argparse accepts but nothing runs. Three assertions:
