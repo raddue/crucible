@@ -366,8 +366,9 @@ run python3 scripts/check_warden_helper_drift.py
 # --- AACR-Bench review-gate measurement core (#631) ---
 run python3 scripts/test_aacr_bench_measure.py
 
-# --- Catalog unit suite ---
+# --- Catalog and release packaging unit suites ---
 run python3 scripts/test_catalog.py
+run python3 scripts/test_package_release.py
 run python3 eval/memory/test_memory.py
 
 # --- Build-routing advisor + reconcile hooks ---
