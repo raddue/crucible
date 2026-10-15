@@ -8,7 +8,7 @@ The **build** skill is the main entry point for feature development. It chains t
 
 1. **Phase 1: Design** (interactive) — Refine the idea with the user, produce a design doc. Forge feed-forward and Cartographer consult run at start. Design passes through a quality gate.
 2. **Phase 2: Plan** (autonomous) — Write implementation plan, review, then quality gate on the plan. Innovate proposes enhancements before the gate.
-3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, two-pass code review (code quality + test quality + AI slop signal detection), test alignment audit (crucible:test-coverage audits existing tests for staleness), test gap writer (fills coverage gaps with dedup-aware auto-retry), and adversarial tester (writes tests designed to break the implementation).
+3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, two-pass code review (code quality + test quality + AI slop signal detection), test alignment audit (crucible:test-coverage audits existing tests for staleness), test gap writer (fills coverage gaps with dedup-aware auto-retry), and Inquisitor per-task mode (writes tests designed to break the implementation).
 4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate, session metrics, full test suite, Forge retrospective, Cartographer recording, branch completion.
 
 Phase 4 also runs a conditional security pass and a supply-chain scan around the gate. **crucible:siege** is dispatched at Step 5.5 — sequentially *before* the quality gate — but only when security signals are detected (or siege is forced); if it completes clean, the build continues to the gate. **dependency-audit** (npm/cargo/pip-audit) runs alongside the gate as an independent supply-chain signal. Both can block completion, yet are deliberately kept out of the gate's weighted score (INV-2 — the score sums only the host red-team's own Fatal/Significant findings; siege, dependency-audit, and external-model signals are all excluded) and out of red-team's input (anti-anchoring: a sibling signal shares the artifact, never the reviewer's context).
@@ -19,11 +19,11 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
-The **adr** skill records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with trigger hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
+The **design** decision-record workflow records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
 
 ## Investigation and decision layers
 
-The **recon** and **assay** skills provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Assay evaluates competing approaches with constraint_fit scoring and kill criteria. Both are dispatched automatically by design (Phase 2), spec (per-ticket investigation), migrate (Phase 0 + User Gate), and audit (Phase 1 scoping). They're also usable standalone — `/recon` before any task, `/assay` for any architectural decision.
+**Recon** and **design** provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Design's approach-evaluation subflow evaluates competing approaches with constraint_fit scoring and kill criteria. Design uses both in Phase 2; spec and migrate consume the same subflow for their decisions. `/recon` remains usable before any task; `/design` can evaluate approaches standalone.
 
 ## Spec → build handoff
 

@@ -16,7 +16,7 @@ Explores a codebase organically, surfaces architectural friction, and proposes c
 
 **Purpose:** Discover structural improvement opportunities in a codebase. Distinct from audit (which finds bugs in a specific subsystem) -- prospector finds what could be better across the entire codebase. Audit finds what's broken. Prospector finds what could be better.
 
-**Model:** Opus (orchestrator, organic explorer, competing design agents). Sonnet (genealogists, structured analysis). If the orchestrator session is not running Opus, warn: "Prospector requires Opus-level reasoning for exploration and design phases. Results may be degraded."
+**Models:** Orchestrator, organic explorer, and competing design agents request `high`; genealogists and structured analysis request `standard`. The Claude Code examples use current reference aliases for those profiles; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for exploration and design, or the harness can observe that the active orchestrator is not running one, warn: "Prospector requests high-profile reasoning for exploration and design phases. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before exploration and design. These warnings are advisory and must not terminate the pipeline.
 
 ## Invocation
 
@@ -708,7 +708,7 @@ After context compaction:
 - **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
 - **Does NOT use:** `crucible:quality-gate` (prospector is advisory, not a fix loop), `crucible:red-team`
-- **Does not dispatch /recon** -- organic exploration serves a different purpose than structured investigation. Does not dispatch /assay -- competing design evaluation is more specialized than assay for this use case. See #147 for rationale.
+- **Does not dispatch /recon** -- organic exploration serves a different purpose than structured investigation. Does not dispatch /design approach evaluation -- competing redesign exploration is more specialized than that subflow for this use case. See #147 for rationale.
 
 ## Subagent Dispatch Summary
 

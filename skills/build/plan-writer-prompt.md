@@ -4,6 +4,8 @@
 
 Use this template when dispatching a plan writer subagent in Phase 2.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Write implementation plan for [feature]"
@@ -40,7 +42,7 @@ Task tool (general-purpose, model: opus):
 
     **Review tier classification (compute for every task):**
     - **Tier 1 (Light):** Low complexity AND 1-3 files AND no cross-system dependencies AND no cartographer landmine proximity. Pipeline: implementer -> cleanup -> single-pass code review.
-    - **Tier 2 (Standard):** Medium complexity OR 3-6 files OR single-system behavioral changes. Not eligible if any Tier 3 trigger applies. Pipeline: implementer -> cleanup -> iterative code review -> single-pass test review -> adversarial tester.
+    - **Tier 2 (Standard):** Medium complexity OR 3-6 files OR single-system behavioral changes. Not eligible if any Tier 3 trigger applies. Pipeline: implementer -> cleanup -> iterative code review -> single-pass test review -> Inquisitor per-task mode.
     - **Tier 3 (Heavy):** High complexity OR 6+ files OR cross-system dependencies OR new public API surface OR cartographer landmine proximity. Pipeline: full current review flow.
 
     **Escalation rules (tier can only increase, never decrease):**

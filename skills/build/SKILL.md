@@ -11,7 +11,7 @@ description: Use when starting any feature development, building new functionali
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
 <!-- CANONICAL: shared/return-convention.md -->
-All subagent returns use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (Tier 1 structural + Tier 2 witness verification — full grammar in the shared convention) to every Task return before acting on the declared VERDICT. The linter is a deterministic runtime tool: orchestrators MUST run `python3 scripts/rcpt_verify.py --tier2 --strict --root <dispatch-root> --ledger <dispatch-root>/receipt-ledger.jsonl <receipt>` on every received receipt before acting on its VERDICT, and apply the shared convention's in-context pseudocode ONLY as the fallback when the tool is unavailable (`--root` is repeatable, but build passes exactly one — the dispatch root; a sha256 mismatch on any resolved artifact hard-FAILs with or without `--strict`, `--strict` additionally hard-FAILs a path-shaped name that neither the dispatch root nor its git toplevel holds, and under a single root the cross-root ambiguity hard-FAIL cannot arise at all — an unresolvable bare basename is UNVERIFIABLE, never a false FAIL). A lint failure is treated as structurally `BLOCKED`.
+All subagent returns use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (Tier 1 structural + Tier 2 witness verification — full grammar in the shared convention) to every Task return before acting on the declared VERDICT. The linter is a deterministic runtime tool: orchestrators MUST run the installed write-boundary wrapper `/usr/local/libexec/crucible/rcpt-verify` (never a bare PATH lookup) when it is present — identical flags, and the wrapper's absence is never a failure (opt-in hardening, AC-25) — else the direct `python3 scripts/rcpt_verify.py --tier2 --strict --root <dispatch-root> --ledger <dispatch-root>/receipt-ledger.jsonl <receipt>` on every received receipt before acting on its VERDICT, and apply the shared convention's in-context pseudocode ONLY as the fallback when the tool is unavailable (`--root` is repeatable, but build passes exactly one — the dispatch root; a sha256 mismatch on any resolved artifact hard-FAILs with or without `--strict`, `--strict` additionally hard-FAILs a path-shaped name that neither the dispatch root nor its git toplevel holds, and under a single root the cross-root ambiguity hard-FAIL cannot arise at all — an unresolvable bare basename is UNVERIFIABLE, never a false FAIL). A lint failure is treated as structurally `BLOCKED`.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
 The orchestrator maintains a per-run Invariant Cairn at `~/.claude/projects/<project-hash>/memory/cairn/cairn-<run-id>.md` per `shared/cairn-convention.md`. See the `## Cairn (Layer 3)` section below for build-specific phase definitions, terminal condition, and mandatory-invariant categories.
@@ -19,6 +19,8 @@ The orchestrator maintains a per-run Invariant Cairn at `~/.claude/projects/<pro
 End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
+
+**Models:** Build dispatches request model-agnostic profiles. Implementers, plan writers, and gate-critical reviewers generally request `high`; bounded mechanical work and some reviewers may request `standard` under the existing complexity heuristics. Prompt templates show current Claude Code reference aliases; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
 **Session index event:** At startup, if session indexing is active (session index path discoverable via glob), emit a `skill_start` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_start","summary":"Starting /build for <user goal>","detail":{"skill":"build","goal":"<user goal>"}}`. See `skills/shared/session-index-convention.md` for the outbox pattern.
 
@@ -95,7 +97,7 @@ Extract `keys=` and `files=` discriminators at insertion time (severity-max, `*-
 - Reviewer (code / test): `read-artifact`, `emit-findings`.
 - Cleanup agent: `read-diff`, `emit-recommendation`.
 - Plan writer / plan reviewer: `read-design`, `emit-artifact`.
-- Acceptance-test writer / test-gap writer / adversarial tester: `run-tests`, `emit-tests`.
+- Acceptance-test writer / test-gap writer / Inquisitor per-task mode: `run-tests`, `emit-tests`.
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -112,7 +114,7 @@ Every status update must include:
 **Examples of GOOD narration:**
 > "Phase 3, Task 4 complete. Reviewer found 2 Important issues — dispatching implementer to fix. Tasks: [1] ✓ [2] ✓ [3] ✓ [4] fixing [5-8] pending"
 
-> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching innovate on the plan."
+> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching design's innovation pass on the plan."
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
@@ -133,7 +135,7 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 | "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A fresh verification round is required. | The gate is only complete after a mode-clean fresh reverify: `0 Fatal` in default `standard`, or `0 Fatal, 0 Significant` when the caller passes `mode: full`. A truly clean first round (`0 Fatal / 0 Significant`) may use normal candidate-clean handling; first-round `0 Fatal / >0 Significant` is actionable. Standard residual Significant/Minor findings must be disclosed. |
 | "The user said 'looks good' / 'move on' — that's approval to skip the gate." | General feedback is not skip approval. Only an unambiguous instruction that explicitly references the gate counts. | Require literal `SKIP GATE` (or equivalent explicit phrase) before recording `Status: SKIPPED`. |
 | "I can fix this one finding myself instead of dispatching a fix agent." | Orchestrator-applied fixes conflate coordination with remediation and bypass the fix journal. Every fix — even trivial — goes through a fix agent. | Orchestrator never edits the artifact directly; always dispatch the fix agent. |
-| "Innovate/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovate is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run innovate and red-team on every artifact, every time. |
+| "Design's innovation pass/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovation is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run design's innovation pass and red-team on every artifact, every time. |
 | "I'll just finish the task list and narrate at the end." | Long-running autonomous pipelines are invisible without narration. Silent runs prevent the user from intervening or learning. | Narrate before every dispatch and after every completion — non-negotiable. |
 
 ## Gate Ledger Protocol
@@ -330,6 +332,9 @@ Quality gates are unconditional at all three gate points:
 **This requirement exists because:** Quality gates consistently find issues the pipeline misses regardless of task size. There is no category of task that is immune. In observed runs, tasks self-assessed as "trivial" had the same defect rate as complex tasks. The only way to skip a quality gate is with explicit user approval — an unambiguous instruction specifically referencing the gate, not general feedback like "looks good" or "move on."
 
 ## Pipeline Status
+
+<!-- CANONICAL: shared/pipeline-status-convention.md (shared header, health state machine, events buffer, inline CLI, compaction recovery; build keeps only its skill-specific body + YELLOW/RED triggers) -->
+**Runtime tool (preferred — the format below is the skill-specific reference).** Compose the shared header/health/events with `python3 scripts/pipeline_status.py write --path <build-scratch>/pipeline-status.md --skill build --phase … --health … [--event …] --body-file <skill-body.md>` (see `shared/pipeline-status-convention.md`); hand-compose only build's skill-specific body (`## Task Progress`, `## Quality Gates`, `## Checkpoints`, `## Compression State`).
 
 Write `<build-scratch>/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
 
@@ -608,7 +613,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
    - **Security review check:** If the contract contains `security_review` field, note it in the Phase 1→2 handoff manifest under Active Constraints: "Contract requires security review (`security_review.status: [required|recommended]`) — siege will be evaluated in Phase 4 Step 5.5." This ensures the directive survives phase handoffs and compaction recovery.
    - Quality-gate the existing design doc with staleness context: "This design doc is pre-existing from /spec and may be stale — verify against current codebase state before proceeding"
    - **Staleness rejection:** If the quality gate finds that the design doc references files, interfaces, or modules that no longer exist in the codebase, reject the doc as fundamentally stale. Fall back to running Phase 1 interactively. Inform user: "Pre-existing design doc for #NNN is fundamentally stale (references [specific items] that no longer exist). Running interactive design instead."
-   - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + innovate + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
+   - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + design's innovation pass + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
    - If quality gate fails (non-staleness issues): fix or escalate
    - Proceed to Phase 3 when the plan passes review
 
@@ -631,15 +636,15 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, innovate, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, design's innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
 ### Step 2: Innovate and Red-Team the Design
 
 After the user approves the design and before starting Phase 2:
 
-**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching innovate and quality-gate on the design doc.
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching design's innovation pass and quality-gate on the design doc.
 
-1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
+1. **Innovation:** Dispatch `crucible:design` in innovation-pass mode (`design/innovation.md`) on the design doc. Plan Writer incorporates the proposal. If it changes the API Surface, Invariants, or integration points, re-extract the contract from the revised design and obtain user approval of the changed contract before the quality gate and handoff.
 2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: design`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
@@ -739,15 +744,15 @@ Before dispatching the Plan Writer, verify the gate ledger and write a handoff m
    - **Inputs for Phase 2:** design doc path, acceptance test paths (or contract tests in refactor mode), conventions path (from cartographer, if loaded)
    - **Decisions Carried Forward:** accumulated decisions from Phase 1
    - **Active Constraints:** constraints affecting planning
-   - **Shed Receipt:** design iteration history, innovate proposals, quality gate round details → design doc on disk captures the outcome
-2. Emit shed statement: "Phase 1 context shed. Design doc and acceptance tests are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
+   - **Shed Receipt:** design iteration history, innovation proposals, quality gate round details → design doc on disk captures the outcome
+2. Emit shed statement: "Phase 1 context shed. Design doc and acceptance tests are on disk. Design iteration history, innovation proposals, and gate round details are not carried forward."
 3. Update `## Compression State` in `<build-scratch>/pipeline-status.md` with manifest contents.
 4. Do NOT emit a Compression State Block (manifest replaces it at this boundary).
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 1 -> Phase 2 (Plan)","detail":{"skill":"build","from":"1","to":"2"}}`.
 
 ## Phase 2: Plan (Autonomous)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, innovate, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, design innovation pass, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
 
 ### Step 1: Write the Plan
 
@@ -787,10 +792,10 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
 **After the plan passes review:**
 
-**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching innovate and quality-gate on the plan.
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching design's innovation pass and quality-gate on the plan.
 
 1. **Write Phase 2 IN_PROGRESS** to the gate ledger.
-2. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
+2. **Innovation:** Run `crucible:design` in innovation-pass mode (`design/innovation.md`) on the approved plan. Plan Writer incorporates the proposal into the plan.
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: plan`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
 4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 
@@ -808,15 +813,15 @@ Write a handoff manifest:
    - **Inputs for Phase 3:** plan path, design doc path, acceptance test paths (or contract tests), contract YAML path (if exists), baseline SHA (current HEAD), cartographer context paths (module files, conventions.md, landmines.md)
    - **Decisions Carried Forward:** accumulated decisions from Phases 1-2
    - **Active Constraints:** constraints affecting execution
-   - **Shed Receipt:** plan review iterations, innovate proposals, quality gate round history → plan on disk captures the outcome
-2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovate proposals, and gate details are not carried forward."
+   - **Shed Receipt:** plan review iterations, innovation proposals, quality gate round history → plan on disk captures the outcome
+2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovation proposals, and gate details are not carried forward."
 3. Update `## Compression State` in `<build-scratch>/pipeline-status.md` with manifest contents.
 4. Do NOT emit a Compression State Block.
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 2 -> Phase 3 (Execute)","detail":{"skill":"build","from":"2","to":"3"}}`.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, adversarial-tester, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
 
 ### Step 0: Load Module Context for Subagents
 
@@ -896,7 +901,7 @@ For each task (or wave of parallel tasks):
    - Use `./build-reviewer-prompt.md` template
 5. **Tier-aware review routing:** Read the task's `Review-Tier` from plan metadata.
    - **Tier 1:** Dispatch single-pass code reviewer (Sonnet). If Clean or Minor-only: task complete. If Critical/Important: dispatch implementer fix, then task complete. If Architectural Concern: escalate.
-   - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch adversarial tester (per existing logic). Task complete.
+   - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch Inquisitor per-task mode (per existing logic). Task complete.
    - **Tier 3:** Follow current full pipeline (no changes to existing flow).
 
 #### Contract-Aware Implementer Guidance
@@ -948,8 +953,8 @@ digraph review {
   "Pass 2: Test Quality Review" -> "Implementer fixes test findings";
   "Implementer fixes test findings" -> "Test Alignment Audit (crucible:test-coverage)";
   "Test Alignment Audit (crucible:test-coverage)" -> "Test Gap Writer";
-  "Test Gap Writer" -> "Adversarial Tester";
-  "Adversarial Tester" -> "Task complete";
+  "Test Gap Writer" -> "Inquisitor per-task mode";
+  "Inquisitor per-task mode" -> "Task complete";
 }
 ```
 
@@ -971,7 +976,7 @@ Each task's `Review-Tier` (from the plan) determines which review steps execute.
 | Implementer fixes (test) | SKIP | If critical findings only | If findings |
 | Test alignment audit | SKIP | SKIP | Yes |
 | Test gap writer | SKIP | SKIP | Yes |
-| Adversarial tester | SKIP | Yes | Yes |
+| Inquisitor per-task mode | SKIP | Yes | Yes |
 
 **Tier 1 "single pass" code review:** Dispatch one reviewer. If findings are Clean, task is complete. If findings include Critical or Important issues, dispatch implementer to fix, then the task is complete (no re-review). If findings include an Architectural Concern, escalate as normal.
 
@@ -1032,12 +1037,12 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 4. The test gap writer reports per-test PASS/FAIL results (see prompt template for report format)
 5. Commits new tests: `test: fill coverage gaps for task N`
 
-**If all tests PASS:** Continue to adversarial tester.
+**If all tests PASS:** Continue to Inquisitor per-task mode.
 
 **If some tests FAIL** (gaps reveal genuinely missing implementation):
 1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, and the gap descriptions from the reviewer
 2. Implementer fixes the missing behavior, then re-runs ALL test gap writer tests (not just the failures — catches regressions from the fix)
-3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to adversarial tester
+3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to Inquisitor per-task mode
 4. If tests still fail after one fix attempt: **escalate to user** with:
    - Which coverage gaps the reviewer identified
    - Which tests the gap writer wrote (per-test PASS/FAIL)
@@ -1046,16 +1051,16 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 
 **Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
 
-#### Adversarial Tester
+#### Inquisitor Per-Task Mode
 
-After the test gap writer completes (or is skipped), dispatch an **Adversarial Tester** (Opus) using `skills/adversarial-tester/break-it-prompt.md`:
+After the test gap writer completes (or is skipped), dispatch **Inquisitor per-task mode** (Opus) using `skills/inquisitor/break-it-prompt.md`:
 
 1. Input: Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`), project test conventions, cartographer module context (if available)
-2. The adversarial tester identifies the top 5 most likely failure modes, writes one test per mode, and runs them
+2. Inquisitor per-task mode ranks failure modes by likelihood and impact, then writes and runs up to 5 tests (fewer when fewer candidates are meaningful).
 3. Outcome handling:
    - **All tests PASS:** Implementation is robust. Log results and proceed to task complete.
    - **Some tests FAIL:** Real weaknesses found. Dispatch implementer to fix. Re-run all tests (including adversarial). If pass → task complete. If fail → one more fix attempt, then escalate to user.
-   - **Tests ERROR (won't compile):** Adversarial tester mistake. Discard broken tests, log, proceed to task complete.
+   - **Tests ERROR (won't compile):** Inquisitor per-task mode mistake. Discard broken tests, log, proceed to task complete.
 4. Quality bypass prevention: If the implementer's fix touches more than 3 files, route through a lightweight code review before completing.
 5. Commit adversarial tests: `test: adversarial tests for task N`
 
@@ -1112,13 +1117,13 @@ When the executor encounters a task marked `atomic: true`:
 
 **Key difference from feature mode:** Feature mode does RED-GREEN-REFACTOR. Refactor mode for atomic steps does **GREEN-GREEN** — tests are green before, tests must be green after. No RED phase because no new behavior is being added.
 
-After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and adversarial tester (unless skipped per restructuring-only annotation below).
+After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and Inquisitor per-task mode (unless skipped per restructuring-only annotation below).
 
 **Non-atomic refactoring tasks** follow normal execution — structural changes that don't break intermediate states (e.g., extracting a private method, adding a module nothing imports yet). These use standard TDD if they introduce new abstractions, or GREEN-GREEN if they are pure restructuring.
 
 ##### Phase 3 Adaptations for Existing Steps
 
-- **Adversarial tester:** The planner annotates each task with `restructuring-only: true/false`. If `restructuring-only: true`, adversarial testing is skipped. Tasks with `restructuring-only: false` still get adversarial testing. When in doubt, default to `false`.
+- **Inquisitor per-task mode:** The planner annotates each task with `restructuring-only: true/false`. If `restructuring-only: true`, per-task adversarial testing is skipped. Tasks with `restructuring-only: false` still get it. When in doubt, default to `false`.
   - `restructuring-only: true` examples: renames where all call sites are mechanically updated, file moves with updated paths, extract-method where the extracted method is private and preserves the original call signature
   - `restructuring-only: false` examples: extract-class where callers must change call targets, splitting a module where consumers must update imports, any change where the consumer-facing API surface shifts
 - **De-sloppify cleanup:** Gains a new removal category: **dead compatibility shims.** After a refactoring task, look for leftover adapter code, re-export aliases, or compatibility layers introduced during migration but no longer referenced. Detection scope: code added after the baseline commit SHA that re-exports, aliases, or wraps symbols under old names, AND where no code outside the refactoring's changed files references the old names. **String-based references:** When the target was registered by name in a configuration system, flag the shim as UNCERTAIN and defer to the reviewer rather than removing it.
@@ -1221,7 +1226,7 @@ After all tasks complete:
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
-2.5. **Guarantee a fully-clean working tree before the review gate.** The Step-1/Step-2 test runs sit between the Phase-3 commit and the review gate and can leave residue — not only tracked modifications but also untracked artifacts. Run `git status --porcelain` and drive the tree to **fully empty** (tracked **and** untracked) by **producing** that clean state, not merely checking for one. Because `git status --porcelain` never lists `.gitignore`d paths, properly-ignored caches/coverage never appear, so the residual to classify is small and author-actionable:
+2.5. **Guarantee a fully-clean working tree before the review gate.** The Step-1/Step-2 test runs sit between the Phase-3 commit and the review gate and can leave residue — not only tracked modifications but also untracked artifacts. Run `git status --porcelain` and drive the tree to **fully empty** (tracked **and** untracked) by **producing** that clean state, not merely checking for one. `docs/memory.md` is the sole exception: it is committed only at end-of-session and excluded from this mid-session check. Because `git status --porcelain` never lists `.gitignore`d paths, properly-ignored caches/coverage never appear, so the residual to classify is small and author-actionable:
    - **Tracked modifications** (a passing test regenerated a golden file or updated a snapshot) → **commit** them: `git add -A && git commit -m "chore(build): commit test-regenerated artifacts before gate"`. This is normal output — committed, not flagged.
    - **Non-ignored new untracked files** → classify each: a legitimately-generated file that belongs in the repo (a golden/fixture) → **commit** it (fold into the same commit); an incidental artifact that should never be tracked (coverage output, a cache) → **gitignore** it (a test-hygiene fix) so it stops appearing.
    - There is **NO bare "assert-clean" branch.** An assert-clean would spuriously halt a *healthy* build whenever a passing test regenerates a golden file, and untracked test residue would make the review gate REFUSE inside a healthy build. build must **produce** the clean tree, not merely check for one.
@@ -1278,7 +1283,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Estimated input tokens (sum of `input_chars` from manifest / 4)
 - Estimated output tokens (sum of `output_chars` from manifest / 4)
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the pipeline completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count comparable dispatches grouped by `model_profile`; report raw `model_tier` separately when useful. Include these in the pipeline completion report alongside existing metrics.
 
 **Gate tracking verification:** Before compiling the pipeline summary (Phase 4 Step 9), verify that all three gate categories (design, plan, implementation) show round count >= 1 with clean final rounds (0 Fatal, 0 Significant). If any gate was skipped with explicit user approval, record it as `USER_SKIP` in the metrics. A zero without user approval indicates a gate was dropped — report this in the summary.
 
@@ -1340,11 +1345,11 @@ Decision types to capture:
 - `./contract-test-writer-prompt.md` — Phase 1 refactor-mode contract test generation
 - `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
-Red-team, innovate, adversarial tester, and inquisitor prompts live in their respective skills:
+Red-team, design innovation, and inquisitor prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
-- `crucible:innovate` — `skills/innovate/innovate-prompt.md`
-- `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
-- `crucible:inquisitor` — `skills/inquisitor/inquisitor-prompt.md`
+- `crucible:design` innovation pass — `skills/design/innovation-prompt.md`
+- `crucible:inquisitor` per-task mode — `skills/inquisitor/break-it-prompt.md`
+- `crucible:inquisitor` full-feature mode — `skills/inquisitor/inquisitor-prompt.md`
 
 ## Quality Gate Orchestration
 
@@ -1401,8 +1406,8 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:finish** — Phase 4
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
 - **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
-- **crucible:innovate** — Creative enhancement before quality gates
-- **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, inside the warden gate)
+- **crucible:design** innovation pass — Creative enhancement before quality gates
+- **crucible:inquisitor** — Per-task adversarial testing (Phase 3) and full-feature cross-component testing (Phase 4, inside the warden gate)
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
 **Recommended sub-skills:**
@@ -1410,7 +1415,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 
-**Recon/assay context:** Inherits recon/assay context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
+**Recon/approach-evaluation context:** Inherits recon/approach-evaluation context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
 
 **Phase 3 sub-skills (dispatched per-task):**
 - **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)

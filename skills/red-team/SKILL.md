@@ -269,6 +269,6 @@ Append external perspectives after the host Devil's Advocate findings in the out
 - **crucible:finish** — before presenting options (full loop mode, directly, not via quality-gate)
 
 **Pairs with:**
-- **crucible:innovate** — innovate runs before red-team at each gate
+- **crucible:design** innovation pass (`design/innovation.md`) — runs before red-team at each gate
 
 See prompt template: `red-team/red-team-prompt.md`

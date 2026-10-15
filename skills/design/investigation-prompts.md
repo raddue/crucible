@@ -23,7 +23,7 @@ Agent tool (subagent_type: general-purpose):
 
     ## Recon Open Questions (Unknowns to Resolve)
 
-    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your research, include the answer. These feed into assay's confidence scoring.]
+    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your research, include the answer. These feed into approach evaluator's confidence scoring.]
 
     ## Project Context
 
@@ -156,7 +156,7 @@ Agent tool (subagent_type: general-purpose):
     [Summary of impact analysis]
 
     **Assay Evaluation (if available):**
-    [Summary of assay recommendation, constraint fit, and kill criteria — or "Not dispatched (Quick scan dimension)"]
+    [Summary of approach-evaluation recommendation, constraint fit, and kill criteria — or "Not dispatched (Quick scan dimension)"]
 
     ## The Recommendation
 

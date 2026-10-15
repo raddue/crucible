@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Phase Planner agent in Phase 3.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (model: opus):
   description: "Decompose migration into phases: [MIGRATION_DESCRIPTION]"

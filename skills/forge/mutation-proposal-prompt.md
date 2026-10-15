@@ -5,6 +5,8 @@
 
 Dispatch an Opus subagent when 10+ retrospectives have accumulated and recurring patterns emerge. This produces proposals for human review — it NEVER directly modifies skills.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Forge mutation analysis — propose skill improvements"

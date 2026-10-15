@@ -5,6 +5,8 @@
 
 Use this template when dispatching the test fix agent after the audit agent reports findings in categories 1-2 (tests to update, tests to delete). The orchestrator fills in the bracketed sections.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Fix test alignment issues found by audit"

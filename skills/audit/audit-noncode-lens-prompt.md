@@ -5,6 +5,8 @@
 
 Use this template when dispatching any non-code analysis lens. The orchestrator fills in the template placeholders with lens-specific configuration from SKILL.md's Artifact Types section.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Audit {{LENS_NAME}} lens ({{ARTIFACT_TYPE}})"
