@@ -70,7 +70,7 @@ async def test_call_tool_success(mock_dispatch, mock_aggregate):
     server_mod._state = ServerState(
         config=_make_config(),
         providers=["mock_provider"],
-        project_dir="/tmp/test-project",
+        project_dir=str(Path(__file__).resolve().parents[3]),
     )
 
     mock_dispatch.return_value = [
