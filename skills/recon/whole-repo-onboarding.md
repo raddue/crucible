@@ -105,7 +105,7 @@ Dispatch parallel Explore subagents, one per partition:
 Agent tool (subagent_type: Explore, model: sonnet)
 ```
 
-Use the prompt template at `./partition-explorer-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/partition-explorer-prompt.md`. Fill in the template variables:
 - `[partition name]` — the partition directory name
 - `[Partition root directory path]` — absolute path to the partition
 - `[Source file extensions detected in this partition]` — which extensions were found
@@ -121,7 +121,7 @@ Dispatch the Init Recorder to merge all partition reports into cartographer form
 Task tool (general-purpose, model: sonnet)
 ```
 
-Use the prompt template at `./init-recorder-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/init-recorder-prompt.md`. Fill in the template variables:
 - `[N]` — number of partition reports
 - `[File paths to partition exploration reports]` — paths to temp files from Step 3
 - `[Existing cartographer data]` — read and paste existing `memory/cartographer/map.md`, `conventions.md`, `landmines.md` if they exist, or say "No prior cartographer data."
@@ -250,7 +250,7 @@ Dispatch parallel Explore subagents, one per confirmed neighbor:
 Agent tool (subagent_type: Explore, model: sonnet)
 ```
 
-Use the prompt template at `./neighbor-scanner-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/neighbor-scanner-prompt.md`. Fill in the template variables:
 - `[repo name]` — the neighbor repository name
 - `[Neighbor repo path]` — path to the neighbor
 - `[Connection context]` — how it was discovered (manifest reference details)
@@ -276,7 +276,7 @@ Dispatch the Topology Recorder to synthesize neighbor scans:
 Task tool (general-purpose, model: sonnet)
 ```
 
-Use the prompt template at `./topology-recorder-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/topology-recorder-prompt.md`. Fill in the template variables:
 - `[N]` — number of neighbor scans
 - `[File paths to neighbor scan results]` — paths to temp files from Step 4
 - `[Current repo name, ecosystem, purpose]` — from Tier 1
@@ -324,10 +324,10 @@ The orchestrator appends accepted content to the project's CLAUDE.md (creating t
 
 | Agent | Model | Dispatch | Prompt Template |
 |-------|-------|----------|-----------------|
-| Partition Explorer | Sonnet | Agent tool (Explore) | `./partition-explorer-prompt.md` |
-| Init Recorder | Sonnet | Task tool (general-purpose) | `./init-recorder-prompt.md` |
-| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./neighbor-scanner-prompt.md` |
-| Topology Recorder | Sonnet | Task tool (general-purpose) | `./topology-recorder-prompt.md` |
+| Partition Explorer | Sonnet | Agent tool (Explore) | `./project-init/partition-explorer-prompt.md` |
+| Init Recorder | Sonnet | Task tool (general-purpose) | `./project-init/init-recorder-prompt.md` |
+| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./project-init/neighbor-scanner-prompt.md` |
+| Topology Recorder | Sonnet | Task tool (general-purpose) | `./project-init/topology-recorder-prompt.md` |
 
 Explorers are dispatched via the Agent tool with the specified `subagent_type`. Recorders are dispatched via the Task tool (general-purpose). Use the prompt templates verbatim, filling in only the bracketed template variables.
 
@@ -430,7 +430,7 @@ Whole-repo onboarding is itself a `/recon` mode and bootstraps the persistent ma
 
 ## Prompt Templates
 
-- `./partition-explorer-prompt.md` — Structured exploration per partition for Tier 1
-- `./init-recorder-prompt.md` — Multi-source fan-in recorder for Tier 1
-- `./neighbor-scanner-prompt.md` — Lightweight neighbor exploration for Tier 2
-- `./topology-recorder-prompt.md` — Topology file writer for Tier 2
+- `./project-init/partition-explorer-prompt.md` — Structured exploration per partition for Tier 1
+- `./project-init/init-recorder-prompt.md` — Multi-source fan-in recorder for Tier 1
+- `./project-init/neighbor-scanner-prompt.md` — Lightweight neighbor exploration for Tier 2
+- `./project-init/topology-recorder-prompt.md` — Topology file writer for Tier 2

@@ -1,6 +1,6 @@
 ---
 name: recon
-description: "Investigate unfamiliar code before a task, onboard to a whole repository and local neighbors, consult or maintain a persistent codebase map, or discover architectural friction and refactor candidates. Use for codebase investigation, first-time repository mapping, codebase maps, architecture friction, refactor discovery, project initialization, and “what should I refactor?” requests; search for cartographer and prospector tasks to route them to the matching recon mode."
+description: "Investigate unfamiliar code before a task, onboard to a whole repository and local neighbors, consult or maintain a persistent codebase map, or discover architectural friction and refactor candidates. Use for codebase investigation, first-time repository onboarding, project init, cartographer maps, prospector discovery, architecture friction, refactor discovery, and “what should I refactor?” requests; route each to the matching recon mode."
 ---
 
 # Recon

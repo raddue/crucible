@@ -152,7 +152,7 @@ At run start, write `scratch/<run-id>/invocation.md` containing:
 
 ### The Organic Explorer
 
-Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./explorer-prompt.md`
+Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./prospector/explorer-prompt.md`
 
 The explorer receives:
 - Cartographer data (if available) — module map, conventions, landmines
@@ -224,7 +224,7 @@ After user approves exploration results, trace the causal origin of each approve
 
 ### Genealogist Agents
 
-Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
+Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./prospector/genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
 
 ### Enhanced Output: Change Metrics
 
@@ -271,7 +271,7 @@ Root cause agents are dispatched only for **High-severity** friction points. In 
 
 ### Agent Spec
 
-Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./root-cause-prompt.md`.
+Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./prospector/root-cause-prompt.md`.
 
 Each agent receives:
 - Friction point description and file locations
@@ -334,7 +334,7 @@ Before writing the draft, the orchestrator also checks whether any Medium/Low-se
 
 ## Phase 3: Structured Analysis (Enhanced)
 
-The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
+The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./prospector/analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
 
 ### Trajectory Context Loading
 
@@ -523,7 +523,7 @@ The decision journal must log which constraint set was selected and which overri
 
 ### Design Agent Dispatch
 
-Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./design-competitor-prompt.md`.
+Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./prospector/design-competitor-prompt.md`.
 
 Each agent receives (subject to 2000-line hard cap):
 - Technical brief from the analysis output (interface surface, caller patterns, structural summary)
@@ -575,13 +575,14 @@ User selects a design, accepts the recommendation, or requests a hybrid. Orchest
 
 ### Design Proposal → Design Skill
 
-The competing redesign proposals are discovery output, not a completed design. Return the selected proposal and supporting friction analysis as input to `/design`; `/design` owns creating and quality-gating the design doc. Do not write design content directly from this mode. Preserve friction genealogy, alternatives, and implementation recommendations in the handoff to `/design`.
+The competing redesign proposals are discovery output, not a completed design. Return a concise handoff to `/design` containing:
 
-- **Friction analysis** — what was found and why it matters
-- **Friction genealogy** — causal origin, key commits, how the friction developed (if genealogy data available)
-- **Chosen design** — interface, usage, hidden complexity, dependency strategy, testing strategy
-- **Competing designs summary** — what was considered and why the winner was chosen
-- **Implementation recommendations** — durable architectural guidance not coupled to current file paths
+- **Friction evidence:** affected paths, impact, frequency, and why the issue matters.
+- **Genealogy and root cause:** causal origin, relevant commits, verified root-cause hypothesis, and unresolved uncertainty.
+- **Chosen proposal:** selected approach and rationale, while preserving the alternatives and reasons rejected.
+- **Constraints for design:** interface boundaries, dependencies, hidden complexity, testing considerations, and implementation recommendations.
+
+Do not write a design document here. `/design` owns design decisions and quality-gated design artifacts.
 
 ### Trajectory Snapshot
 
@@ -717,17 +718,17 @@ After context compaction:
 
 | Agent | Model | Dispatch | Prompt Template |
 |-------|-------|----------|-----------------|
-| Organic Explorer | Opus | Agent tool (Explore) | `./explorer-prompt.md` |
-| Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./genealogist-prompt.md` |
-| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./root-cause-prompt.md` |
-| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./analysis-prompt.md` |
-| Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./design-competitor-prompt.md` |
+| Organic Explorer | Opus | Agent tool (Explore) | `./prospector/explorer-prompt.md` |
+| Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./prospector/genealogist-prompt.md` |
+| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./prospector/root-cause-prompt.md` |
+| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./prospector/analysis-prompt.md` |
+| Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./prospector/design-competitor-prompt.md` |
 
 ## Prompt Templates
 
-- `./explorer-prompt.md` — Phase 1 organic exploration dispatch
-- `./genealogist-prompt.md` — Phase 1.5 git archaeology, causal origin classification, and change metrics
-- `./root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
-- `./analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
-- `./design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
-- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria
+- `./prospector/explorer-prompt.md` — Phase 1 organic exploration dispatch
+- `./prospector/genealogist-prompt.md` — Phase 1.5 git archaeology, causal origin classification, and change metrics
+- `./prospector/root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
+- `./prospector/analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
+- `./prospector/design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
+- `./prospector/REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria

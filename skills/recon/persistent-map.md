@@ -94,7 +94,7 @@ After any significant exploration — the agent read 5+ files, traced a call cha
 
 ### The Process
 
-1. Dispatch a **Cartographer Recorder** subagent (Sonnet) using `./recorder-prompt.md`
+1. Dispatch a **Cartographer Recorder** subagent (Sonnet) using `./cartographer/recorder-prompt.md`
 2. Provide: list of files explored, what was learned, any surprises or gotchas discovered
 3. Subagent returns structured updates for the relevant files
 4. Write or update the appropriate files:
@@ -498,4 +498,4 @@ maintains no call graph and should not replicate one.
 
 ## Prompt Templates
 
-- `./recorder-prompt.md` — Post-exploration discovery recorder dispatch
+- `./cartographer/recorder-prompt.md` — Post-exploration discovery recorder dispatch
