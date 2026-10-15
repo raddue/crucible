@@ -283,7 +283,7 @@ def selftest() -> int:
     check(find_links(["- <!-- CANONICAL: shared/x.md -->"]) == [(1, "shared/x.md")],
           "case5 list matched")
 
-    # Case 6 — preamble-before-CANONICAL matched (the merge-pr/SKILL.md:210 shape).
+    # Case 6 — preamble-before-CANONICAL matched (the finish/merge.md:210 shape).
     check(
         find_links([
             "<!-- Compass emit — orchestrator only (D14). CANONICAL: shared/compass-protocol.md -->"

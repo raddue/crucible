@@ -39,7 +39,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(_HERE, ".."))
 
 # Production files the design's invariants range over (C-d/C-m scope) —
-# grudge_query.py, grudge_append.py, the hook, every skills/*/SKILL.md.
+# grudge_query.py, grudge_append.py, the hook, and all skill instruction/reference files.
 PY_PROD = ("scripts/grudge_query.py", "scripts/grudge_append.py")
 HOOK = ("hooks/grudge-resolution-guard.sh",)
 SELF = os.path.basename(__file__)
@@ -138,8 +138,9 @@ def _scan(files):
 
 
 def _skills_md():
-    return sorted(p for p in glob.glob(os.path.join(ROOT, "skills", "*", "SKILL.md"))
-                  if os.path.isfile(p))
+    paths = glob.glob(os.path.join(ROOT, "skills", "*", "SKILL.md"))
+    paths.extend(glob.glob(os.path.join(ROOT, "skills", "*", "*.md")))
+    return sorted(p for p in paths if os.path.isfile(p))
 
 
 def main(argv):
@@ -152,6 +153,11 @@ def main(argv):
     for p in _skills_md():
         rel = os.path.relpath(p, ROOT)
         real[rel] = open(p, "r", encoding="utf-8", errors="replace").read()
+    merge_ref = os.path.join(ROOT, "skills", "finish", "merge.md")
+    if os.path.isfile(merge_ref):
+        real[os.path.relpath(merge_ref, ROOT)] = open(
+            merge_ref, "r", encoding="utf-8", errors="replace"
+        ).read()
 
     errors = _scan(real)
     if argv[0:1] == ["--selftest"]:
@@ -192,7 +198,7 @@ _PASS = {
         "}\n"
         '_write_state_files() { :; }\n'
     ),
-    "skills/merge-pr/SKILL.md": (
+    "skills/finish/merge.md": (
         '  --files="<changed file 1>" --files="<changed file 2>" \\\n'
     ),
     "skills/debugging/SKILL.md": '  --files="<path 1>" --files="<path 2>"\n',

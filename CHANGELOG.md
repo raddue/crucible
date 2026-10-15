@@ -367,7 +367,7 @@ into measurable calibration scores.
 
 - **`/compass`** — persistent per-repo arc-state in `docs/compass.md` (current
   arc, last meaningful commit, open loops, next move, don't-forget items).
-  Auto-maintained by build, merge-pr, and finish; read by getting-started.
+  Auto-maintained by build and finish; read by getting-started.
   Tickets #273, #286, #308.
 - **`/ledger`** — weekly calibration-ledger renderer: the honest "Crucible
   caught N silent bugs" headline, verdict breakdown, per-skill severity rates,
