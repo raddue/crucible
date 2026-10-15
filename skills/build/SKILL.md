@@ -114,7 +114,7 @@ Every status update must include:
 **Examples of GOOD narration:**
 > "Phase 3, Task 4 complete. Reviewer found 2 Important issues — dispatching implementer to fix. Tasks: [1] ✓ [2] ✓ [3] ✓ [4] fixing [5-8] pending"
 
-> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching innovate on the plan."
+> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching design's innovation pass on the plan."
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
@@ -135,7 +135,7 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 | "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A fresh verification round is required. | The gate is only complete after a mode-clean fresh reverify: `0 Fatal` in default `standard`, or `0 Fatal, 0 Significant` when the caller passes `mode: full`. A truly clean first round (`0 Fatal / 0 Significant`) may use normal candidate-clean handling; first-round `0 Fatal / >0 Significant` is actionable. Standard residual Significant/Minor findings must be disclosed. |
 | "The user said 'looks good' / 'move on' — that's approval to skip the gate." | General feedback is not skip approval. Only an unambiguous instruction that explicitly references the gate counts. | Require literal `SKIP GATE` (or equivalent explicit phrase) before recording `Status: SKIPPED`. |
 | "I can fix this one finding myself instead of dispatching a fix agent." | Orchestrator-applied fixes conflate coordination with remediation and bypass the fix journal. Every fix — even trivial — goes through a fix agent. | Orchestrator never edits the artifact directly; always dispatch the fix agent. |
-| "Innovate/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovate is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run innovate and red-team on every artifact, every time. |
+| "Design's innovation pass/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovation is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run design's innovation pass and red-team on every artifact, every time. |
 | "I'll just finish the task list and narrate at the end." | Long-running autonomous pipelines are invisible without narration. Silent runs prevent the user from intervening or learning. | Narrate before every dispatch and after every completion — non-negotiable. |
 
 ## Gate Ledger Protocol
@@ -615,7 +615,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
    - **Security review check:** If the contract contains `security_review` field, note it in the Phase 1→2 handoff manifest under Active Constraints: "Contract requires security review (`security_review.status: [required|recommended]`) — siege will be evaluated in Phase 4 Step 5.5." This ensures the directive survives phase handoffs and compaction recovery.
    - Quality-gate the existing design doc with staleness context: "This design doc is pre-existing from /spec and may be stale — verify against current codebase state before proceeding"
    - **Staleness rejection:** If the quality gate finds that the design doc references files, interfaces, or modules that no longer exist in the codebase, reject the doc as fundamentally stale. Fall back to running Phase 1 interactively. Inform user: "Pre-existing design doc for #NNN is fundamentally stale (references [specific items] that no longer exist). Running interactive design instead."
-   - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + innovate + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
+   - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + design's innovation pass + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
    - If quality gate fails (non-staleness issues): fix or escalate
    - Proceed to Phase 3 when the plan passes review
 
@@ -638,15 +638,15 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, innovate, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, design's innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
 ### Step 2: Innovate and Red-Team the Design
 
 After the user approves the design and before starting Phase 2:
 
-**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching innovate and quality-gate on the design doc.
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching design's innovation pass and quality-gate on the design doc.
 
-1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
+1. **Innovation:** Dispatch `crucible:design` in innovation-pass mode (`design/innovation.md`) on the design doc. Plan Writer incorporates the proposal. If it changes the API Surface, Invariants, or integration points, re-extract the contract from the revised design and obtain user approval of the changed contract before the quality gate and handoff.
 2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: design`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
@@ -746,15 +746,15 @@ Before dispatching the Plan Writer, verify the gate ledger and write a handoff m
    - **Inputs for Phase 2:** design doc path, acceptance test paths (or contract tests in refactor mode), conventions path (from cartographer, if loaded)
    - **Decisions Carried Forward:** accumulated decisions from Phase 1
    - **Active Constraints:** constraints affecting planning
-   - **Shed Receipt:** design iteration history, innovate proposals, quality gate round details → design doc on disk captures the outcome
-2. Emit shed statement: "Phase 1 context shed. Design doc and acceptance tests are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
+   - **Shed Receipt:** design iteration history, innovation proposals, quality gate round details → design doc on disk captures the outcome
+2. Emit shed statement: "Phase 1 context shed. Design doc and acceptance tests are on disk. Design iteration history, innovation proposals, and gate round details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block (manifest replaces it at this boundary).
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 1 -> Phase 2 (Plan)","detail":{"skill":"build","from":"1","to":"2"}}`.
 
 ## Phase 2: Plan (Autonomous)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, innovate, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, design innovation pass, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
 
 ### Step 1: Write the Plan
 
@@ -794,10 +794,10 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
 **After the plan passes review:**
 
-**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching innovate and quality-gate on the plan.
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching design's innovation pass and quality-gate on the plan.
 
 1. **Write Phase 2 IN_PROGRESS** to the gate ledger.
-2. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
+2. **Innovation:** Run `crucible:design` in innovation-pass mode (`design/innovation.md`) on the approved plan. Plan Writer incorporates the proposal into the plan.
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: plan`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
 4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 
@@ -815,8 +815,8 @@ Write a handoff manifest:
    - **Inputs for Phase 3:** plan path, design doc path, acceptance test paths (or contract tests), contract YAML path (if exists), baseline SHA (current HEAD), cartographer context paths (module files, conventions.md, landmines.md)
    - **Decisions Carried Forward:** accumulated decisions from Phases 1-2
    - **Active Constraints:** constraints affecting execution
-   - **Shed Receipt:** plan review iterations, innovate proposals, quality gate round history → plan on disk captures the outcome
-2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovate proposals, and gate details are not carried forward."
+   - **Shed Receipt:** plan review iterations, innovation proposals, quality gate round history → plan on disk captures the outcome
+2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovation proposals, and gate details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block.
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 2 -> Phase 3 (Execute)","detail":{"skill":"build","from":"2","to":"3"}}`.
@@ -1347,9 +1347,9 @@ Decision types to capture:
 - `./contract-test-writer-prompt.md` — Phase 1 refactor-mode contract test generation
 - `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
-Red-team, innovate, adversarial tester, and inquisitor prompts live in their respective skills:
+Red-team, design innovation, adversarial tester, and inquisitor prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
-- `crucible:innovate` — `skills/innovate/innovate-prompt.md`
+- `crucible:design` innovation pass — `skills/design/innovation-prompt.md`
 - `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
 - `crucible:inquisitor` — `skills/inquisitor/inquisitor-prompt.md`
 
@@ -1408,7 +1408,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:finish** — Phase 4
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
 - **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
-- **crucible:innovate** — Creative enhancement before quality gates
+- **crucible:design** innovation pass — Creative enhancement before quality gates
 - **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, inside the warden gate)
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
@@ -1417,7 +1417,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 
-**Recon/assay context:** Inherits recon/assay context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
+**Recon/approach-evaluation context:** Inherits recon/approach-evaluation context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
 
 **Phase 3 sub-skills (dispatched per-task):**
 - **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)

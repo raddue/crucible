@@ -74,6 +74,134 @@
         "Design presentation is broken into sections with opportunity for user feedback between sections",
         "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy"
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "Use design's innovation pass on this finalized design doc:\n\n## Design: Batch Invoice Processing\n\n**Context:** Accounting team manually processes ~200 invoices/day. We're building automation.\n\n**Architecture:**\n- Upload CSV of invoices via admin UI\n- Backend parses CSV, validates each row against schema\n- Valid invoices are created in the database\n- Invalid rows are collected and returned as an error report\n- Invoices in 'pending' status are sent to the payment processor (Stripe) in a nightly batch job\n\n**Components:**\n- `POST /api/invoices/upload` — accepts CSV, returns validation report\n- `InvoiceParser` — CSV parsing and schema validation\n- `InvoiceBatcher` — nightly cron job that processes pending invoices via Stripe\n- PostgreSQL tables: `invoices`, `invoice_errors`, `payment_results`\n\n**Constraints:** Team of 2, 6-week timeline. Node.js/Express/PostgreSQL stack.\n\n**What's been decided:**\n- CSV format: amount, vendor_email, due_date, description, po_number\n- Validation: amount > 0, valid email, due_date in future, PO number matches pattern\n- Nightly batch at 2 AM UTC\n- Stripe payment intents for each invoice",
+      "expected_output": "Innovation should propose something that addresses a real gap in the design. Strong candidates: idempotency handling (what if the same CSV is uploaded twice?), a progress/status tracking mechanism for the batch job, or a webhook/notification when the batch completes. Should NOT propose scope-expanding features like a full dashboard or ML-based categorization.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "The proposed addition addresses a genuine gap or risk in the design — not cosmetic",
+        "Proposal includes a 'why this over alternatives' comparison with at least one runner-up",
+        "Proposal states the expected impact (what it enables or what risk it mitigates)",
+        "Proposal states the cost in terms of added complexity or scope",
+        "Proposal fits within the stated constraints (2 engineers, 6 weeks, existing stack)",
+        "Proposal is specific enough to implement (not vague like 'add better error handling')"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Use design's innovation pass on this finalized implementation plan:\n\n## Plan: Add Search to Product Catalog\n\n**Task 1:** Add a `GET /api/products/search?q=term&category=X&minPrice=N&maxPrice=N` endpoint\n**Task 2:** Implement full-text search using PostgreSQL `tsvector` and `tsquery` on product name and description\n**Task 3:** Add indexed `category` and `price` columns for filtering\n**Task 4:** Add relevance ranking using `ts_rank()` and sort by relevance by default\n**Task 5:** Add pagination using our existing `paginate()` helper (cursor-based)\n**Task 6:** Update frontend search component to use the new endpoint with debounced input\n**Task 7:** Write integration tests for search with various query combinations\n**Task 8:** Add a search analytics table to log queries (for future relevance tuning)\n\n**Context:** E-commerce app, ~50k products, PostgreSQL 15, Express, React. Current 'search' is just a `LIKE '%term%'` query on product name. Team of 4, 2-sprint timeline (4 weeks).\n\n**Already decided:** PostgreSQL full-text search (not Elasticsearch — not enough scale to justify ops overhead). Cursor-based pagination reuses existing infrastructure.",
+      "expected_output": "This plan is already quite comprehensive. The innovation should find something genuinely missing — perhaps search suggestions/autocomplete (leveraging the tsvector already being built), handling typos/fuzzy matching (pg_trgm), or search result caching for popular queries. Should NOT expand into recommendations, A/B testing, or other large-scope additions that don't fit the timeline.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "The proposed addition builds on existing plan components rather than introducing entirely new infrastructure",
+        "Proposal fits within the 4-week timeline and doesn't require new infrastructure beyond PostgreSQL",
+        "Proposal includes why this addition over alternatives",
+        "Proposal states impact and cost",
+        "Proposal is genuinely useful — not obvious busywork that adds complexity without proportional value",
+        "Proposal does NOT expand scope dramatically (no Elasticsearch, no ML, no A/B testing)"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Use design's innovation pass on this finalized design doc:\n\n## Design: Rate Limiter Middleware\n\n**Context:** Our public API is getting hammered by a few aggressive clients. Need rate limiting.\n\n**Architecture:**\n- Express middleware using Redis for distributed counting\n- Sliding window algorithm (vs fixed window to prevent burst-at-boundary)\n- Rate limits: 100 req/min for authenticated users, 20 req/min for anonymous\n- Response headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset\n- 429 Too Many Requests response with Retry-After header when exceeded\n\n**Implementation:**\n- Redis MULTI/EXEC for atomic increment + expiry\n- Lua script for sliding window calculation\n- Per-IP for anonymous, per-API-key for authenticated\n- Configurable limits per endpoint group (e.g., /api/search gets lower limit)\n- Graceful degradation: if Redis is down, allow requests through (fail-open)\n\n**Constraints:** Solo developer, 1-week timeline. Must not add latency > 5ms per request.\n\n**Testing:** Unit tests with Redis mock, integration tests with Redis testcontainer, load test with k6.\n\n**Already decided:** Redis (already in stack for sessions), sliding window (not token bucket — simpler mental model for API consumers), fail-open (availability > protection).",
+      "expected_output": "This design is already thorough. The innovation should propose something that addresses a real edge case or operational need without breaking the 1-week solo constraint. Maybe: graduated response (slow-down before hard block), client notification/warning at 80% of limit, or monitoring/alerting for rate limit events. Should NOT propose complex additions like ML-based anomaly detection.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "Proposal fits within the 1-week solo developer constraint",
+        "Proposal does NOT add more than 5ms latency (respects the stated constraint)",
+        "Proposal addresses a gap that the existing design doesn't cover",
+        "Proposal includes why this over alternatives",
+        "Proposal states impact and cost",
+        "Proposal is proportionate to the project scope — not overengineering for a 1-week middleware"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Record a decision: we chose PostgreSQL over MySQL for our primary store, after seriously considering MySQL and SQLite. The choice is costly to reverse (data migration). We rejected MySQL because our partial-index requirement is unsupported, and SQLite because independent app processes need concurrent writers. Write the ADR.",
+      "expected_output": "A full ADR following the six-section template, with every alternative carrying a `Rejected:` reason written in timeless language.",
+      "files": [],
+      "expectations": [
+        "Creates `docs/decisions/NNNN-kebab-title.md` with a `# ADR-NNNN: <title>` H1",
+        "Status is `ACCEPTED` with a `## Date` in YYYY-MM-DD form",
+        "Records at least one seriously-considered alternative with a `Rejected:` line stating the specific reason, not 'worse'",
+        "Decision stated in imperative, timeless form",
+        "Does not invent a rejected alternative when none can be sourced"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Write an ADR for the decision to use 2-space indentation in the new module. The alternative (4-space) was not seriously evaluated.",
+      "expected_output": "The skill refuses, names the failed eligibility condition, and writes no file.",
+      "files": [],
+      "expectations": [
+        "Writes no ADR file",
+        "States which eligibility condition failed (no real seriously-considered alternative, and/or trivially reversible)",
+        "Treats refusal as a correct outcome, does not apologize or fabricate"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Record a decision in a repo that already has `docs/adr/ADR-004-Foo.rst` using headings Status/Context/Decision/Consequences only (no Alternatives Considered section), numbered sequentially.",
+      "expected_output": "Continues the existing scheme — `.rst`, the existing headings, the next number — and folds the rejected-alternatives content into Context.",
+      "files": [],
+      "expectations": [
+        "Does NOT create `docs/decisions/0001-*.md`",
+        "Uses the existing `.rst` extension and heading set",
+        "Continues the numbering (ADR-005, not restarting at 1)",
+        "The rejected alternatives and their reasons still appear, folded under an 'Alternatives considered:' lead-in in Context",
+        "Narrates the adaptation"
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "A new decision reverses an existing `ACCEPTED` ADR: we are moving the cache from Redis back to in-memory. Write the new ADR that supersedes the old one.",
+      "expected_output": "Both the new ADR and an edit to the old ADR's Status, with both links present.",
+      "files": [],
+      "expectations": [
+        "Writes a new ADR whose `## Status` carries a `Supersedes ADR-NNNN` line below its state token",
+        "Edits the old ADR's state token to `SUPERSEDED by ADR-MMMM`",
+        "Both edits happen together (no one-sided link)",
+        "Old ADR content (Decision/Context/Alternatives) is not rewritten"
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "`.adr-dir` points at `doc/adr` but the on-disk decision files live in `docs/decisions`. Record a new decision.",
+      "expected_output": "The skill surfaces the conflict and asks, without silently picking a location.",
+      "files": [],
+      "expectations": [
+        "Detects the disagreement between config and on-disk files",
+        "Asks the user which convention to follow rather than silently choosing",
+        "Does not write any ADR before the conflict is resolved"
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "A multi-dimension Crucible design doc (4-5 `### Dn` sections, each with a `Rejected — …` block, in-house format) reaches the design hook. Multiple dimensions pass eligibility.",
+      "expected_output": "At most one ADR — the highest-rank dimension by the D1 tiebreak — with the rest declined-by-cap by name.",
+      "files": [],
+      "expectations": [
+        "Writes at most one ADR",
+        "Picks the highest-rank dimension by the reversal-cost ordering (data migration > interface break > re-training > re-run)",
+        "Declines the rest by name, citing the cap, not an eligibility failure",
+        "Narrates the tiebreak when two dimensions fall in the same kind"
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "A design doc has two cap-eligible dimensions. Hook 1 already wrote one at design time; now the branch reaches finish with a diff that implements the second dimension.",
+      "expected_output": "Hook 2 writes the declined-by-cap dimension it now implements — two ADRs total across the whole build is the correct outcome, not a cap violation.",
+      "files": [],
+      "expectations": [
+        "Recognizes the design-time ADR via idempotence and does not duplicate it",
+        "Writes (or re-declines) the second dimension only because the diff implements it",
+        "Does not treat 'one ADR per hook firing' as a whole-build ceiling of one"
+      ]
     }
   ]
 }

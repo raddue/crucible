@@ -894,4 +894,4 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 
 **Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design), `/prospector` (organic exploration is different), `/project-init` (bootstraps cartographer, complementary purpose). See #147 for rationale.
 
-**Pairs with:** `/assay` (sequential — recon produces evidence, assay evaluates options)
+**Pairs with:** `/design` approach evaluation (sequential — recon produces evidence, design evaluates options)

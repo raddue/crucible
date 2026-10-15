@@ -35,7 +35,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # enforced by check()'s uncategorized + dangling-category guards).
 CATEGORIES: dict[str, list[str]] = {
     "Core Pipeline": [
-        "build", "spec", "design", "planning", "recon", "replay", "assay",
+        "build", "spec", "design", "planning", "recon", "replay",
     ],
     "Implementation": [
         "test-driven-development", "source-driven-development", "checkpoint",
@@ -44,13 +44,13 @@ CATEGORIES: dict[str, list[str]] = {
     "Quality & Audit": [
         "delve", "audit", "siege", "consensus", "prospector", "quality-gate",
         "red-team", "test-coverage", "temper", "review-feedback", "verify",
-        "finish", "innovate", "dependency-audit", "warden",
+        "finish", "dependency-audit", "warden",
     ],
     "Debugging": [
         "debugging",
     ],
     "Knowledge & Learning": [
-        "forge", "project-init", "grudge", "compass", "adr",
+        "forge", "project-init", "grudge", "compass",
     ],
     "Utilities": [
         "distill", "recall",
