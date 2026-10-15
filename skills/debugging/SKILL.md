@@ -171,9 +171,6 @@ approach is rejected.
 No semantic search (glob + regex only); no cross-**user** shared grudgebook
 (sanitized community grudges — v1.1 candidate); no `settings.json` hook.
 
-## Grudge regression oracle — read/write mechanics (#271)
-
-
 ## Overview
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
@@ -186,6 +183,9 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 **Violating the letter of this process is violating the spirit of debugging.**
 
 **Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
+
+
 
 ## Communication Requirement (Non-Negotiable)
 

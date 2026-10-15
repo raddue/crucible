@@ -196,7 +196,7 @@ _PASS = {
         '  --files="<changed file 1>" --files="<changed file 2>" \\\n'
     ),
     "skills/debugging/SKILL.md": '  --files="<path 1>" --files="<path 2>"\n',
-    "skills/grudge/SKILL.md": "  --files=src/a.py --files=src/b.py\n",
+    "skills/debugging/SKILL.md": "  --files=src/a.py --files=src/b.py\n",
 }
 
 _FAIL_EXPECT = [
@@ -209,7 +209,7 @@ _FAIL_EXPECT = [
      'subprocess.run(["python3", "--files", "a.py"])\n'),
     ("C-m space form", "hooks/grudge-resolution-guard.sh", "[C-m]",
      'python3 "$AP" --by-files "$csv"  # two tokens\n'),
-    ("C-d comma value", "skills/grudge/SKILL.md", "[C-d]",
+    ("C-d comma value", "skills/debugging/SKILL.md", "[C-d]", 
      '  --files "src/a.py,src/b.py" \\\n'),
     ("C-o unguarded declare", "hooks/grudge-resolution-guard.sh", "[C-o]",
      "declare -a \"F_$badsha\"\n"),

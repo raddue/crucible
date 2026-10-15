@@ -213,7 +213,7 @@ GIT_COMMON_ABS="$(cd "$SESSION_ROOT" 2>/dev/null && realpath "$(_git . rev-parse
 STORE_REPO_ROOT="$(dirname "$GIT_COMMON_ABS" 2>/dev/null)"
 SHARED_KEY="$(basename "$STORE_REPO_ROOT" 2>/dev/null)"
 if [ ! -d "$GRUDGE_ROOT/$WORKTREE_KEY" ] && [ ! -d "$GRUDGE_ROOT/$SHARED_KEY" ]; then
-  echo "grudge-resolution-guard: no grudge store found for this repo at $GRUDGE_ROOT (checked this worktree and the shared clone root) — see skills/grudge/SKILL.md to start one" >&2
+  echo "grudge-resolution-guard: no grudge store found for this repo at $GRUDGE_ROOT (checked this worktree and the shared clone root) — see skills/debugging/SKILL.md Grudge regression oracle section to start one" >&2
   exit 0
 fi
 
@@ -1035,7 +1035,7 @@ _worktree_fallback() {
   # exactly inside a linked worktree — and that is where the records land:
   # `scripts/grudge_append.py`'s `resolve_repo()` keys a record by
   # `git rev-parse --show-toplevel`, i.e. the WORKTREE, whenever no
-  # `--repo`/`--repo-root` is given, which is how both `skills/grudge/SKILL.md`
+  # `--repo`/`--repo-root` is given, which is how `skills/debugging/SKILL.md`
   # write mode and `skills/merge-pr/SKILL.md` Step 7.5 call it. So a correctly
   # recorded grudge was invisible to step 13 and the candidate blocked anyway,
   # to MAX_BLOCKS and then to an unenforced give-up. Querying the identities
