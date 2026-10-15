@@ -1,5 +1,5 @@
 ---
-name: cartographer-skill
+name: recon-persistent-map-mode
 description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when collaborators need module-specific context for implementation or review
 ---
 
@@ -14,7 +14,7 @@ Living architectural map of the codebase that accumulates across sessions. After
 
 **Core principle:** The agent that re-discovers the same codebase every session wastes the first 20% of every task. The Cartographer remembers the terrain.
 
-**Announce at start:** "I'm using the cartographer skill to [record what I learned about this area / consult the codebase map / load module context for a subagent]."
+**Announce at start:** "I'm using recon's persistent-map mode to [record what I learned about this area / consult the codebase map / load module context for a subagent]."
 
 ## When to Use
 
@@ -403,7 +403,7 @@ Cartographer and Forge are complementary:
 
 During feed-forward, both run:
 1. `crucible:forge` feed-forward → process warnings
-2. `crucible:cartographer-skill` consult → structural awareness
+2. `/recon` persistent-map mode consult → structural awareness
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.
 

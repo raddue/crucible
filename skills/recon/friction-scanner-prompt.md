@@ -3,7 +3,7 @@
 
 # Friction Scanner Prompt Template
 
-Use this template when dispatching the Friction Scanner depth agent. Primary consumer: `/prospector`. Produces friction points with severity, frequency, and file locations for the `## Friction Scan` section.
+Use this template when dispatching the Friction Scanner depth agent. Primary consumer: `/recon improvement-discovery mode`. Produces friction points with severity, frequency, and file locations for the `## Friction Scan` section.
 
 Requested profile: high. Claude Code call-level model mapping: `model: opus`.
 

@@ -17,7 +17,7 @@ The `severity` and `verdict` vocabularies the findings carry are the contract's,
 <!-- CANONICAL: shared/change-sizing.md -->
 Sizing thresholds are human-reviewability guidance delve *reports*, never gates on: a sizing observation is a property of the run's scope, never a verdict or a record field.
 
-`/delve` is the **standalone instance reviewer** of the review trio. It owns ONE concrete defect with one reproduction (even across files); it does not own systemic patterns (that is `/audit`), the merge gate (that is `/temper`), or codebase exploration (that is `/recon` / `/prospector`).
+`/delve` is the **standalone instance reviewer** of the review trio. It owns ONE concrete defect with one reproduction (even across files); it does not own systemic patterns (that is `/audit`), the merge gate (that is `/temper`), or codebase exploration (that is `/recon` / `/recon improvement-discovery mode`).
 
 **Authored fresh, clean retro slate.** delve is a freshly-authored fan-out wrapper — nothing is seeded from any existing skill, and it inherits **none** of the old `code_review` forge-retrospective lessons (that lineage forks to `temper`). On Claude Code the built-in `/code-review` still exists; there is no collision (different name), and the built-in stays an **optional accelerator**, never a dependency (I1).
 
@@ -27,7 +27,7 @@ Sizing thresholds are human-reviewability guidance delve *reports*, never gates 
 
 - **A merge verdict / iterative fix-loop** — use `/temper` (delve runs the engine once and reports; it never loops and never emits Clean / Issues-Found).
 - **Systemic health** — subsystem-wide patterns, absences, structural drift with no single reproduction — use `/audit`. A finding with one concrete reproduction is delve's even when it spans multiple files; a no-single-repro pattern is audit's.
-- **Codebase exploration / redesign** — "what should I refactor", architectural friction — use `/recon` or `/prospector`.
+- **Codebase exploration / redesign** — "what should I refactor", architectural friction — use `/recon` or `/recon improvement-discovery mode`.
 - **Iterative red-team of any artifact** (design docs, plans) — use `/quality-gate`.
 
 ## Dependencies

@@ -1,16 +1,16 @@
 ---
-name: prospector
-description: "Explore a codebase for architectural friction and propose competing redesigns. Triggers on 'prospector', 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or any task requesting discovery of codebase improvement opportunities."
+name: recon-improvement-discovery-mode
+description: "Recon improvement-discovery mode finds architectural friction and competing redesign proposals. Use for 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or open-ended codebase improvement discovery."
 ---
 
-# Prospector
+# Improvement Discovery Mode
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
 Explores a codebase organically, surfaces architectural friction, and proposes competing redesigns for the user to choose from.
 
-**Announce at start:** "Running prospector on [codebase/directory name]."
+**Announce at start:** "Running recon improvement-discovery mode on [codebase/directory name]."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
@@ -21,11 +21,11 @@ Explores a codebase organically, surfaces architectural friction, and proposes c
 ## Invocation
 
 ```
-crucible:prospector                        # default — explore for all friction types
-crucible:prospector --focus testability     # narrow: where is testing painful?
-crucible:prospector --focus coupling        # narrow: where does change ripple?
-crucible:prospector --focus complexity      # narrow: where are things over-engineered?
-crucible:prospector --focus depth           # narrow: Ousterhout deep modules lens
+/recon mode: improvement-discovery       # default — explore all friction types
+/recon mode: improvement-discovery focus: testability
+/recon mode: improvement-discovery focus: coupling
+/recon mode: improvement-discovery focus: complexity
+/recon mode: improvement-discovery focus: depth  # Ousterhout deep modules lens
 ```
 
 Default mode uses the full friction example set. A `--focus` flag swaps in a targeted subset of guiding questions. The explorer is still organic — it can report friction outside its focus — but the focus tells it where to start looking.
@@ -139,7 +139,7 @@ This block is passed to the explorer agent, all root cause agents, all analysis 
 
 ### Pre-Exploration Context
 
-- **RECOMMENDED:** Consult `crucible:cartographer-skill` (consult mode) — load known module boundaries, conventions, landmines
+- **RECOMMENDED:** Consult `/recon` persistent-map mode — load known module boundaries, conventions, landmines
 - **RECOMMENDED:** Consult `crucible:forge` (feed-forward mode) — check past retrospectives for known pain points
 
 ### Write Invocation State
@@ -571,9 +571,9 @@ User selects a design, accepts the recommendation, or requests a hybrid. Orchest
 
 ## Phase 8: Output
 
-### Design Doc
+### Design Proposal → Design Skill
 
-Write a design doc to `docs/plans/YYYY-MM-DD-prospector-<topic>-design.md` where `<topic>` is a kebab-case slug derived from the selected candidate's name, truncated to 40 characters. If the file already exists, append a numeric suffix (`-2`, `-3`). The doc contains:
+The competing redesign proposals are discovery output, not a completed design. Return the selected proposal and supporting friction analysis as input to `/design`; `/design` owns creating and quality-gating the design doc. Do not write design content directly from this mode. Preserve friction genealogy, alternatives, and implementation recommendations in the handoff to `/design`.
 
 - **Friction analysis** — what was found and why it matters
 - **Friction genealogy** — causal origin, key commits, how the friction developed (if genealogy data available)
@@ -605,7 +605,7 @@ The trajectory file is append-only. Each run appends N lines (one per approved f
 
 ### User Choice
 
-After saving the design doc, ask the user:
+After returning the selected proposal for `/design`, ask the user:
 
 > "Design doc saved. Would you like to:
 > (a) File this as an issue in your tracker
@@ -615,7 +615,7 @@ After saving the design doc, ask the user:
 
 **Option (a):** File as an issue using whatever tools are available in the environment. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
 
-**Option (b):** Invoke `crucible:build` in refactor mode. The user provides the prospector design doc as context for build's interactive design phase. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
+**Option (b):** Invoke `crucible:build` in refactor mode with the `/design` artifact as context. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
 
 **Option (c):** Done. Design doc is committed and available for future reference.
 
@@ -627,7 +627,7 @@ Delete `scratch/<run-id>/` after all Phase 8 actions are complete (design doc sa
 
 ### Cartographer Recording
 
-After Phase 8, dispatch `crucible:cartographer-skill` (record mode) with the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
+After Phase 8, use `/recon` persistent-map mode to record the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
 
 ## Dependency Categories
 
@@ -702,8 +702,8 @@ After context compaction:
 
 ## Integration
 
-- **Consults:** `crucible:cartographer-skill` (consult mode), `crucible:forge` (feed-forward mode)
-- **Records to:** `crucible:cartographer-skill` (record mode) — user-approved friction point locations and classifications only
+- **Consults:** `/recon` persistent-map mode, `crucible:forge` (feed-forward mode)
+- **Records to:** `/recon` persistent-map mode — user-approved friction point locations and classifications only
 - **Hands off to:** `crucible:build` (refactor mode) — design doc becomes context for build's design phase
 - **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)

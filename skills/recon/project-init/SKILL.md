@@ -1,18 +1,18 @@
 ---
-name: project-init
-description: Use when onboarding to an unfamiliar codebase and want full structural context before the first real task. Deep-scans the repo and discovers cross-repo topology — whole-repo first-time bootstrap, not task-scoped investigation (use recon when you already have a specific task; project-init bootstraps the cartographer data recon consults).
+name: recon-onboarding-mode
+description: Whole-repo onboarding mode for `/recon`. Deep-scans an unfamiliar repo and discovers optional cross-repo topology before the first task; bootstraps persistent map data used by task-scoped recon.
 ---
 
-# Project Init
+# Whole-Repo Onboarding Mode
 
 ## Overview
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
-Eliminate cold-start penalty by proactively mapping the current repo and its neighborhood. Instead of re-discovering the codebase during every first task, project-init builds structural context upfront so that build, design, and debugging skills start informed.
+Eliminate cold-start penalty by proactively mapping the current repo and its neighborhood. Instead of re-discovering the codebase during every first task, this mode builds structural context upfront so build, design, and debugging start informed.
 
-**Invocation:** User runs `/project-init`. Not auto-triggered.
+**Invocation:** User runs `/recon` with whole-repo onboarding intent. Not auto-triggered.
 
 **Two tiers:**
 - **Tier 1** — Single repo deep scan. Fan-out partition explorers, fan-in to cartographer format.
@@ -26,7 +26,7 @@ Eliminate cold-start penalty by proactively mapping the current repo and its nei
 
 **Models:** Scanners, explorers, and recorders request `standard`. The Claude Code examples use the current reference alias `model: sonnet`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
-**Announce at start:** "I'm using the project-init skill to map this codebase and its neighborhood."
+**Announce at start:** "Running recon whole-repo-onboarding mode to map this codebase and its neighborhood."
 
 ---
 
@@ -397,8 +397,8 @@ Skills that benefit from project-init output:
 
 | Skill | How It Uses project-init Data |
 |-------|-------------------------------|
-| `crucible:cartographer-skill` (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
-| `crucible:cartographer-skill` (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
+| `/recon` persistent-map mode (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
+| `/recon` persistent-map mode (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
 | `crucible:build` | Gets structural awareness from cartographer consult at task start |
 | `crucible:design` | Knows module boundaries and dependencies before proposing architecture |
 | `crucible:debugging` | Loads module context and landmines for investigators |
@@ -412,12 +412,12 @@ Skills that benefit from project-init output:
 
 ### Related Skills
 
-- `crucible:cartographer-skill` — ongoing codebase mapping (project-init bootstraps, cartographer maintains)
+- `/recon` persistent-map mode — ongoing codebase mapping (whole-repo onboarding bootstraps, persistent-map mode maintains)
 - `crucible:build` — implementation workflow (consumes cartographer data)
 - `crucible:design` — architecture planning (consumes map and topology)
 - `crucible:debugging` — investigation workflow (consumes modules and landmines)
 
-**Does not dispatch /recon** -- bootstraps the cartographer data that /recon consults. Complementary, not overlapping. See #147 for rationale.
+Whole-repo onboarding is itself a `/recon` mode and bootstraps the persistent map that task investigations consult.
 
 ---
 

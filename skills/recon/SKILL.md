@@ -1,9 +1,25 @@
 ---
 name: recon
-description: "Standalone codebase investigation. Produces a layered Investigation Brief with core findings (structure, patterns, scope, prior art) plus optional depth modules. Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before a specific task requiring codebase understanding — task-scoped to the surface that task touches (for first-time whole-repo onboarding with cross-repo topology, use project-init, which bootstraps the cartographer data recon consults)."
+description: "Investigate codebases before tasks, map whole repositories and neighbors, maintain persistent codebase maps, or discover architectural friction and redesign candidates. Use /recon for task-scoped investigation, first-time onboarding, persistent mapping, or improvement discovery; select the matching mode."
 ---
 
 # Recon
+
+## Modes
+
+Select exactly one mode with the `mode` parameter; default is `task-investigation`:
+
+```
+/recon
+  mode: "task-investigation" | "whole-repo-onboarding" | "persistent-map" | "improvement-discovery"
+```
+
+- **`task-investigation`** (default): follow the core brief and optional depth-module workflow below.
+- **`whole-repo-onboarding`:** follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
+- **`persistent-map`:** follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
+- **`improvement-discovery`:** follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
+
+These are modes of `/recon`, not separate skills. For specialized output instructions, read the selected mode guide and its prompt/reference files before dispatching. In whole-repo-onboarding mode, announce the mode and follow its tiered workflow. In persistent-map mode, perform the requested consult/load/record action. In improvement-discovery mode, preserve its advisory/read-only boundary and route proposals to `/design`.
 
 ## Overview
 
@@ -68,7 +84,7 @@ List of depth modules to produce after core synthesis. Valid values:
 |---|---|---|---|
 | `impact-analysis` | Impact Analyst | high | `/design`, `/build` |
 | `consumer-registry` | Consumer Mapper | standard | `/migrate` |
-| `friction-scan` | Friction Scanner | high | `/prospector` |
+| `friction-scan` | Friction Scanner | high | `/recon` with `mode: "improvement-discovery"` |
 | `subsystem-manifest` | Manifest Builder | standard | `/audit` |
 | `diagnostic-context` | Diagnostic Gatherer | high | `/debugging` |
 | `execution-readiness` | Readiness Checker | standard | `/build` |
@@ -86,7 +102,7 @@ Directory constraint. When provided, overrides scout scope suggestions entirely 
 |---|---|
 | With task | Scouts focus on task-relevant areas |
 | With context | Prior decisions passed to scouts alongside task |
-| Without task | Full repo recon for audit/project-init cold starts |
+| Without task | Full repo recon, including onboarding-mode cold starts |
 | With scope | Explicit scope overrides scout suggestions |
 | With modules | Depth agents dispatched after core synthesis |
 | No modules | Core layer only — cheapest possible recon |
@@ -112,7 +128,7 @@ Recon narrates its progress at these points — **every one is mandatory**:
 2. **After scout completion, before synthesis** — "Scouts complete. Synthesizing core brief. [N conflicts detected.]"
 3. **After depth module completion, before returning** — "Depth module [name] complete. Returning Investigation Brief."
 4. **On overflow re-run** — "Scout [name] exceeded token budget. Re-running with narrowed scope: [new scope]."
-5. **On cartographer conflict** — "Cartographer conflict detected: [brief description]. Flagged as [auto-updated / unresolved]."
+5. **On cartographer conflict** — "Persistent-map conflict detected: [brief description]. Flagged as [auto-updated / unresolved]."
 6. **On depth module failure** — "Depth module [name] failed: [timeout / error]. Core brief delivered without this module."
 
 ### Direct vs. Sub-Skill Invocation
@@ -632,10 +648,10 @@ not dispatch the recorder twice.
    Task tool (general-purpose, model: sonnet):
      description: "Cartographer recording for recon findings"
    ```
-   Use the existing `crucible:cartographer-skill` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
+   Use [`cartographer/recorder-prompt.md`](cartographer/recorder-prompt.md), the persistent-map recorder template. Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
    - Include auto-update resolutions from cartographer conflict adjudication
    - New module files, conventions, or landmines flow into cartographer storage
-   - **Narrate auto-updates:** "Auto-updating cartographer: [description]. Review with `/cartographer consult`." Auto-updates must be visible — silent persistent changes affect all future sessions.
+   - **Narrate auto-updates:** "Auto-updating persistent map: [description]. Review with `/recon` persistent-map mode." Auto-updates must be visible — silent persistent changes affect all future sessions.
 3. **If nothing new:** Skip recorder dispatch.
 
 **Key constraint:** `/recon` is read-only on the codebase. Cartographer writes go to the memory directory, not the repo.
@@ -886,12 +902,12 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 - `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (high)
 - `readiness-checker-prompt.md` — Readiness Checker (standard)
 
-**Consults:** `crucible:cartographer-skill` (consult mode — direct file read of `map.md`)
+**Consults:** `/recon` persistent-map mode (consult mode — direct file read of `map.md`)
 
-**Records to:** `crucible:cartographer-skill` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
+**Records to:** `/recon` persistent-map mode (recorder dispatch after investigation, using `cartographer/recorder-prompt.md`)
 
 **Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
 
-**Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design), `/prospector` (organic exploration is different), `/project-init` (bootstraps cartographer, complementary purpose). See #147 for rationale.
+**Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design). Improvement discovery and whole-repo onboarding are modes of this skill, not callers. See #147 for the remaining rationale.
 
 **Pairs with:** `/assay` (sequential — recon produces evidence, assay evaluates options)

@@ -17,7 +17,7 @@ Phase 4 also runs a conditional security pass and a supply-chain scan around the
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom — including defect signatures that surface known bug patterns proactively). Both accumulate across sessions.
 
-The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
+Recon's whole-repo-onboarding mode accelerates onboarding — run `/recon` on an unfamiliar repo for structural context before `/build` or `/design`, with optional sibling-repo topology. It produces persistent-map data tagged as structural scaffolding that task-verified findings can later refine.
 
 The **adr** skill records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with trigger hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
 

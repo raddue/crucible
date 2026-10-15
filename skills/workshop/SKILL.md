@@ -5,7 +5,7 @@ description: Tour of the Crucible workshop — the headline orchestrators users 
 
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~49 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~46 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -34,12 +34,12 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | Skill | When to reach for it |
 |---|---|
 | `/delve` | Instance-bug review of a diff or path — parallel finder angles + verify gate, prints ranked, verified defects with reproductions. Report-only (no merge verdict, no fix loop; `--fix` / `--comment` are opt-in). Use when "find bugs in this diff", "scan this file for defects", or you want concrete reproducible bugs. |
-| `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/prospector`. Use when "this has accumulated cruft nobody's looked at in months." |
+| `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/recon improvement-discovery mode`. Use when "this has accumulated cruft nobody's looked at in months." |
 | `/siege` | Security audit. Six parallel attacker-perspective Opus agents, iterates until zero Critical/High. Heavy — reserve for security PRs, scheduled reviews, or post-incident. |
-| `/recon` | Codebase investigation. Layered Investigation Brief with structure / patterns / scope / prior-art. Use before any task that needs codebase understanding you don't have. |
-| `/prospector` | Architectural friction finder. Explores the codebase for refactor candidates and proposes competing redesigns. Use when "what should I refactor next?" |
+| `/recon` | Codebase investigation: task-scoped brief, whole-repo onboarding, persistent-map maintenance, or improvement discovery. Select mode from intent; redesign proposals route to `/design`. |
 
-> **`/delve` vs `/recon` / `/prospector` — different machines.** `/delve` hunts concrete *instance bugs* in a specific diff or path (one defect, one reproduction). `/recon` and `/prospector` *explore* unfamiliar code — recon maps structure / patterns / prior-art before a task; prospector finds architectural friction and proposes redesigns. Reach for `/delve` when you have a **change** and want its bugs; reach for recon / prospector when you have a **codebase** and want to understand or improve it. Within the review trio: `/delve` = instance bugs (one-shot), `/audit` = systemic patterns, `/temper` = merge gate + iterative fix loop.
+
+> **`/delve` vs `/recon` — different machines.** `/delve` hunts concrete *instance bugs* in a specific diff or path (one defect, one reproduction). `/recon` maps unfamiliar code or discovers architectural friction, depending on selected mode. Reach for `/delve` when you have a **change** and want its bugs; reach for `/recon` when you have a **codebase** to understand or improve. Within the review trio: `/delve` = instance bugs (one-shot), `/audit` = systemic patterns, `/temper` = merge gate + iterative fix loop.
 
 ### Wrapping up and reflecting
 
@@ -61,7 +61,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | "Check the save system for bugs" | `/audit` (systemic) or `/audit --bugs` (+ `/delve` instance sweep) |
 | "Security review" / "Threat model" | `/siege` |
 | "What does X do?" / "How does this codebase work?" | `/recon` |
-| "What should I refactor?" | `/prospector` |
+| "What should I refactor?" | `/recon improvement-discovery mode` |
 | "Run quality gate on this" | `/quality-gate` |
 | "Upgrade React to 19" / "Remove deprecated APIs" | `/migrate` |
 | "I'm done, what's next?" | `/finish` |
@@ -79,9 +79,9 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has ~49 skills; this list curates ~15. Skills omitted here are either:
-- **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `adversarial-tester`, `checkpoint`, `verify`, `assay`, `innovate`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+Crucible has ~46 skills; this list curates ~15. Skills omitted here are either:
+- **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `adversarial-tester`, `checkpoint`, `verify`, `assay`, `innovate`) — invoked indirectly, not part of the user-facing menu.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -89,4 +89,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 49-skill catalog with eval deltas
+- `docs/skills.md` — full 46-skill catalog with eval deltas

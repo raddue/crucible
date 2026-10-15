@@ -12,8 +12,8 @@ Stdlib only. The invariant covers TRACKED references only — a brand-new
 untracked/not-yet-staged `.md` is invisible to `git ls-files` and is checked
 once it is staged or committed.
 
-Why: `cartographer-skill/SKILL.md` referenced `crucible:cartographer` (no such
-skill) in its own feed-forward instructions, self-misrouting (#365 / A40). This
+Why: `cartographer-skill/SKILL.md` formerly referenced `crucible:cartographer`
+(no such skill) in its own feed-forward instructions, self-misrouting (#365 / A40). This
 checker covers the `crucible:<token>` reference *form* (the namespaced-invocation
 syntax). It does NOT cover the `skills/<token>/` path form or
 `<!-- CANONICAL: shared/x.md -->` links — those are out of its scope.

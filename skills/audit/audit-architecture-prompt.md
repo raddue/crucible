@@ -51,7 +51,7 @@ Task tool (general-purpose, model: opus):
     - A single missing error handler (instance bug -> /delve); systemic
       absence of error-handling discipline is the Robustness lens
     - Naming or style issues (that's the Consistency lens)
-    - Maintainability / complexity / churn depth (that's /prospector)
+    - Maintainability / complexity / churn depth (that's /recon improvement-discovery mode)
     - Speculative issues you can't point to specific code for
 
     ## Subsystem Overview
@@ -100,7 +100,7 @@ Task tool (general-purpose, model: opus):
     - Do NOT flag a single missing error handler (-> /delve); systemic
       absence is the Robustness lens
     - Do NOT flag style issues (Consistency lens handles that)
-    - Do NOT re-derive maintainability/complexity friction (-> /prospector)
+    - Do NOT re-derive maintainability/complexity friction (-> /recon improvement-discovery mode)
     - Do NOT speculate -- every finding must have code evidence
     - Do NOT exceed 5 findings unless you have strong justification
     - Do NOT flag architectural patterns that are intentional and working
