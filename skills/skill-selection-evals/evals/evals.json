@@ -677,13 +677,26 @@
       "dimension": "direct",
       "boundary": "decision-record",
       "prompt": "Write an ADR for our choice to use PostgreSQL over MySQL",
-      "expected_skill": "adr",
+      "expected_skill": "design",
       "common_mistakes": [
-        "design"
+        "finish"
       ],
       "context": "A decision has already been made; the user asks to record it as an ADR.",
-      "reasoning": "adr writes Architecture Decision Records for decisions already made. design explores decisions that have not been made yet.",
+      "reasoning": "design owns the decision-record subflow for an already-made durable architectural choice; it runs ADR eligibility before writing.",
       "difficulty": "easy"
+    },
+    {
+      "id": "decision-record-direct-02",
+      "dimension": "direct",
+      "boundary": "decision-record",
+      "prompt": "Record this decision: we chose PostgreSQL over MySQL after comparing both for our primary database",
+      "expected_skill": "design",
+      "common_mistakes": [
+        "finish"
+      ],
+      "context": "Settled durable architecture choice; user asks to record decision without the word ADR.",
+      "reasoning": "design routes the record-this-decision phrase to decision-record eligibility and ADR output, not a new design dialogue.",
+      "difficulty": "hard"
     },
     {
       "id": "decision-record-design-01",
@@ -692,10 +705,10 @@
       "prompt": "I need to decide between Postgres and Mongo for our primary store",
       "expected_skill": "design",
       "common_mistakes": [
-        "adr"
+        "finish"
       ],
       "context": "The decision has not been made yet; the user needs to explore and choose.",
-      "reasoning": "design explores and decides. adr only records decisions already made \u2014 it refuses on an unsettled decision.",
+      "reasoning": "design explores unsettled choices; its decision-record subflow is reserved for choices already made.",
       "difficulty": "medium"
     },
     {
@@ -705,10 +718,10 @@
       "prompt": "Write up what we decided this session for whoever picks this up next",
       "expected_skill": "handoff",
       "common_mistakes": [
-        "adr"
+        "design"
       ],
       "context": "The user wants a session-to-session handoff note, not a durable architectural decision record.",
-      "reasoning": "handoff writes session handoff docs. adr writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
+      "reasoning": "handoff writes session handoff docs. design\u2019s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
       "difficulty": "medium"
     },
     {
@@ -718,10 +731,10 @@
       "prompt": "Record this bug so we don't repeat it",
       "expected_skill": "grudge",
       "common_mistakes": [
-        "adr"
+        "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-      "reasoning": "grudge is the book of grudges \u2014 bug regression memory. adr records decisions with alternatives, not bugs.",
+      "reasoning": "grudge is the book of grudges \u2014 bug regression memory. design\u2019s decision-record subflow records decisions with alternatives, not bugs.",
       "difficulty": "easy"
     },
     {
@@ -731,11 +744,11 @@
       "prompt": "The PR just landed, let's wrap this up",
       "expected_skill": "finish",
       "common_mistakes": [
-        "adr",
+        "design",
         "merge-pr"
       ],
       "context": "The work is complete and the user wants to integrate it.",
-      "reasoning": "finish wraps up completed work. adr is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
+      "reasoning": "finish wraps up completed work. design\u2019s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
       "difficulty": "medium"
     },
     {
@@ -745,10 +758,10 @@
       "prompt": "We merged the persistence change, record where we ended up",
       "expected_skill": "finish",
       "common_mistakes": [
-        "adr"
+        "design"
       ],
       "context": "Completion-shaped wrap-up language after a merge.",
-      "reasoning": "'record where we ended up' is completion framing. adr requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
+      "reasoning": "'record where we ended up' is completion framing. design\u2019s decision-record subflow requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
       "difficulty": "hard"
     },
     {
@@ -758,10 +771,10 @@
       "prompt": "Why did we choose X for the ledger?",
       "expected_skill": "recall",
       "common_mistakes": [
-        "adr"
+        "design"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
-      "reasoning": "recall/recon own the read side (they mine docs/decisions/). adr writes and refuses on a settled decision \u2014 it has no answer output.",
+      "reasoning": "recall/recon own the read side (they mine docs/decisions/). design\u2019s decision-record subflow writes and refuses on a settled decision \u2014 it has no answer output.",
       "difficulty": "medium"
     }
   ]

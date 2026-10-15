@@ -1,6 +1,6 @@
 ---
 name: design
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "Use before creative work: features, components, functionality, or behavior changes. Investigate choices and produce designs; also evaluate approaches ('which option'), inject one innovation into a finalized design or plan, and record durable architecture decisions ('write an ADR', 'record this decision')."
 ---
 
 # Brainstorming Ideas Into Designs
@@ -10,9 +10,10 @@ description: "You MUST use this before any creative work - creating features, bu
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
 <!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
 
-Turn ideas into fully formed designs through investigated, collaborative dialogue.
+Turn ideas into fully formed designs through investigated, collaborative dialogue. For a standalone approach comparison, use [approach evaluation](approach-evaluation.md); for "write an ADR", "record this decision", or a finish-stage decision, use [decision records](decision-records.md). For a finalized design or plan, run the [innovation pass](innovation.md) before adversarial review, including its sweep/recovery rules when requested. These are design subflows, not separate skills.
 
 Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.
 
@@ -112,25 +113,25 @@ After agents return:
    - Would this feature survive if the host application were replaced tomorrow?
    If fewer than 3 answers are "yes," flag to the user: "This feature may not belong in [target system] — it only shares [N/4] characteristics. Consider whether it deserves its own application. Each application should be describable in a single sentence — if you need a paragraph, it's doing too much." The user decides; this is a structured nudge, not a veto.
 4. **Check for question redirection** — if agents found the wrong question is being asked, redirect: "Was going to ask about X, but investigation revealed the real decision is Y."
-5. **Assay dispatch (Deep Dive only)** — For Deep Dive dimensions, dispatch `/assay` for structured evaluation:
+5. **Approach evaluation (Deep Dive only)** — For Deep Dive dimensions, run the [approach-evaluation subflow](approach-evaluation.md) with `approach-evaluator-prompt.md` for structured evaluation:
 
    ```
-   /assay
+   design approach-evaluation
      question: "<design dimension question>"
      context: { recon brief sections + agent findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
      decision_type: "architecture"
      cascading_decisions: [<prior dimension decisions>]
    ```
 
-   Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence scoring on what the investigation explicitly could not determine, and populates `missing_information` with actionable items (using recon's `Resolvable by:` metadata).
+   Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds the evaluator's confidence scoring on what the investigation explicitly could not determine, and populates `missing_information` with actionable items (using recon's `Resolvable by:` metadata).
 
-   Use assay's recommendation as the starting point. Present assay's `constraint_fit` scoring, `kill_criteria`, and `confidence` level to the user.
+   Use the evaluator's recommendation as the starting point. Present its `constraint_fit` scoring, `kill_criteria`, and `confidence` level to the user.
 
-   **On assay failure:** "Assay evaluation failed: [reason]. Proceeding with manual synthesis." Synthesize options manually (existing behavior).
+   **On evaluator failure:** "Approach evaluation failed: [reason]. Proceeding with manual synthesis." Synthesize options manually (existing behavior).
 
-   Quick scan and Direct ask dimensions do NOT dispatch assay.
+   Quick scan and Direct ask dimensions do NOT run approach evaluation.
 
-6. **Synthesize into 2-3 informed options** with a recommended choice (enriched by assay output when available)
+6. **Synthesize into 2-3 informed options** with a recommended choice (enriched by evaluator output when available)
 
 #### Step 6: Challenge (Deep Dive Only)
 
@@ -170,10 +171,10 @@ single-model Challenger agent.
 
 **Challenge:** [1-2 sentence summary of what the challenger raised]
 
-**Constraint Fit:** [from assay report, if available — pattern_alignment, scope_fit, reversibility, integration_risk]
-**Kill Criteria:** [from assay — when to revisit this decision]
-**Confidence:** [high/medium/low from assay]
-**Unknowns:** [from assay's missing_information, grounded by recon's Open Questions — what we don't know and how to find out]
+**Constraint Fit:** [from evaluator report, if available — pattern_alignment, scope_fit, reversibility, integration_risk]
+**Kill Criteria:** [from evaluator — when to revisit this decision]
+**Confidence:** [high/medium/low from evaluator]
+**Unknowns:** [from evaluator's missing_information, grounded by recon's Open Questions — what we don't know and how to find out]
 
 **Recommendation:** [your recommended option and why]
 
@@ -249,9 +250,10 @@ Raise critical gaps with the user before saving.
   source: "design"     # Provenance tracking — distinguishes from /spec-authored docs
   ---
   ```
+- After approval, run [innovation](innovation.md) once on the design doc, incorporate its single proposal, and confirm the revised design with the user before extracting a contract. The same pass runs whether design is standalone or called by build; do not repeat it in build.
 - **ADR hook (before committing):** If any `### Dn — …` decision dimension in the
-  just-written design doc passes the `adr` skill's D1 eligibility test, run
-  `crucible:adr` for the single most-durable surviving dimension; it writes the
+  just-written design doc passes [decision-record eligibility](decision-records.md), run
+  that workflow for the single most-durable surviving dimension; it writes the
   ADR with status `PROPOSED`. Commit the ADR in the same commit as the design
   doc (`git add docs/decisions/NNNN-*.md`), so no untracked ADR is left behind
   to trip warden's clean-tree assert. Say in one line when no dimension passes.
@@ -273,7 +275,13 @@ After the design doc is written and the user approves it:
 - Ask: "Ready to set up for implementation?"
 - Use crucible:worktree, then crucible:planning
 
-## Quality Gate
+## Cairn (Layer 3) — innovation sweeps only
+
+For ≥3 innovation passes against the same target, maintain one cairn phase per `run/N`, capture each proposal as an invariant, reconcile on phase entry, and seal the final ranked view. Single passes need no cairn. Follow the full sweep-specific bindings and recovery rules in [innovation](innovation.md); the canonical schema stays in `shared/cairn-convention.md`.
+
+## Innovation and Quality Gate
+
+The innovation pass above precedes contract extraction, so the approved contract describes the revised design. A standalone invocation may also run innovation-pass mode on a finalized implementation plan. Build runs a separate plan pass after plan review. Gate the final design after its contract is approved.
 
 This skill produces **design docs**. When used standalone, invoke `crucible:quality-gate` after the design document is saved and committed. When used as a sub-skill of build, the parent orchestrator handles gating.
 
@@ -289,9 +297,9 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 ## Integration
 
-**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer-skill, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context), crucible:assay (Phase 2 decision evaluation)
+**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer-skill, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context); approach evaluation, innovation, and decision records are local design subflows
 
-**Recon/Assay dispatch:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Assay is dispatched per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to existing behavior on failure.
+**Recon/approach evaluation:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Approach evaluation runs per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to manual investigation or synthesis on failure.
 
 **Contract schema:** Shared with `/spec` — see `skills/spec/contract-schema.md` for the canonical contract YAML schema (version 1.0). Both `/design` and `/spec` emit contracts that `/build` consumes.
 
