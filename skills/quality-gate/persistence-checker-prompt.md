@@ -1,13 +1,7 @@
 # Contents
 
-- What you are NOT
-- Your task
-- Correspondence judgment rubric
-- Output format — JSON output schema
-- Fail-open behavior
-- Anti-anchoring guarantees you provide
-- What "structural diff" means in practice
-- Worked example (illustrative)
+- What you are NOT · Your task · Correspondence judgment rubric · Output format — JSON output schema
+- Fail-open behavior · Anti-anchoring guarantees you provide · What "structural diff" means in practice · Worked example (illustrative)
 
 # Persistence Checker — Structural Diff Prompt
 

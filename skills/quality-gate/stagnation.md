@@ -1,12 +1,7 @@
 # Contents
 
-- Stagnation Detection
-- First-Pass Check (orchestrator — runs every round)
-- Multi-Model Consensus (when available)
-- Persistence Check (Component 4 / #265)
-- Fix-Generated Defect Tracking (#546)
-- Judge Dispatch (silent-seed at round ≥ `max(1, suppression_threshold - 3)` when `suppression_threshold ≥ 6`; normal escalation at round ≥ `suppression_threshold`)
-- Verdict-Level Promotion (Persistent Finding Corroboration, Component 4 / #265)
+- Stagnation Detection · First-Pass Check (orchestrator — runs every round) · Multi-Model Consensus (when available) · Persistence Check (Component 4 / #265)
+- Fix-Generated Defect Tracking (#546) · Judge Dispatch (silent-seed at round ≥ `max(1, suppression_threshold - 3)` when `suppression_threshold ≥ 6`; normal escalation at round ≥ `suppression_threshold`) · Verdict-Level Promotion (Persistent Finding Corroboration, Component 4 / #265)
 
 ## Stagnation Detection
 

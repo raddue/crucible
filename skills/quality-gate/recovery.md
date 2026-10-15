@@ -1,8 +1,6 @@
 # Contents
 
-- Round History and Compaction Recovery
-- Checkpoint Timing
-- Round 4 Fix
+- Round History and Compaction Recovery · Checkpoint Timing · Round 4 Fix
 
 ## Round History and Compaction Recovery
 

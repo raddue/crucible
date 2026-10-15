@@ -1,19 +1,9 @@
 # Contents
 
-- Artifact Preparation
-- Small artifacts (design docs, plans, hypotheses)
-- Code artifacts
-- Chunked Gate Counter Semantics
-- Hypothesis artifacts
-- Minor Issue Handling
-- Clean-Pass Minor Advisory (#362)
-- Pre-Flight Dependency Audit
-- Security Surface Detection and Siege Dispatch
-- Detection Heuristic
-- Decision and Dispatch
-- Result Integration
-- Standalone Siege Invocations
-- Anti-Anchoring Rules
+- Artifact Preparation · Small artifacts (design docs, plans, hypotheses) · Code artifacts · Chunked Gate Counter Semantics
+- Hypothesis artifacts · Minor Issue Handling · Clean-Pass Minor Advisory (#362) · Pre-Flight Dependency Audit
+- Security Surface Detection and Siege Dispatch · Detection Heuristic · Decision and Dispatch · Result Integration
+- Standalone Siege Invocations · Anti-Anchoring Rules
 
 ## Artifact Preparation
 

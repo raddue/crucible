@@ -1,27 +1,11 @@
 # Contents
 
-- Convergence Telemetry
-- Invocation Convention
-- When Used Standalone (user invokes directly)
-- When Used as a Sub-Skill of Build, Debugging, or Spec
-- Artifact Types
-- Documentation Convention
-- Escalation
-- Exit Precedence
-- Red Flags
-- Loop ownership
-- Anti-anchoring
-- Scoring & verdicts (INV-2 hygiene)
-- State & recovery
-- Multi-model & external
-- Look-harder, tail-rubric, and persistence (#265)
-- Fix-generated fan-out (#546)
-- Implementation Invariants
-- Checkable (INV-A1 — INV-A19)
-- Testable (INV-T1 — INV-T18, with T2b/T2c/T5b suffix variants)
-- Fix-Generated Defect Tracking (INV-546-1 — INV-546-13)
-- 303 Cost-Cap (INV-303-1 — INV-303-7)
-- Integration
+- Convergence Telemetry · Invocation Convention · When Used Standalone (user invokes directly) · When Used as a Sub-Skill of Build, Debugging, or Spec
+- Artifact Types · Documentation Convention · Escalation · Exit Precedence
+- Red Flags · Loop ownership · Anti-anchoring · Scoring & verdicts (INV-2 hygiene)
+- State & recovery · Multi-model & external · Look-harder, tail-rubric, and persistence (#265) · Fix-generated fan-out (#546)
+- Implementation Invariants · Checkable (INV-A1 — INV-A19) · Testable (INV-T1 — INV-T18, with T2b/T2c/T5b suffix variants) · Fix-Generated Defect Tracking (INV-546-1 — INV-546-13)
+- 303 Cost-Cap (INV-303-1 — INV-303-7) · Integration
 
 ## Convergence Telemetry
 

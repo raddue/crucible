@@ -1,33 +1,12 @@
 # Contents
 
-- Overview
-- Tool Interface
-- `consensus_query` (MCP tool)
-- Consensus Modes
-- review
-- verdict
-- investigate
-- Configuration
-- Schema
-- Field Reference
-- Validation Rules
-- Graceful Degradation
-- Cost Estimation
-- Per-Query Cost Multiplier
-- Estimated Impact on Quality Gate Runs
-- Cost Management Recommendations
-- Red Flags
-- Never
-- Always
-- Integration Points
-- Active Integration
-- Excluded (with rationale)
-- Reconsideration Criteria
-- MCP Server Implementation Guide
-- Architecture
-- Provider Adapters
-- Parallel Dispatch
-- Aggregation
+- Overview · Tool Interface · `consensus_query` (MCP tool) · Consensus Modes
+- review · verdict · investigate · Configuration
+- Schema · Field Reference · Validation Rules · Graceful Degradation
+- Cost Estimation · Per-Query Cost Multiplier · Estimated Impact on Quality Gate Runs · Cost Management Recommendations
+- Red Flags · Never · Always · Integration Points
+- Active Integration · Excluded (with rationale) · Reconsideration Criteria · MCP Server Implementation Guide
+- Architecture · Provider Adapters · Parallel Dispatch · Aggregation
 - Testing
 
 ---

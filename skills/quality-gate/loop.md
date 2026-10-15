@@ -1,12 +1,7 @@
 # Contents
 
-- Anti-Rationalization Table — quality-gate
-- Skill Arguments
-- Closure-mode contract (#624)
-- How It Works
-- Tail-Rubric Flag (Component 2 / #265)
-- Multi-Model Red-Team Review (when available)
-- Pre-Threshold Consensus Carve-Out
+- Anti-Rationalization Table — quality-gate · Skill Arguments · Closure-mode contract (#624) · How It Works
+- Tail-Rubric Flag (Component 2 / #265) · Multi-Model Red-Team Review (when available) · Pre-Threshold Consensus Carve-Out
 
 ## Anti-Rationalization Table — quality-gate
 

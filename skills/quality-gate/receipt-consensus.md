@@ -1,15 +1,8 @@
 # Contents
 
-- Receipt Linter (Ledger Return Protocol)
-- Dispatch-root and findings-root layout (#486)
-- Cairn (Layer 3)
-- Tripwire Manifest Sweep (Layer 2)
-- Consensus Detection
-- External Model Review (Optional)
-- When It Runs
-- Consensus Bridge (Round 1, then every `max(1, suppression_threshold // 3)` rounds, up to round 15)
-- Scoring Invariant (INV-2)
-- Graceful Degradation
+- Receipt Linter (Ledger Return Protocol) · Dispatch-root and findings-root layout (#486) · Cairn (Layer 3) · Tripwire Manifest Sweep (Layer 2)
+- Consensus Detection · External Model Review (Optional) · When It Runs · Consensus Bridge (Round 1, then every `max(1, suppression_threshold // 3)` rounds, up to round 15)
+- Scoring Invariant (INV-2) · Graceful Degradation
 
 ## Receipt Linter (Ledger Return Protocol)
 

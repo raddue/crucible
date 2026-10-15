@@ -1,12 +1,7 @@
 # Contents
 
-- What you are NOT
-- Your task
-- Judgment rubric
-- Output format — JSON output schema
-- Fail-open behavior
-- Anti-anchoring guarantees you provide
-- Worked example (illustrative)
+- What you are NOT · Your task · Judgment rubric · Output format — JSON output schema
+- Fail-open behavior · Anti-anchoring guarantees you provide · Worked example (illustrative)
 
 # Fix-Generated Defect Checker — Structural Diff Prompt
 

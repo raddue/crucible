@@ -1,25 +1,10 @@
 # Contents
 
-- When to Use
-- Skill Arguments
-- Manifest Scanning
-- Ecosystem Detection and Ordering
-- Audit Tool Availability
-- Audit Tool Error Handling
-- Severity Normalization
-- Output Model
-- Tool Availability
-- Summary
-- npm — packages/api/package.json — FINDINGS
-- pip — src/requirements.txt — FINDINGS
-- pip — src/pyproject.toml — FINDINGS
-- Warnings
-- Overall Result Computation
-- Blocking and Prompting Behavior
-- Compaction Recovery
-- Stale Audit Results
-- Invocation Convention
-- Red Flags
+- When to Use · Skill Arguments · Manifest Scanning · Ecosystem Detection and Ordering
+- Audit Tool Availability · Audit Tool Error Handling · Severity Normalization · Output Model
+- Tool Availability · Summary · npm — packages/api/package.json — FINDINGS · pip — src/requirements.txt — FINDINGS
+- pip — src/pyproject.toml — FINDINGS · Warnings · Overall Result Computation · Blocking and Prompting Behavior
+- Compaction Recovery · Stale Audit Results · Invocation Convention · Red Flags
 - Integration
 
 ---

@@ -1,17 +1,8 @@
 # Contents
 
-- Input
-- Procedure
-- Step 1: Fix Echo Analysis
-- Step 2: Semantic Comparison
-- Step 3: Apply Decision Rules
-- Step 4: Consecutive-Round Tracking (only when all findings are new)
-- Fail-Open Defaults
-- Output Format
-- Stagnation Judge Verdict
-- Comparison Table
-- Classification
-- Reasoning
+- Input · Procedure · Step 1: Fix Echo Analysis · Step 2: Semantic Comparison
+- Step 3: Apply Decision Rules · Step 4: Consecutive-Round Tracking (only when all findings are new) · Fail-Open Defaults · Output Format
+- Stagnation Judge Verdict · Comparison Table · Classification · Reasoning
 
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->

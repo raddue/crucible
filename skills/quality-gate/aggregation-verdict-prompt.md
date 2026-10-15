@@ -1,17 +1,8 @@
 # Contents
 
-- Model Responses
-- Original Context
-- Your Job
-- 1. Report the Verdict Distribution
-- 2. Determine Confidence Level
-- 3. Handle Split Decisions
-- 4. Summarize Majority Reasoning
-- 5. Summarize Dissent Reasoning
-- 6. Evaluate on Reasoning Merit
-- 7. Identify Shared and Divergent Reasoning
-- 8. Surface Unique Considerations
-- Output Format
+- Model Responses · Original Context · Your Job · 1. Report the Verdict Distribution
+- 2. Determine Confidence Level · 3. Handle Split Decisions · 4. Summarize Majority Reasoning · 5. Summarize Dissent Reasoning
+- 6. Evaluate on Reasoning Merit · 7. Identify Shared and Divergent Reasoning · 8. Surface Unique Considerations · Output Format
 
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->

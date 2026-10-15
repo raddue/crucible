@@ -1,21 +1,9 @@
 # Contents
 
-- Cost-Cap and Diminishing-Return Signals (#303)
-- Per-Round Ledger
-- Accepted
-- Deferred (v1.0 — empty in v0.1)
-- Diminishing-Return Signal
-- Cost-Cap Prompt
-- Combined-Prompt Rule
-- Non-Interactive End-of-Gate Summary
-- Non-Skippability
-- Architectural Concerns Exit
-- Fix Mechanism
-- No-Op Fix Detection
-- Scope Anchoring for Fix Agents
-- Fix Memory
-- Round N Fix
-- Fix Verification
+- Cost-Cap and Diminishing-Return Signals (#303) · Per-Round Ledger · Accepted · Deferred (v1.0 — empty in v0.1)
+- Diminishing-Return Signal · Cost-Cap Prompt · Combined-Prompt Rule · Non-Interactive End-of-Gate Summary
+- Non-Skippability · Architectural Concerns Exit · Fix Mechanism · No-Op Fix Detection
+- Scope Anchoring for Fix Agents · Fix Memory · Round N Fix · Fix Verification
 
 ## Cost-Cap and Diminishing-Return Signals (#303)
 
