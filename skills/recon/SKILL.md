@@ -10,7 +10,7 @@ description: "Investigate unfamiliar code before a task, onboard to a whole repo
 Select exactly one mode from user intent; default to task-scoped investigation:
 
 - **Task investigation:** follow the core brief and optional depth-module workflow below.
-- **Whole-repo onboarding:** select for first-time full-repository mapping; follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
+- **Whole-repo onboarding:** select for first-time full-repository mapping; follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below.
 - **Persistent map:** select for consulting or updating accumulated codebase knowledge; follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
 - **Improvement discovery:** select for open-ended improvement discovery; follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
 

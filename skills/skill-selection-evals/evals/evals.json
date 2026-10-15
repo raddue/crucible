@@ -488,7 +488,7 @@
         "recon"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
-      "reasoning": "workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. recon whole-repo-onboarding mode is codebase onboarding, not skill-suite onboarding.",
+      "reasoning": "Workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. Getting-started is silent conversation bootstrap, not a user-facing catalog. Recon whole-repo onboarding handles codebase onboarding, not skill-suite onboarding.",
       "difficulty": "easy"
     },
     {
@@ -502,7 +502,7 @@
         "workshop"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
-      "reasoning": "recon whole-repo-onboarding mode deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon should select whole-repo-onboarding mode (no task exists). getting-started is conversation bootstrap, not codebase onboarding.",
+      "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository and optional cross-repo topology before a task. Getting-started is conversation bootstrap, not codebase onboarding.",
       "difficulty": "medium"
     },
     {
@@ -529,7 +529,7 @@
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
-      "reasoning": "Recon should select whole-repo onboarding mode for full structural context before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap."},{,
+      "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap.",
       "difficulty": "medium"
     },
     {
@@ -543,7 +543,7 @@
         "recon improvement-discovery mode"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
-      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. recon whole-repo-onboarding mode is first-time whole-repo onboarding (not scoped to a task). recon improvement-discovery mode hunts architectural friction/improvements, not how-it-works investigation.",
+      "reasoning": "Select task-scoped investigation to map the auth surface for a specific upcoming change. Whole-repo onboarding is not task-scoped; improvement discovery searches for architectural friction, not how auth works.",
       "difficulty": "easy"
     },
     {
@@ -557,7 +557,7 @@
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-      "reasoning": "Recon should select improvement-discovery mode to find architectural friction and propose redesigns. Task investigation maps code to answer how-it-works questions; audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "reasoning": "Select improvement discovery to find architectural friction and propose redesigns. Task investigation answers how-it-works questions; audit reviews a specified subsystem, not an open-ended improvement hunt.",
       "difficulty": "medium"
     },
     {
@@ -571,7 +571,7 @@
         "recon improvement-discovery mode"
       ],
       "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for recon whole-repo-onboarding mode over recon.",
-      "reasoning": "recon whole-repo-onboarding mode deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). recon improvement-discovery mode is improvement discovery, not mapping.",
+      "reasoning": "Select whole-repo onboarding for first-time mapping and sibling-repo topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
       "difficulty": "hard"
     },
     {
@@ -585,7 +585,7 @@
         "recon improvement-discovery mode"
       ],
       "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
-      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. recon whole-repo-onboarding mode would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. recon improvement-discovery mode hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
+      "reasoning": "Select task-scoped investigation: this is one module in service of a specific upcoming change. Whole-repo onboarding is unnecessary; improvement discovery is for architectural friction, not understanding the current refund flow.",
       "difficulty": "medium"
     },
     {
