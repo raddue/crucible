@@ -6,7 +6,7 @@
 - [Mandatory checkpoints](#mandatory-checkpoints)
 - [Merge execution](#merge-execution)
 - [Post-merge health](#post-merge-health)
-- [Cleanup and grudge recording](#cleanup-and-grudge-recording-step-7)
+- [Cleanup and grudge recording](#step-7-cleanup)
 - [Common mistakes and red flags](#common-mistakes-and-red-flags)
 - [Gate execution ledger](#gate-execution-ledger)
 
