@@ -2,6 +2,7 @@
 """Warn-only, per-skill practices audit (#719). No enforcement or baseline yet."""
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
@@ -10,12 +11,12 @@ from catalog import _scalar_value
 ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = {"shared", "skill-selection-evals"}
 COLUMNS = ("Body", "Contents", "Nesting", "Frontmatter", "Scripts")
-# Markdown links and inline-code paths both serve as reference links in these skills.
-LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)|`([^`\n]+\.md)`")
+# Canonical markers declare references; inline-code path mentions do not.
+LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 SCRIPT_STEP = re.compile(r"\b(?:python3?|bash|sh)\s+(?:\S+/)?(?:scripts|hooks)/\S+|\./(?:scripts|hooks)/\S+")
 SETUP = re.compile(r"\b(?:requires?|dependencies|prerequisites?|setup|install|stdlib|built-in|no install|python 3)\b", re.I)
 WHEN = re.compile(r"\b(?:when|whenever|use for|used for|triggers? on|for tasks? (?:that|involving))\b", re.I)
-IMPERATIVE = re.compile(r"(?:^|[.!?]\s+)(?:use|invoke|run|write|create|add|build|make|check|review|turn|generate|extract|read|find|show|you|we|i)\b", re.I)
+PERSONAL = re.compile(r"\b(?:you|your|we|our|i|my)\b", re.I)
 
 
 def references(text: str, source: Path, root: Path) -> set[Path]:
@@ -47,9 +48,27 @@ def has_contents(text: str) -> bool:
                for match in [re.match(r"^\s*[-*+]\s+\[[^]]+\]\(#([^)]+)\)", line)] if match]
     plain = [match.group(1) for line in lines[:20]
              for match in [re.match(r"^\s*[-*+]\s+(.+?)\s*$", line)] if match]
-    return heading and ((bool(entries) and all(anchor in anchors for anchor in entries))
-                        or (bool(plain) and all(re.sub(r"[^\w -]", "", item.lower()).replace(" ", "-") in anchors
-                                                for item in plain)))
+    ordered = [match.group(1) for line in lines[:20]
+               for match in [re.match(r"^\s*\d+[.)]\s+(.+?)\s*$", line)] if match]
+    ordered = [re.sub(r"^\[([^]]+)\]\(#[^)]+\)$", r"\1", item) for item in ordered]
+    label = any(re.match(r"^\*\*(?:table of )?contents\*\*:?\s*$", line, re.I) for line in lines[:20])
+    prose = [line.strip() for line in lines[:20] if line.strip() and not line.lstrip().startswith(("#", "-", "*"))
+             and not re.match(r"^\s*\d+[.)]\s+", line)]
+    return (heading or label) and (bool(entries) and all(anchor in anchors for anchor in entries)
+                                    or bool(plain + ordered) and all(
+                                        re.sub(r"[^\w -]", "", item.lower()).replace(" ", "-") in anchors
+                                        for item in plain + ordered)
+                                    or heading and any(
+                                        sum(word in line.lower() for word in anchor.split("-")) >= 1
+                                        for line in prose for anchor in anchors - {"contents", "table-of-contents"}))
+
+
+def read_markdown(path: Path, problems: list[str]) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except (UnicodeError, OSError) as exc:
+        problems.append(f"{path.name}: cannot read UTF-8 Markdown ({type(exc).__name__})")
+        return ""
 
 
 def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
@@ -59,7 +78,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
         if name in EXCLUDED or name.startswith("temper-eval-"):
             continue
         problems = {column: [] for column in COLUMNS}
-        lines = skill.read_text(encoding="utf-8").splitlines()
+        lines = read_markdown(skill, problems["Frontmatter"]).splitlines()
         end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None) if lines and lines[0].strip() == "---" else None
         if end is None:
             problems["Frontmatter"].append("missing or unclosed frontmatter")
@@ -74,19 +93,24 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
             problems["Frontmatter"].append("name must be <=64 lowercase letters/digits/hyphens")
         if not description or len(description) > 1024:
             problems["Frontmatter"].append("description must be non-empty and <=1024 characters")
-        if description and IMPERATIVE.search(description):
-            problems["Frontmatter"].append("description should be third-person, not imperative/first/second-person")
+        if description and PERSONAL.search(description):
+            problems["Frontmatter"].append("description should use third-person, not first/second-person voice")
         if description and not WHEN.search(description):
             problems["Frontmatter"].append("description lacks when-to-use signal")
 
         direct = references("\n".join(body), skill, root)
         nested = set()
+        read_refs = {}
         for ref in sorted(direct):
-            for child in sorted(references(ref.read_text(encoding="utf-8"), ref, root) - direct - {ref}):
+            text = read_markdown(ref, problems["Contents"])
+            read_refs[ref] = text
+            for child in sorted(references(text, ref, root) - direct - {ref}):
                 nested.add(child)
                 problems["Nesting"].append(f"{ref.relative_to(root)} -> {child.relative_to(root)} not linked directly")
         for ref in sorted(direct | nested):
-            text = ref.read_text(encoding="utf-8")
+            text = read_refs.get(ref)
+            if text is None:
+                text = read_markdown(ref, problems["Contents"])
             if len(text.splitlines()) > 100 and not has_contents(text):
                 problems["Contents"].append(f"{ref.relative_to(root)}: >100 lines, no contents list in first 20")
         for index, line in enumerate(body):
@@ -97,7 +121,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
 
 
 def render(results: dict[str, dict[str, list[str]]]) -> str:
-    header = "# Skill practices audit\n\nWarn-only snapshot for #719; violations do not fail CI. Re-run `python3 scripts/check_skill_best_practices.py`. Scripts column is a best-effort dependency-note heuristic. Later `--enforce` can compare per-skill failures against a ratchet baseline; no baseline or enforcement exists yet.\n\n"
+    header = "# Skill practices audit\n\nWarn-only snapshot for #719; violations do not fail CI. Refresh with `python3 scripts/check_skill_best_practices.py --write-report`; the default check-only run never updates this file. Scripts column is a best-effort dependency-note heuristic. Later `--enforce` can compare per-skill failures against a ratchet baseline; no baseline or enforcement exists yet.\n\n"
     rows = ["| Skill | Body | Contents | Nesting | Frontmatter | Scripts | Overall |",
             "| --- | --- | --- | --- | --- | --- | --- |"]
     for name, checks in results.items():
@@ -116,21 +140,25 @@ def render(results: dict[str, dict[str, list[str]]]) -> str:
     return header + "\n".join(rows + details) + "\n"
 
 
-def main(root: Path = ROOT) -> int:
+def main(root: Path = ROOT, write_report: bool = False) -> int:
     results = audit(root)
     report = root / "docs" / "skill-practices-audit.md"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    content = render(results)
-    if not report.exists() or report.read_text(encoding="utf-8") != content:
-        report.write_text(content, encoding="utf-8")
+    if write_report:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        content = render(results)
+        if not report.exists() or report.read_text(encoding="utf-8") != content:
+            report.write_text(content, encoding="utf-8")
     print(f"Skill practices audit: {len(results)} skills; {sum(all(not x for x in checks.values()) for checks in results.values())} clean; warn-only")
     for name, checks in results.items():
         for column in COLUMNS:
             for item in checks[column]:
                 print(f"WARN {name} {column}: {item}")
-    print(f"Scorecard: {report.relative_to(root)}")
+    if write_report:
+        print(f"Scorecard: {report.relative_to(root)}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--write-report", action="store_true", help="update docs/skill-practices-audit.md")
+    raise SystemExit(main(write_report=parser.parse_args().write_report))
