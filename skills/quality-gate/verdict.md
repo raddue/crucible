@@ -166,7 +166,7 @@ record rather than that chunk's, and neither rollback may delete the other's.
 
 **The record home is not the findings root (S5, round 13).** `skills/quality-gate/recovery.md`
 leaves **every** integration-round file home and the `<findings-root>` itself unpinned
-(`SKILL.md:293` and its Round History), so pinning this record's path is not enough: the
+(`recovery.md` › Round History and Compaction Recovery), so pinning this record's path is not enough: the
 round's findings, journal, coverage and linter second root can land elsewhere or nowhere
 while the emitter still reads a `cross-chunk` record. This plan therefore does **not** pin
 that layout unilaterally — it **blocks the integration populator** until the gate's
