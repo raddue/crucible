@@ -97,7 +97,7 @@ Begin by reading that file.
 > reference implementation, retained deliberately; de-duplicating it is tracked
 > separately).
 >
-> Prior art and reference implementation of tier 1: `skills/quality-gate/SKILL.md`
+> Prior art and reference implementation of tier 1: `skills/quality-gate/cost-fix.md`
 > ("Scope Anchoring for Fix Agents"). Measured evidence for tier 2: `#562` spike,
 > `docs/research/2026-09-06-scope-judge-spike.md`.
 

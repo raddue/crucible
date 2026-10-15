@@ -389,7 +389,7 @@ Any counter for which reason codes were recorded carries them as a sorted, de-du
 | code | exit | what produces it | remedy |
 | --- | --- | --- | --- |
 | `tier1-reject` | 1 | Tier-1 rejected the receipt, so Tier-2 was never entered. | Fix the receipt and re-dispatch. |
-| `root-absent` | 1 | A supplied `--root` names a directory that does not exist — the normal pre-write state of a findings root the reviewed subagent creates, and also what a crash, a timeout or a wrong output path produces. Tier-1 ran; Tier-2 did not. | Create the directory before the lint (see `quality-gate/SKILL.md`), then re-run. |
+| `root-absent` | 1 | A supplied `--root` names a directory that does not exist — the normal pre-write state of a findings root the reviewed subagent creates, and also what a crash, a timeout or a wrong output path produces. Tier-1 ran; Tier-2 did not. | Create the directory before the lint (see `quality-gate/receipt-consensus.md`), then re-run. |
 | `root-collapse` | 1 | Two **differently spelled** `--root` tokens resolve to one directory, so the cross-root ambiguity check could not fire. Tier-1 ran; Tier-2 did not. | Inspect the findings root for a symlink before re-running. |
 | `root-invalid` | 2 | A supplied `--root` is the **empty string**, or names an existing **non-directory** (the `<findings-root>` vs `[FINDINGS_OUTPUT_PATH]` one-token slip, or a swallowed shell substitution). Nothing ran, Tier-1 included. | Fix the command line. |
 | `root-missing-value` | 2 | `--root` was the **final** token — a substitution expanded to nothing and ate the root. | Fix the command line. |
