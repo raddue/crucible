@@ -34,7 +34,7 @@
       "id": "test-methodology-direct-03",
       "dimension": "direct",
       "boundary": "test-methodology",
-      "prompt": "I just finished implementing the rate limiter. Try to break it \u2014 find edge cases I missed.",
+      "prompt": "I just finished implementing the rate limiter. Try to break it — find edge cases I missed.",
       "expected_skill": "adversarial-tester",
       "common_mistakes": [
         "test-coverage",
@@ -42,7 +42,7 @@
         "red-team"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
-      "reasoning": "Implementation is done \u2014 this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Adversarial-tester reads implementation diffs and writes tests designed to make it break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
+      "reasoning": "Implementation is done — this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Adversarial-tester reads implementation diffs and writes tests designed to make it break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
       "difficulty": "easy"
     },
     {
@@ -55,7 +55,7 @@
         "test-driven-development"
       ],
       "context": "Code was built last week. Tests need to be added after the fact. This is retroactive test addition, not test-first development.",
-      "reasoning": "Despite saying 'write tests', this is NOT TDD. The parser already exists \u2014 TDD requires writing tests BEFORE implementation. Test-coverage audits and adds tests for existing code. The key signal is 'I just built' (past tense) \u2014 the code-before-test ship has sailed.",
+      "reasoning": "Despite saying 'write tests', this is NOT TDD. The parser already exists — TDD requires writing tests BEFORE implementation. Test-coverage audits and adds tests for existing code. The key signal is 'I just built' (past tense) — the code-before-test ship has sailed.",
       "difficulty": "hard"
     },
     {
@@ -82,7 +82,7 @@
         "quality-gate"
       ],
       "context": "User is requesting a review of their own work before submission. No external feedback has been received.",
-      "reasoning": "Code-review is for when you want your work reviewed \u2014 requesting a review. Review-feedback is for when you have RECEIVED review comments and need to process them. The direction is outbound (requesting review), not inbound (receiving feedback).",
+      "reasoning": "Code-review is for when you want your work reviewed — requesting a review. Review-feedback is for when you have RECEIVED review comments and need to process them. The direction is outbound (requesting review), not inbound (receiving feedback).",
       "difficulty": "easy"
     },
     {
@@ -95,7 +95,7 @@
         "temper"
       ],
       "context": "User has received review feedback on a PR and needs to process and respond to the comments.",
-      "reasoning": "Review-feedback handles inbound review comments \u2014 analyzing them for technical merit, identifying unclear or contradictory items, and determining the right response. Code-review would be requesting a new review, which is the wrong direction.",
+      "reasoning": "Review-feedback handles inbound review comments — analyzing them for technical merit, identifying unclear or contradictory items, and determining the right response. Code-review would be requesting a new review, which is the wrong direction.",
       "difficulty": "easy"
     },
     {
@@ -108,7 +108,7 @@
         "temper"
       ],
       "context": "Despite using the word 'review', the user has RECEIVED feedback and needs to process it. The feedback is inbound.",
-      "reasoning": "The word 'review' appears but the direction is inbound \u2014 the user received comments and needs to process them. Review-feedback handles this. Code-review would be wrong because the user is not requesting a fresh review of their code.",
+      "reasoning": "The word 'review' appears but the direction is inbound — the user received comments and needs to process them. Review-feedback handles this. Code-review would be wrong because the user is not requesting a fresh review of their code.",
       "difficulty": "medium"
     },
     {
@@ -121,8 +121,8 @@
         "review-feedback",
         "audit"
       ],
-      "context": "User is presenting their own code and asking for a review. No prior feedback exists \u2014 this is a request for review.",
-      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) \u2014 temper. If the user had said 'I got a review on this code, help me address it', the direction would be inbound \u2014 review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit.",
+      "context": "User is presenting their own code and asking for a review. No prior feedback exists — this is a request for review.",
+      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) — temper. If the user had said 'I got a review on this code, help me address it', the direction would be inbound — review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit.",
       "difficulty": "easy"
     },
     {
@@ -144,14 +144,14 @@
       "id": "adversarial-scope-direct-02",
       "dimension": "direct",
       "boundary": "adversarial-scope",
-      "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem \u2014 correctness, robustness, architecture, everything.",
+      "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem — correctness, robustness, architecture, everything.",
       "expected_skill": "audit",
       "common_mistakes": [
         "red-team",
         "temper",
         "recon"
       ],
-      "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact \u2014 an entire subsystem with multiple files.",
+      "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact — an entire subsystem with multiple files.",
       "reasoning": "Audit dispatches parallel analysis agents across four lenses (correctness, robustness, consistency, architecture) on an existing subsystem. Red-team reviews a single artifact. Code-review is lighter-weight. Prospector looks for architectural friction across the whole codebase, not a specific subsystem.",
       "difficulty": "medium"
     },
@@ -159,7 +159,7 @@
       "id": "adversarial-scope-negative-01",
       "dimension": "negative",
       "boundary": "adversarial-scope",
-      "prompt": "We just assembled the full feature \u2014 auth, API routes, database migrations, and frontend. Hunt for cross-component bugs before we ship.",
+      "prompt": "We just assembled the full feature — auth, API routes, database migrations, and frontend. Hunt for cross-component bugs before we ship.",
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
@@ -181,21 +181,21 @@
         "red-team"
       ],
       "context": "Despite using the word 'audit', the focus is specifically on security. This narrows the scope from general audit to security audit.",
-      "reasoning": "Siege is the security-specific audit \u2014 dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture \u2014 broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
+      "reasoning": "Siege is the security-specific audit — dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture — broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
       "difficulty": "hard"
     },
     {
       "id": "completion-claims-direct-01",
       "dimension": "direct",
       "boundary": "completion-claims",
-      "prompt": "I just ran the tests and they all pass \u2014 here's the output:\n\n```\n$ npm test\n  12 passing (340ms)\n  0 failing\n```\n\nFeature works end-to-end. Let's create a PR and merge.",
+      "prompt": "I just ran the tests and they all pass — here's the output:\n\n```\n$ npm test\n  12 passing (340ms)\n  0 failing\n```\n\nFeature works end-to-end. Let's create a PR and merge.",
       "expected_skill": "finish",
       "common_mistakes": [
         "verify",
         "temper"
       ],
       "context": "User has provided fresh test evidence in the current message. Verification is satisfied. This is now an integration decision.",
-      "reasoning": "Finish guides completion \u2014 presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain.",
+      "reasoning": "Finish guides completion — presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain.",
       "difficulty": "easy"
     },
     {
@@ -209,7 +209,7 @@
         "test-coverage"
       ],
       "context": "User is uncertain about completion. They need evidence, not an integration decision.",
-      "reasoning": "Verify runs verification commands and confirms output before any success claims \u2014 evidence before assertions. The user says 'I think' (uncertain) and 'confirm everything works' (needs evidence). Finish would be premature \u2014 the user has not yet confirmed the work is correct.",
+      "reasoning": "Verify runs verification commands and confirms output before any success claims — evidence before assertions. The user says 'I think' (uncertain) and 'confirm everything works' (needs evidence). Finish would be premature — the user has not yet confirmed the work is correct.",
       "difficulty": "easy"
     },
     {
@@ -222,7 +222,7 @@
         "finish"
       ],
       "context": "User claims completion but has not provided evidence of running tests or verification commands in the current session. 'Looks good to me' is a subjective claim, not verified evidence.",
-      "reasoning": "Despite the user's confidence, verify requires fresh evidence in the current session. 'Looks good to me' is not the same as 'tests pass and here is the output'. Verify must run before finish \u2014 the completion claim needs evidence backing.",
+      "reasoning": "Despite the user's confidence, verify requires fresh evidence in the current session. 'Looks good to me' is not the same as 'tests pass and here is the output'. Verify must run before finish — the completion claim needs evidence backing.",
       "difficulty": "hard"
     },
     {
@@ -234,8 +234,8 @@
       "common_mistakes": [
         "verify"
       ],
-      "context": "All verification signals present: tests pass, CI green, peer approvals received. The user is asking what the next step is \u2014 this is an integration decision.",
-      "reasoning": "Same completion-area prompt as other evals in this boundary, but context includes strong evidence (tests, CI, approvals). With evidence satisfied, the question 'what now?' is an integration decision \u2014 finish. If evidence were missing, verify would be correct. The distinguishing context is the presence of multiple verification signals.",
+      "context": "All verification signals present: tests pass, CI green, peer approvals received. The user is asking what the next step is — this is an integration decision.",
+      "reasoning": "Same completion-area prompt as other evals in this boundary, but context includes strong evidence (tests, CI, approvals). With evidence satisfied, the question 'what now?' is an integration decision — finish. If evidence were missing, verify would be correct. The distinguishing context is the presence of multiple verification signals.",
       "difficulty": "medium"
     },
     {
@@ -249,7 +249,7 @@
         "audit"
       ],
       "context": "Active failure with error evidence. This is a bug to investigate and fix, not a completion check or subsystem review.",
-      "reasoning": "Debugging handles active failures \u2014 bugs, test failures, unexpected behavior. The user has an error log showing a specific failure. Verify checks completion claims (no active failure here). Audit reviews subsystems (this is a specific bug, not a broad review).",
+      "reasoning": "Debugging handles active failures — bugs, test failures, unexpected behavior. The user has an error log showing a specific failure. Verify checks completion claims (no active failure here). Audit reviews subsystems (this is a specific bug, not a broad review).",
       "difficulty": "easy"
     },
     {
@@ -262,8 +262,8 @@
         "verify",
         "test-coverage"
       ],
-      "context": "Tests pass but behavior is wrong. This is a bug \u2014 the tests are insufficient or the bug is in an untested path.",
-      "reasoning": "Despite tests passing, there is unexpected behavior (wrong search results). This is a debugging scenario \u2014 investigate the root cause. Verify would just re-run the (already passing) tests. Test-coverage would audit test quality but not investigate the specific user-reported issue.",
+      "context": "Tests pass but behavior is wrong. This is a bug — the tests are insufficient or the bug is in an untested path.",
+      "reasoning": "Despite tests passing, there is unexpected behavior (wrong search results). This is a debugging scenario — investigate the root cause. Verify would just re-run the (already passing) tests. Test-coverage would audit test quality but not investigate the specific user-reported issue.",
       "difficulty": "medium"
     },
     {
@@ -276,8 +276,8 @@
         "audit",
         "verify"
       ],
-      "context": "User reports something is wrong \u2014 this is an active problem, not a proactive review. The phrasing indicates a current issue, not a desire for broad subsystem review.",
-      "reasoning": "'Something is wrong' signals an active problem \u2014 debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate.",
+      "context": "User reports something is wrong — this is an active problem, not a proactive review. The phrasing indicates a current issue, not a desire for broad subsystem review.",
+      "reasoning": "'Something is wrong' signals an active problem — debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate.",
       "difficulty": "medium"
     },
     {
@@ -294,7 +294,7 @@
         "planning"
       ],
       "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline. Tests design-before-build ordering discipline.",
-      "reasoning": "Design must come before build \u2014 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient \u2014 it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline).",
+      "reasoning": "Design must come before build — 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient — it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline).",
       "difficulty": "medium"
     },
     {
@@ -359,7 +359,7 @@
         "test-driven-development"
       ],
       "context": "Build-shaped: spec + implement + PR, with test emphasis.",
-      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG \u2014 invoking TDD or spec directly would bypass build's orchestration.",
+      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG — invoking TDD or spec directly would bypass build's orchestration.",
       "difficulty": "easy"
     },
     {
@@ -388,7 +388,7 @@
         "test-driven-development"
       ],
       "context": "Build-shaped: implement + PR in one prompt.",
-      "reasoning": "Implement + PR together is a build-shaped dispatch \u2014 the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
+      "reasoning": "Implement + PR together is a build-shaped dispatch — the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
       "difficulty": "easy"
     },
     {
@@ -431,7 +431,7 @@
         "planning"
       ],
       "context": "Build-shaped: explicit 'build end-to-end' framing.",
-      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build \u2014 it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
+      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build — it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
       "difficulty": "easy"
     },
     {
@@ -474,7 +474,7 @@
         "simplify"
       ],
       "context": "Boundary case: refactor + PR. Refactor reads like /simplify but scope + PR makes it build-shaped.",
-      "reasoning": "Refactor with explicit PR at the end is still design-through-execution \u2014 particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
+      "reasoning": "Refactor with explicit PR at the end is still design-through-execution — particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
       "difficulty": "medium"
     },
     {
@@ -488,7 +488,7 @@
         "recon"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
-      "reasoning": "workshop is the on-demand tour of the Crucible workshop \u2014 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. recon whole-repo-onboarding mode is codebase onboarding, not skill-suite onboarding.",
+      "reasoning": "workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. recon whole-repo-onboarding mode is codebase onboarding, not skill-suite onboarding.",
       "difficulty": "easy"
     },
     {
@@ -498,11 +498,11 @@
       "prompt": "I just cloned this repo and have never seen it. Give me full structural context before I start.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
-        "getting-started"
+        "getting-started",
+        "workshop"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
-      "reasoning": "recon whole-repo-onboarding mode deep-scans an unfamiliar repo for full structural context and cross-repo topology \u2014 first-time whole-repo onboarding. recon should select whole-repo-onboarding mode (no task exists). getting-started is conversation bootstrap, not codebase onboarding.",
+      "reasoning": "recon whole-repo-onboarding mode deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon should select whole-repo-onboarding mode (no task exists). getting-started is conversation bootstrap, not codebase onboarding.",
       "difficulty": "medium"
     },
     {
@@ -525,10 +525,10 @@
       "prompt": "Onboard me to this unfamiliar codebase so I have context before the first real task.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
-        "workshop"
+        "workshop",
+        "getting-started"
       ],
-      "context": "Onboarding to a codebase (not the skill suite) before any specific task \u2014 whole-repo structural context.",
+      "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
       "reasoning": "recon whole-repo-onboarding mode owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is recon whole-repo-onboarding mode verbatim.",
       "difficulty": "medium"
     },
@@ -539,11 +539,11 @@
       "prompt": "Before I add OAuth, investigate how auth currently works in this repo.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
-        "recon"
+        "recon whole-repo-onboarding mode",
+        "recon improvement-discovery mode"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
-      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches \u2014 'investigate how auth works before I add OAuth' is exactly task-scoped recon. recon whole-repo-onboarding mode is first-time whole-repo onboarding (not scoped to a task). recon improvement-discovery mode hunts architectural friction/improvements, not how-it-works investigation.",
+      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. recon whole-repo-onboarding mode is first-time whole-repo onboarding (not scoped to a task). recon improvement-discovery mode hunts architectural friction/improvements, not how-it-works investigation.",
       "difficulty": "easy"
     },
     {
@@ -553,25 +553,25 @@
       "prompt": "Where are the structural problems in this codebase? What should I refactor?",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
+        "recon task-investigation mode",
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-      "reasoning": "recon improvement-discovery mode explores a codebase for architectural friction and proposes redesigns \u2014 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "reasoning": "recon improvement-discovery mode explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
       "difficulty": "medium"
     },
     {
       "id": "explore-vs-improve-negative-01",
       "dimension": "negative",
       "boundary": "explore-vs-improve",
-      "prompt": "First time in this repo \u2014 map the whole thing and any sibling repos it depends on.",
+      "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
-        "recon"
+        "recon task-investigation mode",
+        "recon improvement-discovery mode"
       ],
-      "context": "Whole-repo first-time mapping PLUS cross-repo topology \u2014 the distinguishing signal for recon whole-repo-onboarding mode over recon.",
-      "reasoning": "recon whole-repo-onboarding mode deep-scans a repo AND discovers cross-repo topology for first-time onboarding \u2014 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). recon improvement-discovery mode is improvement discovery, not mapping.",
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for recon whole-repo-onboarding mode over recon.",
+      "reasoning": "recon whole-repo-onboarding mode deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). recon improvement-discovery mode is improvement discovery, not mapping.",
       "difficulty": "hard"
     },
     {
@@ -581,11 +581,11 @@
       "prompt": "Explore the payment module so I understand it before I touch the refund flow.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
-        "recon"
+        "recon whole-repo-onboarding mode",
+        "recon improvement-discovery mode"
       ],
-      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module \u2014 task-scoped recon, not whole-repo onboarding.",
-      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. recon whole-repo-onboarding mode would be wrong \u2014 this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. recon improvement-discovery mode hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
+      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
+      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. recon whole-repo-onboarding mode would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. recon improvement-discovery mode hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
       "difficulty": "medium"
     },
     {
@@ -599,7 +599,7 @@
         "test-coverage"
       ],
       "context": "A single completed implementation; the ask is to write tests that break that one component.",
-      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break \u2014 per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
+      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break — per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
       "difficulty": "medium"
     },
     {
@@ -613,7 +613,7 @@
         "quality-gate"
       ],
       "context": "User wants the whole pre-push review gate run over their changes, not a single reviewer.",
-      "reasoning": "The 'gate ... before I push' push-gate cue routes to warden \u2014 the whole-set gate that runs temper, delve, red-team, siege, and inquisitor and returns one verdict. temper is a single fresh-eyes merge-verdict reviewer (one leg of warden); quality-gate red-teams a typed artifact, not a code push gate.",
+      "reasoning": "The 'gate ... before I push' push-gate cue routes to warden — the whole-set gate that runs temper, delve, red-team, siege, and inquisitor and returns one verdict. temper is a single fresh-eyes merge-verdict reviewer (one leg of warden); quality-gate red-teams a typed artifact, not a code push gate.",
       "difficulty": "medium"
     },
     {
@@ -695,7 +695,7 @@
         "adr"
       ],
       "context": "The decision has not been made yet; the user needs to explore and choose.",
-      "reasoning": "design explores and decides. adr only records decisions already made \u2014 it refuses on an unsettled decision.",
+      "reasoning": "design explores and decides. adr only records decisions already made — it refuses on an unsettled decision.",
       "difficulty": "medium"
     },
     {
@@ -721,7 +721,7 @@
         "adr"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-      "reasoning": "grudge is the book of grudges \u2014 bug regression memory. adr records decisions with alternatives, not bugs.",
+      "reasoning": "grudge is the book of grudges — bug regression memory. adr records decisions with alternatives, not bugs.",
       "difficulty": "easy"
     },
     {
@@ -761,7 +761,7 @@
         "adr"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
-      "reasoning": "recall/recon own the read side (they mine docs/decisions/). adr writes and refuses on a settled decision \u2014 it has no answer output.",
+      "reasoning": "recall/recon own the read side (they mine docs/decisions/). adr writes and refuses on a settled decision — it has no answer output.",
       "difficulty": "medium"
     }
   ]
