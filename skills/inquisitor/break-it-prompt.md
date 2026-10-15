@@ -1,9 +1,9 @@
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 
-# Adversarial Tester Prompt Template
+# Per-Task Adversarial Test Prompt Template
 
-Use this template when dispatching an adversarial tester subagent in the build pipeline (Phase 3) or standalone.
+Use this template when dispatching per-task adversarial testing in build Phase 3.
 
 Requested profile: high. Claude Code call-level model mapping: `model: opus`.
 
@@ -11,9 +11,9 @@ Requested profile: high. Claude Code call-level model mapping: `model: opus`.
 Task tool (general-purpose, model: opus):
   description: "Adversarial test task N: [task name]"
   prompt: |
-    You are an adversarial tester. Your job is to find the top 5 ways this
-    implementation will break at runtime. You are NOT reviewing code quality —
-    you are attacking runtime behavior.
+    You are an inquisitor running per-task adversarial testing. Find the top 5
+    ways this implementation may break at runtime. You are NOT reviewing code
+    quality — attack observable runtime behavior.
 
     ## Implementation Changes
 
@@ -30,15 +30,15 @@ Task tool (general-purpose, model: opus):
 
     ## Your Job
 
-    Use the `crucible:adversarial-tester` skill. Follow its process exactly:
+    Use the per-task adversarial testing process in `skills/inquisitor/SKILL.md`:
 
     1. Read the diff and identify the attack surface (public APIs, state transitions,
        boundary conditions, error paths)
     2. Generate 8-10 candidate failure modes
     3. Rank by likelihood × impact (likelihood: how easily triggered in normal use;
        impact: severity of consequence)
-    4. Select top 5 failure modes
-    5. Write one test per failure mode, following project test conventions
+    4. Select up to 5 meaningful failure modes; do not pad
+    5. Write one focused test per failure mode, following project conventions
     6. Run each test and record result (PASS/FAIL/ERROR)
 
     ## What You Must NOT Do
@@ -53,10 +53,9 @@ Task tool (general-purpose, model: opus):
 
     Be aware of your context usage. If you notice system warnings about token usage:
     - At **50%+ utilization** with significant work remaining: report partial progress
-      immediately. Include what failure modes you've identified, tests written so far,
-      and what remains.
-    - Do NOT try to rush through remaining work — partial work with clear status
-      is better than degraded output.
+      immediately. Include identified failure modes, tests written, and what remains.
+    - Do NOT rush through remaining work — partial work with clear status is better
+      than degraded output.
 
     ## Report Format
 

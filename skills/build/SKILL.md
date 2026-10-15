@@ -97,7 +97,7 @@ Extract `keys=` and `files=` discriminators at insertion time (severity-max, `*-
 - Reviewer (code / test): `read-artifact`, `emit-findings`.
 - Cleanup agent: `read-diff`, `emit-recommendation`.
 - Plan writer / plan reviewer: `read-design`, `emit-artifact`.
-- Acceptance-test writer / test-gap writer / adversarial tester: `run-tests`, `emit-tests`.
+- Acceptance-test writer / test-gap writer / Inquisitor per-task mode: `run-tests`, `emit-tests`.
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -823,7 +823,7 @@ Write a handoff manifest:
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, adversarial-tester, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
 
 ### Step 0: Load Module Context for Subagents
 
@@ -903,7 +903,7 @@ For each task (or wave of parallel tasks):
    - Use `./build-reviewer-prompt.md` template
 5. **Tier-aware review routing:** Read the task's `Review-Tier` from plan metadata.
    - **Tier 1:** Dispatch single-pass code reviewer (Sonnet). If Clean or Minor-only: task complete. If Critical/Important: dispatch implementer fix, then task complete. If Architectural Concern: escalate.
-   - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch adversarial tester (per existing logic). Task complete.
+   - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch Inquisitor per-task mode (per existing logic). Task complete.
    - **Tier 3:** Follow current full pipeline (no changes to existing flow).
 
 #### Contract-Aware Implementer Guidance
@@ -955,8 +955,8 @@ digraph review {
   "Pass 2: Test Quality Review" -> "Implementer fixes test findings";
   "Implementer fixes test findings" -> "Test Alignment Audit (crucible:test-coverage)";
   "Test Alignment Audit (crucible:test-coverage)" -> "Test Gap Writer";
-  "Test Gap Writer" -> "Adversarial Tester";
-  "Adversarial Tester" -> "Task complete";
+  "Test Gap Writer" -> "Inquisitor per-task mode";
+  "Inquisitor per-task mode" -> "Task complete";
 }
 ```
 
@@ -978,7 +978,7 @@ Each task's `Review-Tier` (from the plan) determines which review steps execute.
 | Implementer fixes (test) | SKIP | If critical findings only | If findings |
 | Test alignment audit | SKIP | SKIP | Yes |
 | Test gap writer | SKIP | SKIP | Yes |
-| Adversarial tester | SKIP | Yes | Yes |
+| Inquisitor per-task mode | SKIP | Yes | Yes |
 
 **Tier 1 "single pass" code review:** Dispatch one reviewer. If findings are Clean, task is complete. If findings include Critical or Important issues, dispatch implementer to fix, then the task is complete (no re-review). If findings include an Architectural Concern, escalate as normal.
 
@@ -1039,12 +1039,12 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 4. The test gap writer reports per-test PASS/FAIL results (see prompt template for report format)
 5. Commits new tests: `test: fill coverage gaps for task N`
 
-**If all tests PASS:** Continue to adversarial tester.
+**If all tests PASS:** Continue to Inquisitor per-task mode.
 
 **If some tests FAIL** (gaps reveal genuinely missing implementation):
 1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, and the gap descriptions from the reviewer
 2. Implementer fixes the missing behavior, then re-runs ALL test gap writer tests (not just the failures — catches regressions from the fix)
-3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to adversarial tester
+3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to Inquisitor per-task mode
 4. If tests still fail after one fix attempt: **escalate to user** with:
    - Which coverage gaps the reviewer identified
    - Which tests the gap writer wrote (per-test PASS/FAIL)
@@ -1053,16 +1053,16 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 
 **Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
 
-#### Adversarial Tester
+#### Inquisitor Per-Task Mode
 
-After the test gap writer completes (or is skipped), dispatch an **Adversarial Tester** (Opus) using `skills/adversarial-tester/break-it-prompt.md`:
+After the test gap writer completes (or is skipped), dispatch **Inquisitor per-task mode** (Opus) using `skills/inquisitor/break-it-prompt.md`:
 
 1. Input: Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`), project test conventions, cartographer module context (if available)
-2. The adversarial tester identifies the top 5 most likely failure modes, writes one test per mode, and runs them
+2. Inquisitor per-task mode identifies the top 5 most likely failure modes, writes one test per mode, and runs them
 3. Outcome handling:
    - **All tests PASS:** Implementation is robust. Log results and proceed to task complete.
    - **Some tests FAIL:** Real weaknesses found. Dispatch implementer to fix. Re-run all tests (including adversarial). If pass → task complete. If fail → one more fix attempt, then escalate to user.
-   - **Tests ERROR (won't compile):** Adversarial tester mistake. Discard broken tests, log, proceed to task complete.
+   - **Tests ERROR (won't compile):** Inquisitor per-task mode mistake. Discard broken tests, log, proceed to task complete.
 4. Quality bypass prevention: If the implementer's fix touches more than 3 files, route through a lightweight code review before completing.
 5. Commit adversarial tests: `test: adversarial tests for task N`
 
@@ -1119,13 +1119,13 @@ When the executor encounters a task marked `atomic: true`:
 
 **Key difference from feature mode:** Feature mode does RED-GREEN-REFACTOR. Refactor mode for atomic steps does **GREEN-GREEN** — tests are green before, tests must be green after. No RED phase because no new behavior is being added.
 
-After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and adversarial tester (unless skipped per restructuring-only annotation below).
+After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and Inquisitor per-task mode (unless skipped per restructuring-only annotation below).
 
 **Non-atomic refactoring tasks** follow normal execution — structural changes that don't break intermediate states (e.g., extracting a private method, adding a module nothing imports yet). These use standard TDD if they introduce new abstractions, or GREEN-GREEN if they are pure restructuring.
 
 ##### Phase 3 Adaptations for Existing Steps
 
-- **Adversarial tester:** The planner annotates each task with `restructuring-only: true/false`. If `restructuring-only: true`, adversarial testing is skipped. Tasks with `restructuring-only: false` still get adversarial testing. When in doubt, default to `false`.
+- **Inquisitor per-task mode:** The planner annotates each task with `restructuring-only: true/false`. If `restructuring-only: true`, per-task adversarial testing is skipped. Tasks with `restructuring-only: false` still get it. When in doubt, default to `false`.
   - `restructuring-only: true` examples: renames where all call sites are mechanically updated, file moves with updated paths, extract-method where the extracted method is private and preserves the original call signature
   - `restructuring-only: false` examples: extract-class where callers must change call targets, splitting a module where consumers must update imports, any change where the consumer-facing API surface shifts
 - **De-sloppify cleanup:** Gains a new removal category: **dead compatibility shims.** After a refactoring task, look for leftover adapter code, re-export aliases, or compatibility layers introduced during migration but no longer referenced. Detection scope: code added after the baseline commit SHA that re-exports, aliases, or wraps symbols under old names, AND where no code outside the refactoring's changed files references the old names. **String-based references:** When the target was registered by name in a configuration system, flag the shim as UNCERTAIN and defer to the reviewer rather than removing it.
@@ -1347,10 +1347,10 @@ Decision types to capture:
 - `./contract-test-writer-prompt.md` — Phase 1 refactor-mode contract test generation
 - `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
-Red-team, innovate, adversarial tester, and inquisitor prompts live in their respective skills:
+Red-team, innovate, and inquisitor prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
 - `crucible:innovate` — `skills/innovate/innovate-prompt.md`
-- `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
+- `crucible:inquisitor` per-task mode — `skills/inquisitor/break-it-prompt.md`
 - `crucible:inquisitor` — `skills/inquisitor/inquisitor-prompt.md`
 
 ## Quality Gate Orchestration
@@ -1409,7 +1409,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
 - **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
 - **crucible:innovate** — Creative enhancement before quality gates
-- **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, inside the warden gate)
+- **crucible:inquisitor** — Per-task adversarial testing (Phase 3) and full-feature cross-component testing (Phase 4, inside the warden gate)
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
 **Recommended sub-skills:**

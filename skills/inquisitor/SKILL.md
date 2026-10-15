@@ -1,33 +1,37 @@
 ---
 name: inquisitor
-description: "Use when a full feature is assembled and you want to hunt cross-component bugs before final quality gate. Runs 5 parallel adversarial dimensions against the complete implementation diff. Triggers on 'inquisitor', 'hunt bugs', 'cross-component test', 'find integration issues', or automatically in build pipeline Phase 4."
+description: "Use after an implementation to find runtime failure modes, write up to 5 adversarial tests, or hunt cross-component bugs in an assembled feature. Runs per-task adversarial testing and 5 parallel dimensions against full feature diffs. Triggers on 'inquisitor', 'hunt bugs', 'cross-component test', 'find integration issues', 'break it', 'adversarial test', 'stress test implementation', 'find weaknesses', or automatically in build pipeline Phase 4."
 ---
 
 # Inquisitor
 
-Hunt cross-component bugs by dispatching 5 parallel adversarial dimensions against the full feature diff. Each dimension writes and runs tests targeting a different class of failure mode that per-task testing misses.
+Find runtime failure modes with up to 5 adversarial tests for a single task, or hunt cross-component bugs by dispatching 5 parallel adversarial dimensions against the full feature diff. Use the per-task mode in Phase 3 and the full-feature mode in Phase 4.
 
-**Announce at start:** "I'm using the inquisitor skill to hunt cross-component bugs across the full implementation."
+**Announce at start:** "I'm using the inquisitor skill to find runtime failure modes and test the implementation adversarially."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Model:** Opus (orchestrating parallel adversarial subagents requires precise coordination)
+**Model:** Opus for full-feature mode; high profile for per-task dispatches.
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
-## Why This Exists
+## Per-Task Adversarial Testing (Build Phase 3)
 
-Per-task adversarial testing (Phase 3) sees one task's diff. It catches bugs within each task's scope. But the bugs you find instantly after a big feature lands live in the **seams** -- wiring that's almost right, state that initializes in one task but gets consumed in another, edge cases that only appear when the whole feature is assembled.
+Use after implementation to find unknown runtime weaknesses within one task's diff. Read the full diff, brainstorm 8–10 candidate failure modes, rank by likelihood and impact, then write and run up to 5 focused tests for the strongest meaningful cases (fewer if fewer qualify). Tests must target observable behavior, follow project conventions, include a brief comment explaining each attack vector, and avoid duplicating existing coverage. Report each attack vector, likelihood, impact, test, result (PASS/FAIL/ERROR), and fix guidance for failures. Do not modify production code or refactor existing tests. Skip only when the task has no behavioral logic or no tests were written during implementation. In build, route FAILs through the existing implementer fix loop; discard ERROR tests. Start with a mode-neutral announcement, or name per-task adversarial testing when the caller distinguishes the modes.
 
-The inquisitor sees the FULL diff and attacks the interactions.
+Use `./break-it-prompt.md` for per-task dispatches. Emit its `## ADVERSARIAL TEST REPORT` format, not the full-feature `## INQUISITOR REPORT` format. Do not run the full-feature ledger-emission step for per-task results; the canonical ledger entry describes the inquisitor multi-dimension gate and is not defined for a per-task test proposal.
+
+## Why Full-Feature Mode Exists
+
+Per-task testing sees one task's diff and catches bugs within its scope. Bugs that appear only after assembly live in the **seams** -- wiring that's almost right, state initialized in one task but consumed in another, and edge cases that require the full feature. Full-feature mode sees the complete diff and attacks those interactions.
 
 ## Distinction from Related Skills
 
 | Agent | Question | Output | Scope |
 |-------|----------|--------|-------|
 | Red-team | "What's wrong with this artifact?" | Written findings (Fatal/Significant/Minor) | Attacks designs, plans, code quality |
-| Adversarial Tester | "What runtime behavior breaks?" | Executable tests (per-task) | Single task's changes |
+| **Inquisitor (per-task)** | "What runtime behavior breaks?" | Up to 5 executable tests | Single task's changes |
 | **Inquisitor** | "What breaks between components?" | Executable tests (full feature) | Cross-component interactions across all tasks |
 
 ## The 5 Dimensions
@@ -104,7 +108,9 @@ Each dimension is a parallel subagent with a specific attack lens. All 5 are dis
 
 **Test style:** Exercise existing functionality through paths that touch newly modified code, verifying prior behavior is preserved.
 
-## Process
+## Full-Feature Process
+
+Use this process only when the caller requests cross-component analysis of an assembled feature or build reaches Phase 4. Per-task Phase 3 uses the section above and `break-it-prompt.md`.
 
 ### Step 1: Determine the Full Feature Diff
 
@@ -247,11 +253,11 @@ When used within the build pipeline (Phase 4):
 - **Input:** `git diff <base-sha>..HEAD` where base-sha is the commit before Phase 3 execution began
 - **Orchestrator provides:** base SHA, project test conventions, cartographer module context
 
-The build orchestrator handles the inquisitor as a single step. It does NOT invoke the inquisitor's fix cycle independently -- the inquisitor skill manages its own fix cycle internally and reports the final outcome.
+The build orchestrator handles per-task and full-feature inquisitor modes as separate steps: Phase 3 per-task checks use the adversarial-test report and existing implementer fix loop; Phase 4 full-feature checks use the five-dimension report and this skill's fix cycle.
 
 ## Standalone Usage
 
-Invoke directly with `/inquisitor` when you want to assault a feature branch:
+Invoke directly with `/inquisitor` when you want to attack one task's implementation or an assembled feature branch. Select the per-task or full-feature mode based on scope. For full-feature mode:
 
 1. Determine base branch (default: `main`, or user-specified)
 2. Compute merge-base: `git merge-base HEAD <base-branch>`
@@ -261,13 +267,13 @@ Invoke directly with `/inquisitor` when you want to assault a feature branch:
 
 ## Skip Condition
 
-The **orchestrator** (not this skill) decides whether to skip. When used standalone, use your judgment:
+The **orchestrator** (not this skill) decides whether to skip. In per-task mode, skip if the task has no behavioral logic or no tests were written during implementation. In full-feature mode, use the following standalone guidance:
 - Skip if the diff contains only non-behavioral files (docs, config, assets)
 - If borderline, run the process -- a dimension can report "No attack surface for this dimension" if the diff genuinely has nothing relevant
 
 ## Quality Gate
 
-This skill produces **adversarial tests across 5 dimensions**. The tests themselves are the quality mechanism. When used in the build pipeline, the quality-gate that follows reviews the final state including any inquisitor fixes. No additional quality gate is needed on the inquisitor's own output.
+Full-feature mode produces **adversarial tests across 5 dimensions**; per-task mode produces up to 5 focused tests. The tests themselves are the quality mechanism. When used in the build pipeline, the quality-gate that follows reviews the final state including any inquisitor fixes. No additional quality gate is needed on the inquisitor's own output.
 
 ## External Model Review (Optional)
 
@@ -285,11 +291,11 @@ Append external perspectives per dimension alongside the host subagent's finding
 
 ## Integration
 
-- **Called by:** `crucible:build` (Phase 4, after temper, before quality-gate)
-- **Dispatches:** 5 parallel subagents (one per dimension) using `./inquisitor-prompt.md`
+- **Called by:** `crucible:build` (Phase 3 per-task; Phase 4 full-feature after temper, before quality-gate)
+- **Dispatches:** Per-task subagent using `./break-it-prompt.md`; full-feature mode uses 5 parallel subagents (one per dimension) using `./inquisitor-prompt.md`
 - **May dispatch:** Fixer subagents for FAIL results, lightweight temper if fix touches 3+ files
 - **Uses:** `crucible:cartographer-skill` context (when available) for module-aware attack surface analysis
-- **Pairs with:** `crucible:adversarial-tester` (per-task, Phase 3) -- inquisitor is the full-feature complement
-- **Prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)
+- **Per-task dispatch template:** `break-it-prompt.md`
+- **Full-feature prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)
 
 **Multi-model consensus:** Not applicable. Inquisitor dimensions write and run executable tests, requiring local filesystem and test runner access. See `skills/consensus/SKILL.md` for exclusion rationale.
