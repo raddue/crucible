@@ -38,7 +38,7 @@ The session index lives at:
 
 ## Query Modes
 
-`/recall <query>` below is legacy shorthand: invoke `getting-started` with the recall request; the query modes are unchanged.
+`/recall <query>` below is historical notation, not a slash command: invoke `/getting-started recall <query>` (or ask for session history); the query is the caller arguments captured in `getting-started/SKILL.md`, and the query modes are unchanged.
 
 ### No Arguments: `/recall`
 

@@ -30,7 +30,14 @@ python3 "$plugin_root/scripts/memory.py" read --limit 30 2>/dev/null \
 
 ## Bundled References
 
-These former standalone skills live here as flat reference files. Invoke `getting-started`, then read and follow only the matching file — its mechanics are authoritative and unchanged. Legacy `/compass`, `/forge`, `/handoff`, `/recall`, `/workshop` phrasing routes here.
+Compass, forge, handoff, recall, and the workshop tour live here as flat reference files; they are no longer separate skills, so `/compass`, `/forge`, `/handoff`, `/recall`, and `/workshop` do not exist as slash commands. Reach them by invoking `/getting-started` (or letting it auto-activate on the description triggers) with the request, e.g. `/getting-started handoff`, `/getting-started recall errors`, `/getting-started compass doctor`, `/getting-started retrospective`, `/getting-started tour`. Then read and follow only the matching file below — its mechanics are authoritative and unchanged.
+
+**Invocation arguments.** Argument substitution applies only to this invoked body, never to reference files read afterward. Capture the invocation arguments here and hand them to the reference explicitly:
+
+- Arguments (may be empty): $ARGUMENTS
+- First word selects the reference when it names one (`compass`, `forge`/`retrospective`, `handoff`, `recall`, `workshop`/`tour`); otherwise route on the request text. The remaining words are that reference's **caller arguments**.
+- If this line still shows a literal dollar-sign `ARGUMENTS` placeholder (no substitution happened, e.g. auto-activation or a harness without substitution), treat the arguments as **empty**.
+- `handoff.md` reads caller arguments in Step 0 step 2 and as scoping hints; `recall.md` uses them as the query (empty = summary mode); `compass.md` uses them as the subcommand.
 
 | Request | Reference | Mechanics |
 |---------|-----------|-----------|
