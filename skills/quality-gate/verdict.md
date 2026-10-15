@@ -124,8 +124,7 @@ from the endpoint-reported name still yields `ran: "unknown"` (no adapter
 observes the response name today).
 
 **Recovery across compaction (S3, round 9).** The gate checkpoints every three rounds
-and carries recovery state from disk (`skills/quality-gate/recovery.md`,
-`:1121-1125`), so a review result living only in memory across the review→verdict seam
+and carries recovery state from disk (`skills/quality-gate/recovery.md` › Compaction recovery), so a review result living only in memory across the review→verdict seam
 is a normal lifecycle transition, not an edge case. Persist the review-mode `per_model`
 list and its use status to `<findings-root>/round-<N>-review-result.json` **at dispatch time,
 before any other dispatch**, and read that file back at terminal emit before deciding
