@@ -10,7 +10,7 @@ pinning is what prevents a self-match (a checker that never globs cannot read
 itself), so the pinned phrases need NOT be obfuscated/split.
 
 Path-pinning to `quality-gate/SKILL.md` is load-bearing: the checker must NOT
-scan `red-team/SKILL.md`, whose "Only Fatal and Significant count" /
+scan `quality-gate/red-team-mode.md`, whose "Only Fatal and Significant count" /
 external-findings "do NOT count toward stagnation scoring" lines are
 deliberately retained per the #358 two-vocabulary separation (design D2). It
 is therefore intentionally scoped away from those intentionally-retained lines.

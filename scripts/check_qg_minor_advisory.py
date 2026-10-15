@@ -10,7 +10,7 @@ NEVER rglobs; the path pinning is what prevents a self-match (a checker that nev
 globs cannot read itself), so the pinned phrases need NOT be obfuscated/split.
 
 Path-pinning to `quality-gate/SKILL.md` is load-bearing (mirrors the sibling
-check_qg_stagnation_minor.py): the checker must NOT scan `red-team/SKILL.md`, whose
+check_qg_stagnation_minor.py): the checker must NOT scan `quality-gate/red-team-mode.md`, whose
 "Only Fatal and Significant count" / Minors-"don't count toward stagnation" lines are
 deliberately retained per the #358 two-vocabulary separation — they would be
 false-positive matches for a Minor-semantics checker. It is therefore intentionally

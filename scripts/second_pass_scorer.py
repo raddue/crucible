@@ -379,7 +379,7 @@ def _parse_headline_entries_in_span(
     marker-based ("a `#### <title>` heading is recommended formatting for
     readability; it is never itself what makes text an entry, precisely so a
     missing heading cannot zero out an otherwise-labelled Fatal"). The
-    Steel-Man-Then-Kill block `red-team/red-team-prompt.md` MANDATES for every
+    Steel-Man-Then-Kill block `quality-gate/red-team-prompt.md` MANDATES for every
     Fatal/Significant finding is five `**Finding:**`/`**Best Defense:**`/`**Why
     The Defense Fails:**`/`**Severity:**`/`**Proposed Fix:**` lines with NO
     `####` heading, so a findings file written exactly to spec scored

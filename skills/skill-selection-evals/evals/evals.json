@@ -39,7 +39,7 @@
       "common_mistakes": [
         "test-coverage",
         "test-driven-development",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
       "reasoning": "Implementation is done — this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Inquisitor per-task mode reads implementation diffs and writes tests designed to make them break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
@@ -146,7 +146,7 @@
       "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem — correctness, robustness, architecture, everything.",
       "expected_skill": "audit",
       "common_mistakes": [
-        "red-team",
+        "quality-gate red-team mode",
         "temper",
         "prospector"
       ],
@@ -162,7 +162,7 @@
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Full feature assembled from multiple components. Need to find integration issues across component boundaries, not review a single artifact or existing subsystem.",
       "reasoning": "Inquisitor full-feature mode runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Inquisitor per-task mode finds edge cases in one implementation.",
@@ -176,7 +176,7 @@
       "expected_skill": "siege",
       "common_mistakes": [
         "audit",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Despite using the word 'audit', the focus is specifically on security. This narrows the scope from general audit to security audit.",
       "reasoning": "Siege is the security-specific audit — dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture — broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
