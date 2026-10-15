@@ -39,7 +39,7 @@ digraph cartographer_modes {
 
 **Three modes:**
 - **Record** — after significant exploration during build, debugging, or investigation
-- **Consult** — before design, planning, or execution (pairs with `crucible:forge` feed-forward)
+- **Consult** — before design, planning, or execution (pairs with `crucible:getting-started` (`forge.md`) feed-forward)
 - **Load** — when dispatching implementer/reviewer/investigator subagents into a mapped area
 
 ## Storage
@@ -334,7 +334,7 @@ If no signatures are pruning-eligible, the count temporarily exceeds 20 until th
 
 ### When to Trigger
 
-Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work. Runs alongside `crucible:forge` feed-forward.
+Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work. Runs alongside `crucible:getting-started` (`forge.md`) feed-forward.
 
 ### The Process
 
@@ -402,7 +402,7 @@ Cartographer and Forge are complementary:
 - **Together** they eliminate the `wrong-assumption` deviation type that Forge keeps logging
 
 During feed-forward, both run:
-1. `crucible:forge` feed-forward → process warnings
+1. `crucible:getting-started` (`forge.md`) feed-forward → process warnings
 2. `crucible:cartographer-skill` consult → structural awareness
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.

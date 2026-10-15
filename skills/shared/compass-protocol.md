@@ -4,6 +4,18 @@ version: 1
 
 # Compass Protocol (canonical)
 
+## Contents
+
+- [When to emit](#when-to-emit)
+- [Schema — `docs/compass.md`](#schema--docscompassmd)
+- [Bootstrap sentinel `<pending>`](#bootstrap-sentinel-pending)
+- [Concurrency / lock protocol](#concurrency--lock-protocol)
+- [RMW flow](#rmw-flow)
+- [Multi-arc collision — D8/D8.5 carve-out ordering](#multi-arc-collision--d8d85-carve-out-ordering)
+- [CLI surface](#cli-surface)
+- [D13 compact-form rendering](#d13-compact-form-rendering)
+- [Invariants index (C-1..C-9)](#invariants-index-c-1c-9)
+
 > Canonical write-protocol prompt for `docs/compass.md`, a per-repo arc-state
 > file. Referenced by every skill that reads or writes compass state via
 > `<!-- CANONICAL: shared/compass-protocol.md -->`.

@@ -140,7 +140,7 @@ This block is passed to the explorer agent, all root cause agents, all analysis 
 ### Pre-Exploration Context
 
 - **RECOMMENDED:** Consult `crucible:cartographer-skill` (consult mode) — load known module boundaries, conventions, landmines
-- **RECOMMENDED:** Consult `crucible:forge` (feed-forward mode) — check past retrospectives for known pain points
+- **RECOMMENDED:** Consult `crucible:getting-started` (`forge.md`) (feed-forward mode) — check past retrospectives for known pain points
 
 ### Write Invocation State
 
@@ -702,7 +702,7 @@ After context compaction:
 
 ## Integration
 
-- **Consults:** `crucible:cartographer-skill` (consult mode), `crucible:forge` (feed-forward mode)
+- **Consults:** `crucible:cartographer-skill` (consult mode), `crucible:getting-started` (`forge.md`) (feed-forward mode)
 - **Records to:** `crucible:cartographer-skill` (record mode) — user-approved friction point locations and classifications only
 - **Hands off to:** `crucible:build` (refactor mode) — design doc becomes context for build's design phase
 - **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.

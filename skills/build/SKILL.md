@@ -425,7 +425,7 @@ After compaction, before re-writing the status file:
 2. Reconstruct phase, health, and skill-specific body from internal state files
 3. If crucible:checkpoint was used: verify checkpoint availability by checking for the shadow repo at the computed path. Log available checkpoint count. Do not restore — just confirm checkpoints are recoverable.
 4. Emit a Compression State Block into the conversation to seed the new context window with recovered state
-4.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, decisions, file changes), use `/recall` to query `events.jsonl` with filters for targeted recovery.
+4.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, decisions, file changes), use the recall reference (`/getting-started recall <query>`, `getting-started/recall.md`) to query `events.jsonl` with filters for targeted recovery.
 5. Write the updated status file
 6. Output inline status to CLI
 
@@ -628,7 +628,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
-- **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+- **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
@@ -1233,7 +1233,7 @@ After all tasks complete:
    - A tree that is **still** dirty or untracked *after* the commit/gitignore step is a **surfaced build/test defect** — surface it (error out) and stop; do NOT silently sweep it into the gate's first commit. End state: `git status --porcelain` empty (tracked **and** untracked), identical to the review gate's entry precondition.
 3. **REQUIRED REVIEW AND SUPPLY-CHAIN SIGNALS:** Use crucible:warden on the full implementation and dispatch `crucible:quality-gate` **dependency-audit mode** (`dependency-audit.md`, `scope_root` = project root) in parallel. They consume the same code artifact but not each other's findings. Pass warden `reviewer-set: full`, `Phase: code`, and `PipelineID: <current PipelineID>`; warden runs temper + delve + red-team[quality-gate leg] + siege[conditional] + inquisitor[unconditional in full], drives and commits its fixes, and emits the aggregate review marker. The dependency-audit mode writes its separate `audit-results.md` signal; it does not enter the red-team loop and is not part of warden's weighted score. Await both. On either warden `BLOCKED` or audit `Result: BLOCKED`, halt Phase 4 (fail-closed); surface audit FINDINGS/INCONCLUSIVE/FAILED separately, never as a clean audit. Do NOT separately invoke other reviewer legs or another full quality-gate; warden remains the sole code-review gate-driver (I-W4).
 6b. **Verify warden's aggregate verdict marker and integrate the independent dependency-audit result before writing Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
-7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:
    - Read the metrics log at `/tmp/crucible-metrics-<session-id>.log` for duration and subagent counts
@@ -1411,7 +1411,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
 **Recommended sub-skills:**
-- **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
+- **crucible:getting-started** (`forge.md`) — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 

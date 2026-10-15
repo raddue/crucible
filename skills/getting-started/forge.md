@@ -1,9 +1,21 @@
----
-name: forge
-description: Use when a significant task completes and you need a retrospective, when starting a new task and want to consult past lessons, or when 10+ retrospectives have accumulated and skill improvements should be proposed
----
-
 # Forge
+
+## Contents
+
+- [Overview](#overview)
+- [Cairn (Layer 3)](#cairn-layer-3)
+- [When to Use](#when-to-use)
+- [Storage](#storage)
+- [Trajectory Capture (Opt-In)](#trajectory-capture-opt-in)
+- [Mode 1: Post-Task Retrospective](#mode-1-post-task-retrospective)
+- [Mode 2: Pre-Task Feed-Forward](#mode-2-pre-task-feed-forward)
+- [Mode 3: Skill Mutation Proposals](#mode-3-skill-mutation-proposals)
+- [Integration](#integration)
+- [Quick Reference](#quick-reference)
+- [Red Flags](#red-flags)
+- [Rationalization Prevention](#rationalization-prevention)
+- [Common Mistakes](#common-mistakes)
+- [Prompt Templates](#prompt-templates)
 
 ## Overview
 
@@ -17,7 +29,7 @@ Self-improving retrospective system. After tasks complete, runs structured retro
 
 **Core principle:** The agent that never reviews its own performance never improves. The Forge closes the loop.
 
-**Announce at start:** "I'm using the forge skill to [run a retrospective / consult past lessons / propose skill improvements]."
+**Announce at start:** "I'm using getting-started's forge reference to [run a retrospective / consult past lessons / propose skill improvements]."
 
 ## Cairn (Layer 3)
 
@@ -179,7 +191,7 @@ entry. Trajectory capture is a nice-to-have — it must never leak sensitive dat
 
 ### When to Trigger
 
-After any skill that completes a significant task reports success. The calling skill (or orchestrator) invokes `crucible:forge` in retrospective mode.
+After any skill that completes a significant task reports success. The calling skill (or orchestrator) invokes `crucible:getting-started` (`forge.md`) in retrospective mode.
 
 ### The Process
 

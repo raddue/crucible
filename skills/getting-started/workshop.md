@@ -1,11 +1,14 @@
----
-name: workshop
-description: Tour of the Crucible workshop — the headline orchestrators users invoke directly. Use when the user asks "what skills are available?", "where do I start?", "what should I use for X?", "give me a tour of Crucible", "what are the main commands?", or any onboarding-style question. Also use after onboarding a new user or when someone needs to pick the right tool for a specific task. This is the on-demand catalog tour; the silent conversation-start activation protocol itself is getting-started.
----
-
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~42 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+## Contents
+
+- [Pick by what you're doing](#pick-by-what-youre-doing)
+- [Quick reference by trigger phrase](#quick-reference-by-trigger-phrase)
+- [Pipelines (composition)](#pipelines-composition)
+- [What's not in this list (intentionally)](#whats-not-in-this-list-intentionally)
+- [See also](#see-also)
+
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~37 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -46,8 +49,8 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | Skill | When to reach for it |
 |---|---|
 | `/finish` | Implementation is complete, tests pass, and you need to decide how to integrate — merge, PR, cleanup. Guides the completion decision. |
-| `/forge` | A significant task just completed. Writes a retrospective; proposes skill mutations after 10+ retrospectives accumulate. Compounding knowledge accelerator. |
-| `/handoff` | End-of-session. Writes a handoff doc for the next session — continuation of current arc, or proposed next pickup if the current arc is wrapping. |
+| `/getting-started` → [forge.md](forge.md) | A significant task just completed. Writes a retrospective; proposes skill mutations after 10+ retrospectives accumulate. Compounding knowledge accelerator. |
+| `/getting-started` → [handoff.md](handoff.md) | End-of-session. Writes a handoff doc for the next session — continuation of current arc, or proposed next pickup if the current arc is wrapping. |
 
 ## Quick reference by trigger phrase
 
@@ -65,8 +68,8 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | "Run quality gate on this" | `/quality-gate` |
 | "Upgrade React to 19" / "Remove deprecated APIs" | `/migrate` |
 | "I'm done, what's next?" | `/finish` |
-| "Write a retrospective" | `/forge` |
-| "End of session, write a handoff" | `/handoff` |
+| "Write a retrospective" | `/getting-started` → `forge.md` |
+| "End of session, write a handoff" | `/getting-started` → `handoff.md` |
 
 ## Pipelines (composition)
 
@@ -74,14 +77,14 @@ The big skills compose. The most common pipelines:
 
 - **Full feature:** `/build` is the canonical one. Internally runs `/design` → `/planning` → execute → `/temper` per task → `/inquisitor` → `/quality-gate` → `/finish`.
 - **Standalone design + plan:** `/design` produces a doc → user reviews → `/planning` produces a plan → execute manually or feed to `/build`.
-- **Post-merge reflection:** `/forge` after a significant arc; `/handoff` at session boundary.
+- **Post-merge reflection:** forge retrospective (`getting-started` → `forge.md`) after a significant arc; handoff (`getting-started` → `handoff.md`) at session boundary.
 - **Recon-first:** `/recon` before `/build` or `/design` when the codebase is unfamiliar.
 
 ## What's not in this list (intentionally)
 
-Crucible has ~42 skills; this list curates ~15. Skills omitted here are either:
+Crucible has ~37 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., quality-gate red-team mode, `inquisitor`, `checkpoint`, `verify`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, quality-gate consensus mechanism, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, quality-gate consensus mechanism, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -89,4 +92,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 42-skill catalog with eval deltas
+- `docs/skills.md` — full 37-skill catalog with eval deltas
