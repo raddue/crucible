@@ -1,7 +1,11 @@
----
-name: recon-onboarding-mode
-description: Whole-repo onboarding mode for `/recon`. Deep-scans an unfamiliar repo and discovers optional cross-repo topology before the first task; bootstraps persistent map data used by task-scoped recon.
----
+- [Overview](#overview)
+- [Scope estimation](#pre-flight-scope-estimation)
+- [Tier 1: Single repo](#tier-1-single-repo-deep-scan)
+- [Tier 2: Cross-repo topology](#tier-2-cross-repo-discovery)
+- [Completion and proposal](#completion-claude-md-proposal)
+- [Re-invocation merge](#re-invocation-merge)
+- [Prompt templates](#prompt-templates)
+
 
 # Whole-Repo Onboarding Mode
 

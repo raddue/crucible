@@ -18,7 +18,7 @@ never self-match its own literal pin strings — see
       (`graphify explain` / `graphify affected` / `graphify query`), and states
       the enforced-vs-recommended decision (`recommended, not enforced`).
 
-  skills/recon/cartographer/SKILL.md — a "With Graphify" integration note that
+  skills/recon/persistent-map.md — a "With Graphify" integration note that
       pins the division of labor (graphify = derived call graph; cartographer =
       curated prose), so a future reader sees the two as complementary rather than
       reading graphify as a third parallel structural-knowledge store.
@@ -33,7 +33,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DISPATCH_CONVENTION = ROOT / "skills/shared/dispatch-convention.md"
-CARTOGRAPHER = ROOT / "skills/recon/cartographer/SKILL.md"
+CARTOGRAPHER = ROOT / "skills/recon/persistent-map.md"
 
 # label -> literal substring that MUST appear in dispatch-convention.md.
 DISPATCH_REQUIRED: dict[str, str] = {

@@ -1,9 +1,24 @@
----
-name: recon-improvement-discovery-mode
-description: "Recon improvement-discovery mode finds architectural friction and competing redesign proposals. Use for 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or open-ended codebase improvement discovery."
----
+- [Purpose and invocation](#purpose)
+- [Communication and budget](#communication-requirement-non-negotiable)
+- [Friction discovery](#phase-0-5-framework-detection)
+- [Genealogy and root cause](#phase-1-5-friction-genealogy)
+- [Analysis and prioritization](#phase-3-structured-analysis)
+- [Competing redesign proposals](#phase-5-design-competition)
+- [Proposal handoff to design](#phase-8-output)
+- [Scratch, trajectory, and integration](#trajectory-snapshot)
+
 
 # Improvement Discovery Mode
+
+## Contents
+
+- [Purpose](#purpose)
+- [Invocation and communication](#invocation)
+- [Friction exploration](#phase-1-explore-organic-discovery)
+- [Genealogy and root cause](#phase-1-5-friction-genealogy)
+- [Analysis and design competition](#phase-2-root-cause-analysis)
+- [Proposal output](#phase-8-output)
+- [Trajectory and integration](#trajectory-snapshot)
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.

@@ -309,7 +309,7 @@ REQUIRED).
 
 This convention adds a pointer, not a new store. Graphify is the derived call
 graph; recon's persistent-map mode is the curated prose map — see
-`skills/recon/cartographer/SKILL.md`'s "With Graphify" note for the division
+`skills/recon/persistent-map.md`'s "With Graphify" note for the division
 of labor. Do not fold one into the other.
 
 ## Pipeline-Active Marker

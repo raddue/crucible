@@ -1,7 +1,11 @@
----
-name: recon-persistent-map-mode
-description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when collaborators need module-specific context for implementation or review
----
+- [Overview](#overview)
+- [When to Use](#when-to-use)
+- [Storage and size caps](#storage)
+- [Record, consult, load](#mode-1-record-discovery)
+- [Module map and conventions formats](#what-gets-recorded)
+- [Defect signatures](#defect-signatures)
+- [With Forge and Graphify](#integration)
+
 
 # Cartographer
 

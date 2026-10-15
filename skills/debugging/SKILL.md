@@ -902,7 +902,7 @@ When count of existing signatures would exceed 20 after writing:
 4. Write-before-delete ordering: dispatch the recorder first, then delete pruned files after the recorder succeeds
 
 **Step 3: Dispatch recorder (orchestrator)**
-Dispatch a Sonnet cartographer recorder agent using `/recon` persistent-map mode recorder-prompt.md with the "Record defect signature" directive. Provide:
+Dispatch a Sonnet recorder agent using the template `skills/recon/cartographer/recorder-prompt.md` with the "Record defect signature" directive. Provide:
 - Phase 4.5 scan report (generalized pattern, confirmed siblings, reverted siblings, skipped siblings)
 - Original fix metadata (file path, commit SHA, commit message summary, issue number)
 - Cartographer module names from Phase 0 (or directory prefix fallbacks)

@@ -30,7 +30,7 @@ Security-surface set (evaluated on the repo-relative path):
     forcing a hard-out marker onto them would contradict the taxonomy.
 
 Pin-surface forms (all case-insensitive — the tree has real casing drift,
-e.g. `model: Sonnet` in skills/recon improvement-discovery mode/SKILL.md:335. Values may be bare
+e.g. `model: Sonnet` in skills/recon/improvement-discovery.md:335. Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
 convention, see skills/consensus/SKILL.md), or bracket-suffixed
 (`claude-fable-*[1m]`, this repo's own bracket-suffix pin form). The neutral
