@@ -15,7 +15,7 @@ def skill(root: Path, name: str, body: str = "# Skill\n", description: str = "Ch
 
 def main() -> None:
     with TemporaryDirectory() as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()
         path = skill(root, "one", "# Skill\n" * 500)
         assert not checker.audit(root)["one"]["Body"]
         path.write_text(path.read_text() + "extra\n")
@@ -55,6 +55,12 @@ def main() -> None:
         assert not checker.audit(root)["bad"]["Frontmatter"]
         skill(root, "bad", description="Checks things when needed. Invoke when checking.")
         assert not checker.audit(root)["bad"]["Frontmatter"]
+        for description in ('Triggers on "review my changes".',
+                            "Triggers on 'what should I refactor'.",
+                            'Checks I/O conventions, i.e. files, before audit.',
+                            'Checks skills after changes.'):
+            skill(root, "bad", description=description)
+            assert not checker.audit(root)["bad"]["Frontmatter"], description
         (root / "skills" / "bad" / "SKILL.md").write_text(
             "---\nname: " + "a" * 65 + "\ndescription: " + "x" * 1025 + "\n---\n# Skill\n")
         assert len(checker.audit(root)["bad"]["Frontmatter"]) >= 2
@@ -79,6 +85,10 @@ def main() -> None:
         common.write_text("# Common\nIntro prose.\n## Contents\nNothing useful listed.\n"
                           + "line\n" * 100 + "## Usage\n## Notes\n")
         assert checker.audit(root)["one"]["Contents"]
+        for prose in ("Arbitrary prose unrelated to sections.", "The guidance follows."):
+            common.write_text("# Common\n## Contents\n" + prose + "\n" + "line\n" * 100
+                              + "## CI — I/O & a\n")
+            assert checker.audit(root)["one"]["Contents"], prose
         skill(root, "one", "# Skill\nRun `python3 scripts/helper.py`.\n")
         assert checker.audit(root)["one"]["Scripts"]
         skill(root, "one", "# Skill\nRequires Python 3; no install needed.\nRun `python3 scripts/helper.py`.\n")

@@ -4,7 +4,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 
 | Skill | Body | Contents | Nesting | Frontmatter | Scripts | Overall |
 | --- | --- | --- | --- | --- | --- | --- |
-| adr | PASS | PASS | PASS | FAIL | PASS | FAIL |
+| adr | PASS | PASS | PASS | PASS | PASS | PASS |
 | adversarial-tester | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | anvil | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | assay | PASS | FAIL | PASS | PASS | PASS | FAIL |
@@ -12,7 +12,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | build | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
 | cartographer-skill | PASS | FAIL | PASS | FAIL | PASS | FAIL |
 | checkpoint | PASS | PASS | PASS | FAIL | PASS | FAIL |
-| compass | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
+| compass | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | consensus | PASS | FAIL | PASS | FAIL | PASS | FAIL |
 | debugging | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
 | delve | PASS | FAIL | PASS | PASS | PASS | FAIL |
@@ -32,10 +32,10 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | parallel | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | project-init | PASS | FAIL | PASS | FAIL | PASS | FAIL |
-| prospector | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
+| prospector | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | quality-gate | FAIL | FAIL | PASS | FAIL | FAIL | FAIL |
 | recall | PASS | PASS | PASS | FAIL | PASS | FAIL |
-| recon | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
+| recon | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | red-team | PASS | FAIL | PASS | FAIL | PASS | FAIL |
 | replay | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | review-feedback | PASS | FAIL | PASS | PASS | PASS | FAIL |
@@ -43,18 +43,17 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | source-driven-development | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | stocktake | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
-| temper | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
+| temper | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | test-coverage | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-driven-development | PASS | PASS | PASS | PASS | PASS | PASS |
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
-| workshop | PASS | PASS | PASS | FAIL | PASS | FAIL |
+| workshop | PASS | PASS | PASS | PASS | PASS | PASS |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 33/46 | 12/46 | 46/46 | 23/46 | 34/46 | 4/46 |
+| TOTAL | 33/46 | 12/46 | 46/46 | 29/46 | 34/46 | 6/46 |
 
-## Violations (154)
+## Violations (147)
 
-- `adr` Frontmatter (1): description should use third-person, not first/second-person voice
 - `adversarial-tester` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
 - `anvil` Body (1): 558 body lines (max 500)
 - `assay` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
@@ -67,7 +66,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `cartographer-skill` Frontmatter (1): description should use third-person, not first/second-person voice
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
 - `compass` Contents (1): skills/shared/compass-protocol.md: >100 lines, no contents list in first 20
-- `compass` Frontmatter (1): description should use third-person, not first/second-person voice
 - `compass` Scripts (1): SKILL.md:57: script step lacks nearby dependency/setup note (heuristic)
 - `consensus` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
 - `consensus` Frontmatter (1): description lacks when-to-use signal
@@ -76,7 +74,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `debugging` Scripts (2): SKILL.md:348: script step lacks nearby dependency/setup note (heuristic); SKILL.md:974: script step lacks nearby dependency/setup note (heuristic)
 - `delve` Contents (4): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; … and 1 more
 - `design` Contents (2): skills/getting-started/trust-hierarchy.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `design` Frontmatter (2): description should use third-person, not first/second-person voice; description lacks when-to-use signal
+- `design` Frontmatter (1): description should use third-person, not first/second-person voice
 - `design` Scripts (1): SKILL.md:39: script step lacks nearby dependency/setup note (heuristic)
 - `distill` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
 - `finish` Contents (2): skills/shared/compass-protocol.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
@@ -104,7 +102,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `project-init` Frontmatter (1): description should use third-person, not first/second-person voice
 - `prospector` Body (1): 726 body lines (max 500)
 - `prospector` Contents (2): skills/prospector/REFERENCE.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `prospector` Frontmatter (1): description should use third-person, not first/second-person voice
 - `quality-gate` Body (1): 1847 body lines (max 500)
 - `quality-gate` Contents (5): skills/shared/cairn-convention.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; … and 2 more
 - `quality-gate` Frontmatter (1): description lacks when-to-use signal
@@ -112,7 +109,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `recall` Frontmatter (1): description lacks when-to-use signal
 - `recon` Body (1): 893 body lines (max 500)
 - `recon` Contents (3): skills/getting-started/trust-hierarchy.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20
-- `recon` Frontmatter (1): description lacks when-to-use signal
 - `red-team` Contents (3): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `red-team` Frontmatter (1): description should use third-person, not first/second-person voice
 - `replay` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
@@ -129,10 +125,8 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `stocktake` Scripts (5): SKILL.md:54: script step lacks nearby dependency/setup note (heuristic); SKILL.md:55: script step lacks nearby dependency/setup note (heuristic); SKILL.md:56: script step lacks nearby dependency/setup note (heuristic); … and 2 more
 - `temper` Body (1): 514 body lines (max 500)
 - `temper` Contents (4): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; … and 1 more
-- `temper` Frontmatter (1): description should use third-person, not first/second-person voice
 - `test-coverage` Contents (2): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `warden` Body (1): 942 body lines (max 500)
 - `warden` Contents (3): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `warden` Frontmatter (1): description should use third-person, not first/second-person voice
-- `workshop` Frontmatter (1): description should use third-person, not first/second-person voice

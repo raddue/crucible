@@ -15,8 +15,9 @@ COLUMNS = ("Body", "Contents", "Nesting", "Frontmatter", "Scripts")
 LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)(?:\s+[^>]*?)?\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 SCRIPT_STEP = re.compile(r"\b(?:python3?|bash|sh)\s+(?:\S+/)?(?:scripts|hooks)/\S+|\./(?:scripts|hooks)/\S+")
 SETUP = re.compile(r"\b(?:requires?|dependencies|prerequisites?|setup|install|stdlib|built-in|no install|python 3)\b", re.I)
-WHEN = re.compile(r"\b(?:when|whenever|use for|used for|triggers? on|for tasks? (?:that|involving))\b", re.I)
-PERSONAL = re.compile(r"\b(?:you|your|we|our|i|my)\b", re.I)
+WHEN = re.compile(r"\b(?:when|whenever|before|after|use (?:when|before|after|for)|used for|triggers? on|for tasks? (?:that|involving))\b", re.I)
+PERSONAL = re.compile(r"\b(?:you|your|we|our|my)\b|(?<![\w/])i\b(?![./])", re.I)
+QUOTED = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|\u2018[^\u2019]*\u2019|(?<!\w)\u0027[^\u0027]*\u0027(?!\w)|`[^`]*`')
 
 
 def references(text: str, source: Path, root: Path) -> set[Path]:
@@ -63,8 +64,9 @@ def has_contents(text: str) -> bool:
     return (bool(entries) and all(anchor in anchors for anchor in entries)
             or bool(plain) and all(re.sub(r"[^\w -]", "", item.lower()).replace(" ", "-") in anchors
                                    for item in plain)
-            or any(any(word in line.lower() for word in anchor.split("-"))
-                   for line in prose for anchor in anchors - {"contents", "table-of-contents"}))
+            or any(re.search(r"\b" + re.escape(word) + r"\b", line, re.I)
+                   for line in prose for anchor in anchors - {"contents", "table-of-contents"}
+                   for word in anchor.split("-") if len(word) > 3))
 
 
 def read_markdown(path: Path, problems: list[str]) -> str:
@@ -97,7 +99,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
             problems["Frontmatter"].append("name must be <=64 lowercase letters/digits/hyphens")
         if not description or len(description) > 1024:
             problems["Frontmatter"].append("description must be non-empty and <=1024 characters")
-        if description and PERSONAL.search(description):
+        if description and PERSONAL.search(QUOTED.sub("", description)):
             problems["Frontmatter"].append("description should use third-person, not first/second-person voice")
         if description and not WHEN.search(description):
             problems["Frontmatter"].append("description lacks when-to-use signal")
