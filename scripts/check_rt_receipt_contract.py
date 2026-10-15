@@ -36,12 +36,14 @@ Exits 0 if all assertions hold, 1 with a bulleted violation list otherwise.
 Mirrors `scripts/check_canonical_drift.py` and `scripts/check_i2_marker.py`.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RT_PROMPT = ROOT / "skills/red-team/red-team-prompt.md"
+RT_PROMPT = ROOT / "skills/quality-gate/red-team-prompt.md"
 QG_SKILL = ROOT / "skills/quality-gate/SKILL.md"
-RT_SKILL = ROOT / "skills/red-team/SKILL.md"
+RT_SKILL = ROOT / "skills/quality-gate/red-team-mode.md"
 RETURN_CONV = ROOT / "skills/shared/return-convention.md"
 
 # Worked-example markers Task 1 DECLARES and Task 2 emits verbatim (load-bearing
@@ -2318,7 +2320,7 @@ def main(argv: list[str] | None = None) -> int:
 
     errs: list[str] = []
     errs += check_rt_prompt(RT_PROMPT.read_text(encoding="utf-8"))
-    errs += check_qg(QG_SKILL.read_text(encoding="utf-8"))
+    errs += check_qg(read_runbook())
     errs += check_rt_skill(RT_SKILL.read_text(encoding="utf-8"))
     errs += check_return_conv(RETURN_CONV.read_text(encoding="utf-8"))
 
