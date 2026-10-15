@@ -102,7 +102,7 @@ Two rules; either firing sets the advisory (both firing → `density+trajectory`
 
 ## Pre-Flight Dependency Audit
 
-On code artifacts run the `dependency-audit.md` lane, unless the parent already ran it for this artifact. It remains an **independent supply-chain signal**, with its own BLOCKED/FINDINGS/INCONCLUSIVE/FAILED/CLEAN result and arguments; never add vulnerabilities to the adversarial weighted score (INV-2). Surface the audit result alongside the gate verdict. A BLOCKED result blocks the parent pipeline; no manifests is a no-op. For a direct "audit dependencies" request, run the lane alone without manufacturing a red-team review.
+**Parent-dispatched parallel lane.** The parent orchestrator invokes `quality-gate` dependency-audit mode (`dependency-audit.md`) alongside this gate on code artifacts. The scan has its own BLOCKED/FINDINGS/INCONCLUSIVE/FAILED/CLEAN result and arguments; the parent surfaces and integrates that signal. This gate neither dispatches the lane nor receives its receipt. Audit findings are NOT passed to the red-team reviewer or added to the weighted score (INV-2). A direct "audit dependencies" request invokes the audit mode alone.
 
 ## Security Surface Detection and Siege Dispatch
 
@@ -133,7 +133,7 @@ Set `security_surface: detected` if ANY of the following signals fires:
 
 **Dependency-audit signal:** If dependency-audit (running in parallel) flags Critical/High vulnerabilities in security-critical packages (auth libraries, crypto libraries, web frameworks), promote to `security_surface: detected` even if no other signal fired.
 
-**Standalone invocation note:** Standalone `/quality-gate` on code runs the dependency-audit lane. A reported vulnerability can promote security-surface detection; run siege per the existing decision rule. Parent-provided audit results are consumed without a duplicate scan.
+**Standalone invocation note:** A standalone full `/quality-gate` on code does not run the audit lane. A user wanting both invokes audit mode separately or uses `/build`. When a parent supplies a completed audit signal, Critical/High findings can promote security-surface detection under the rule above; the gate does not scan or re-run the audit.
 
 **Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection.
 

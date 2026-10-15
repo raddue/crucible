@@ -25,7 +25,7 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 ## Runbook — read before dispatch
 
-Choose mode from the invocation: a full-gate caller uses the single-pass reviewer inside its gate; a direct "red-team this" request uses the standalone red-team loop; a dependency/CVE request uses only the audit lane. **Full gate** owns the multi-round review and fix loop; **red-team mode** preserves the standalone full-loop and single-pass caller semantics in `red-team-mode.md`. **Dependency-audit mode** produces an independent supply-chain result from `dependency-audit.md`; it never changes the weighted adversarial score. Consensus is optional; see `consensus-mechanism.md` and `receipt-consensus.md` when enabled.
+Choose mode from the invocation: a full-gate caller uses the single-pass reviewer inside its gate; a direct "red-team this" request uses the standalone red-team loop; a dependency/CVE request uses only the audit lane. **Full gate** owns the multi-round review and fix loop; **red-team mode** preserves the standalone full-loop and single-pass caller semantics in `red-team-mode.md`. **Dependency-audit mode** produces an independent supply-chain result from `dependency-audit.md`; the parent invokes it in parallel with the full gate for code artifacts, and it never changes the weighted adversarial score. Consensus is optional; see `consensus-mechanism.md` and `receipt-consensus.md` when enabled.
 
 Read these flat references in order for a full gate. They preserve the original runbook text and CONTRACT anchors; do not skip a referenced phase:
 
