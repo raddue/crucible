@@ -966,7 +966,7 @@ Prompt templates are created during skill implementation. Each template follows 
 - **Persistence:** `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` (read at start, written at end)
 - **Pairs with:** `crucible:build` -- Siege can run after build Phase 4 (implementation) when the activation heuristic triggers
 - **Pairs with:** `crucible:audit` -- audit may recommend Siege; Siege never invokes audit
-- **Does NOT use:** `crucible:quality-gate` (Siege has its own security-specific gate), `crucible:red-team` (Siege's agents ARE the red team, specialized for security)
+- **Does NOT use:** `crucible:quality-gate` (Siege has its own security-specific gate), `crucible:quality-gate (red-team mode)` (Siege's agents ARE the red team, specialized for security)
 
 ### Severity Mapping to Build Pipeline
 

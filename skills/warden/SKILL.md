@@ -850,7 +850,7 @@ numbers are added.
   not papered over (Ordering step 0 / I-W6). No auto-save/restore machinery: warden pushes
   the precondition back to the user, exactly as it does for a detached HEAD.
 - **Standalone finish (not from build) through warden (M3)**: finish today uses
-  `crucible:red-team` directly because at finish time there is "no typed artifact." Routed
+  `crucible:quality-gate (red-team mode)` directly because at finish time there is "no typed artifact." Routed
   through warden, the red-team leg is always `crucible:quality-gate` on artifact `code`,
   invoked with **warden's own run-id** as PipelineID — so it runs non-interactively (no
   between-rounds check-ins) in the standalone-finish path as well as inside build. warden's

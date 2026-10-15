@@ -461,7 +461,7 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
 
 **Pairs with:**
 - **worktree** - Cleans up worktree (if applicable)
-- **crucible:red-team** — Adversarial review before presenting options. Note: finish uses `crucible:red-team` directly rather than `crucible:quality-gate` because it doesn't produce a typed artifact — it's a pre-completion sanity check, not an iterative gate.
+- **crucible:quality-gate (standalone red-team mode)** — Adversarial full loop before presenting options. Finish has no typed artifact, so select the preserved standalone red-team loop rather than the typed-artifact gate.
 
 **Recommended:**
 - **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)

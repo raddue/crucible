@@ -1348,7 +1348,7 @@ Decision types to capture:
 - `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
 Red-team, design innovation, adversarial tester, and inquisitor prompts live in their respective skills:
-- `crucible:red-team` — `skills/red-team/red-team-prompt.md`
+- `crucible:quality-gate (red-team mode)` — `skills/quality-gate/red-team-prompt.md`
 - `crucible:design` innovation pass — `skills/design/innovation-prompt.md`
 - `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
 - `crucible:inquisitor` — `skills/inquisitor/inquisitor-prompt.md`
@@ -1361,8 +1361,8 @@ Build is the outermost orchestrator. The **design and plan** gates route via `cr
 
 | Pipeline Stage | Artifact Type | Replaces |
 |---------------|---------------|----------|
-| Phase 1, Step 2 (after design) | design | Existing `crucible:red-team` on design |
-| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
+| Phase 1, Step 2 (after design) | design | Existing `crucible:quality-gate (red-team mode)` on design |
+| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:quality-gate (red-team mode)` on plan |
 | Phase 4 (single warden gate) | code | `crucible:warden` — runs the red-team leg (+ temper/delve/inquisitor/siege) |
 
 For the **code leg**, code review (`crucible:temper`), inquisitor (`crucible:inquisitor`), and the quality-gate red-team leg are now consolidated inside `crucible:warden` — temper does structured quality checks, inquisitor writes cross-component adversarial tests, and the red-team leg does adversarial artifact review (plus delve and a conditional siege run). The three purposes still stand, but warden drives them as one disjunction-of-native-gates rather than as separate steps.
@@ -1407,7 +1407,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:design** — Phase 1
 - **crucible:finish** — Phase 4
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
-- **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
+- **crucible:quality-gate (red-team mode)** — Adversarial review engine (invoked by quality-gate)
 - **crucible:design** innovation pass — Creative enhancement before quality gates
 - **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, inside the warden gate)
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.

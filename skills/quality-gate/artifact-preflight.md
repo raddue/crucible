@@ -112,13 +112,7 @@ Two rules; either firing sets the advisory (both firing → `density+trajectory`
 
 ## Pre-Flight Dependency Audit
 
-**Extracted to `crucible:dependency-audit` (2026-05-16).** The dependency-vulnerability scanning logic formerly inlined here is now its own skill, invoked in parallel with quality-gate by the parent orchestrator (build, debugging, user session). It produces an independent supply-chain signal that is surfaced alongside quality-gate's verdict but does not feed into quality-gate's weighted score (preserves INV-2 — host red-team findings only).
-
-**Migration note:** The `skip_blocking` and `min_blocking_severity` arguments no longer live on quality-gate; they belong to `crucible:dependency-audit`. Build dispatches both skills with their own arguments. Direct user invocations of `/quality-gate` no longer trigger pre-flight; users wanting both should invoke `/dependency-audit` separately or use `/build`.
-
-**Anti-anchoring preserved:** As before, dependency-audit findings are NOT passed to red-team dispatch. The two skills share an artifact but produce independent signals.
-
-See `skills/dependency-audit/SKILL.md` for the full audit specification (manifest scanning, ecosystem detection, severity normalization, output schema, recovery semantics).
+On code artifacts run the `dependency-audit.md` lane, unless the parent already ran it for this artifact. It remains an **independent supply-chain signal**, with its own BLOCKED/FINDINGS/INCONCLUSIVE/FAILED/CLEAN result and arguments; never add vulnerabilities to the adversarial weighted score (INV-2). Surface the audit result alongside the gate verdict. A BLOCKED result blocks the parent pipeline; no manifests is a no-op. For a direct "audit dependencies" request, run the lane alone without manufacturing a red-team review.
 
 ## Security Surface Detection and Siege Dispatch
 
@@ -149,7 +143,7 @@ Set `security_surface: detected` if ANY of the following signals fires:
 
 **Dependency-audit signal:** If dependency-audit (running in parallel) flags Critical/High vulnerabilities in security-critical packages (auth libraries, crypto libraries, web frameworks), promote to `security_surface: detected` even if no other signal fired.
 
-**Standalone invocation note:** Standalone `/quality-gate` does not run `crucible:dependency-audit` (extracted to the parent orchestrator). Therefore the dependency-audit-promotes-security-surface path does NOT fire in standalone mode. Users wanting this signal should either: (a) invoke `/dependency-audit` first and pass `force_siege: true` to `/quality-gate` if it reports findings, or (b) use `/build`, which dispatches both skills.
+**Standalone invocation note:** Standalone `/quality-gate` on code runs the dependency-audit lane. A reported vulnerability can promote security-surface detection; run siege per the existing decision rule. Parent-provided audit results are consumed without a duplicate scan.
 
 **Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection.
 
@@ -201,5 +195,5 @@ To prevent context leaking between rounds:
 
 1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round. **Exemption:** never strip, edit, or delete a `.crucible/fetched-endpoints.md` line, and never strip a `FETCHED-ENDPOINT:` call-site comment as a "stale annotation" — both are permanent disclosure records, not comments about a prior review round.
 2. **Standardized framing.** The orchestrator's dispatch prompt must use the **same framing** for every round. Do not mention that prior review rounds occurred, what was fixed, or how many rounds have run. The reviewer sees the artifact as if it is the first review.
-3. **No findings forwarding.** Never pass prior round findings to the next reviewer. This is already specified in `crucible:red-team` but is restated here because the quality-gate orchestrator is the most likely point of accidental leakage.
+3. **No findings forwarding.** Never pass prior round findings to the next reviewer. This is already specified in quality-gate red-team mode but is restated here because the quality-gate orchestrator is the most likely point of accidental leakage.
 

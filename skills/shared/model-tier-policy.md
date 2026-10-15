@@ -155,7 +155,7 @@ checker guarantee):**
 - **(a) `inherit` / session-model roles.** Dependency-audit's inline-on-session
   path has no static pin to catch (`crucible-qg-fix` was the other member of
   this residual until #537 pinned it to Sonnet). The standalone-or-`finish`-driven `/red-team`
-  fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table) is now a
+  fix-mechanism dispatch (`quality-gate/red-team-mode.md` fix-mechanism table) is now a
   member by the same "no static pin to catch" test — it stayed on the
   inherited/session model when `crucible-qg-fix` pinned away from it (#537;
   see #538). **Operator convention: do not run gate/build/siege — or

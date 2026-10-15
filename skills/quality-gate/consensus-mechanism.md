@@ -284,7 +284,7 @@ Uses `asyncio.gather()` with per-model timeout. Each model call is independent. 
 ### Aggregation
 
 After collecting responses, the aggregator:
-1. Selects the mode-specific prompt template from `skills/consensus/aggregation-{mode}-prompt.md`
+1. Selects the mode-specific prompt template from `skills/quality-gate/aggregation-{mode}-prompt.md`
 2. Injects all successful model responses (identified by provider name)
 3. Dispatches to the first configured Anthropic model (primary aggregator)
 4. Parses the structured JSON output from the aggregator response
