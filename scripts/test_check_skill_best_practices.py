@@ -59,12 +59,12 @@ def main() -> None:
             "---\nname: " + "a" * 65 + "\ndescription: " + "x" * 1025 + "\n---\n# Skill\n")
         assert len(checker.audit(root)["bad"]["Frontmatter"]) >= 2
 
-        path = skill(root, "one", "# Skill\n<!-- CANONICAL: shared/common.md -->\n")
+        path = skill(root, "one", "# Skill\n<!-- CANONICAL: shared/common.md — usage notes -->\n")
         common = root / "skills" / "shared" / "common.md"
         common.parent.mkdir(exist_ok=True)
         common.write_text("# Common\n" + "line\n" * 100 + "See [extra](extra.md).\n")
         (common.parent / "extra.md").write_text("# Extra\n")
-        assert checker.audit(root)["one"]["Contents"]
+        assert any("common.md" in issue for issue in checker.audit(root)["one"]["Contents"])
         assert checker.audit(root)["one"]["Nesting"]
         common.write_text(common.read_text().replace("See [extra](extra.md).", "See `extra.md`."))
         assert not checker.audit(root)["one"]["Nesting"]
@@ -72,7 +72,8 @@ def main() -> None:
         (common.parent / "extra.md").write_text("# Extra\n" + "line\n" * 100)
         assert any("extra.md" in issue for issue in checker.audit(root)["one"]["Contents"])
         for toc in ("**Contents**\n1. Usage\n2. Notes", "## Contents\n1. [Usage](#usage)\n2. [Notes](#notes)",
-                    "## Contents\nUsage and notes follow below."):
+                    "## Contents\nUsage and notes follow below.",
+                    "- Unrelated introduction bullet\n## Contents\n- Usage\n- Notes"):
             common.write_text("# Common\n" + toc + "\n" + "line\n" * 100 + "## Usage\n## Notes\n")
             assert not checker.audit(root)["one"]["Contents"], toc
         common.write_text("# Common\nIntro prose.\n## Contents\nNothing useful listed.\n"

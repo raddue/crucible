@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = {"shared", "skill-selection-evals"}
 COLUMNS = ("Body", "Contents", "Nesting", "Frontmatter", "Scripts")
 # Canonical markers declare references; inline-code path mentions do not.
-LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
+LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)(?:\s+[^>]*?)?\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 SCRIPT_STEP = re.compile(r"\b(?:python3?|bash|sh)\s+(?:\S+/)?(?:scripts|hooks)/\S+|\./(?:scripts|hooks)/\S+")
 SETUP = re.compile(r"\b(?:requires?|dependencies|prerequisites?|setup|install|stdlib|built-in|no install|python 3)\b", re.I)
 WHEN = re.compile(r"\b(?:when|whenever|use for|used for|triggers? on|for tasks? (?:that|involving))\b", re.I)
@@ -41,26 +41,30 @@ def references(text: str, source: Path, root: Path) -> set[Path]:
 
 def has_contents(text: str) -> bool:
     lines = text.splitlines()
-    heading = any(re.match(r"^#{1,6}\s+(?:table of )?contents\b", line, re.I) for line in lines[:20])
+    top = lines[:20]
+    start = next((i for i, line in enumerate(top) if re.match(
+        r"^(?:#{1,6}\s+|\*\*)(?:table of )?contents\b", line, re.I)), None)
+    if start is None:
+        return False
+    section = []
+    for line in top[start + 1:]:
+        if re.match(r"^#{1,6}\s+", line):
+            break
+        section.append(line)
     anchors = {re.sub(r"[^\w -]", "", match.group(1).lower()).replace(" ", "-")
                for line in lines for match in [re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)] if match}
-    entries = [match.group(1) for line in lines[:20]
+    entries = [match.group(1) for line in section
                for match in [re.match(r"^\s*[-*+]\s+\[[^]]+\]\(#([^)]+)\)", line)] if match]
-    plain = [match.group(1) for line in lines[:20]
-             for match in [re.match(r"^\s*[-*+]\s+(.+?)\s*$", line)] if match]
-    ordered = [match.group(1) for line in lines[:20]
-               for match in [re.match(r"^\s*\d+[.)]\s+(.+?)\s*$", line)] if match]
-    ordered = [re.sub(r"^\[([^]]+)\]\(#[^)]+\)$", r"\1", item) for item in ordered]
-    label = any(re.match(r"^\*\*(?:table of )?contents\*\*:?\s*$", line, re.I) for line in lines[:20])
-    prose = [line.strip() for line in lines[:20] if line.strip() and not line.lstrip().startswith(("#", "-", "*"))
-             and not re.match(r"^\s*\d+[.)]\s+", line)]
-    return (heading or label) and (bool(entries) and all(anchor in anchors for anchor in entries)
-                                    or bool(plain + ordered) and all(
-                                        re.sub(r"[^\w -]", "", item.lower()).replace(" ", "-") in anchors
-                                        for item in plain + ordered)
-                                    or heading and any(
-                                        sum(word in line.lower() for word in anchor.split("-")) >= 1
-                                        for line in prose for anchor in anchors - {"contents", "table-of-contents"}))
+    plain = [match.group(1) for line in section
+             for match in [re.match(r"^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$", line)] if match]
+    plain = [re.sub(r"^\[([^]]+)\]\(#[^)]+\)$", r"\1", item) for item in plain]
+    prose = [line.strip() for line in section if line.strip() and not re.match(
+        r"^\s*(?:[-*+]|\d+[.)])\s+", line)]
+    return (bool(entries) and all(anchor in anchors for anchor in entries)
+            or bool(plain) and all(re.sub(r"[^\w -]", "", item.lower()).replace(" ", "-") in anchors
+                                   for item in plain)
+            or any(any(word in line.lower() for word in anchor.split("-"))
+                   for line in prose for anchor in anchors - {"contents", "table-of-contents"}))
 
 
 def read_markdown(path: Path, problems: list[str]) -> str:
