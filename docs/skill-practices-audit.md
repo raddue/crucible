@@ -4,7 +4,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 
 | Skill | Body | Contents | Nesting | Frontmatter | Scripts | Overall |
 | --- | --- | --- | --- | --- | --- | --- |
-| adversarial-tester | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | anvil | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | audit | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | build | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
@@ -20,7 +19,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | getting-started | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | grudge | PASS | PASS | PASS | PASS | PASS | PASS |
 | handoff | PASS | PASS | PASS | FAIL | FAIL | FAIL |
-| inquisitor | PASS | FAIL | PASS | FAIL | PASS | FAIL |
+| inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | merge-pr | PASS | PASS | PASS | PASS | FAIL | FAIL |
 | migrate | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
@@ -44,11 +43,10 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | workshop | PASS | PASS | PASS | PASS | PASS | PASS |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 28/40 | 10/40 | 40/40 | 27/40 | 29/40 | 4/40 |
+| TOTAL | 27/39 | 10/39 | 39/39 | 27/39 | 28/39 | 4/39 |
 
-## Violations (135)
+## Violations (133)
 
-- `adversarial-tester` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (2): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20
@@ -79,7 +77,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `handoff` Frontmatter (1): description lacks when-to-use signal
 - `handoff` Scripts (1): SKILL.md:93: script step lacks nearby dependency/setup note (heuristic)
 - `inquisitor` Contents (2): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `inquisitor` Frontmatter (1): description should use third-person, not first/second-person voice
 - `merge-pr` Scripts (3): SKILL.md:224: script step lacks nearby dependency/setup note (heuristic); SKILL.md:229: script step lacks nearby dependency/setup note (heuristic); SKILL.md:279: script step lacks nearby dependency/setup note (heuristic)
 - `migrate` Body (1): 549 body lines (max 500)
 - `migrate` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
