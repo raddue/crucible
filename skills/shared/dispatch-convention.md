@@ -308,8 +308,9 @@ never a gate — it always exits 0) and cartographer's (RECOMMENDED, not
 REQUIRED).
 
 This convention adds a pointer, not a new store. Graphify is the derived call
-graph; cartographer is the curated prose map — see cartographer-skill's "With
-Graphify" note for the division of labor. Do not fold one into the other.
+graph; recon's persistent-map mode is the curated prose map — see
+`skills/recon/cartographer/SKILL.md`'s "With Graphify" note for the division
+of labor. Do not fold one into the other.
 
 ## Pipeline-Active Marker
 

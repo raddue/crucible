@@ -88,11 +88,11 @@ sites: [{file, line}, {file, line}, ...]
 
 ## `--drift` Mode (code path, opt-in)
 
-Drift compares the subsystem against an **explicit intent artifact** and reports divergence from it. It exists alongside `/recon` improvement-discovery mode without colliding: **prospector keys on git history** ("how did it get this way", churn, vestigial structure); **Drift keys on a design artifact** ("does it still match what we said").
+Drift compares the subsystem against an **explicit intent artifact** and reports divergence from it. It exists alongside `/recon` improvement-discovery mode without colliding: **improvement discovery keys on git history** ("how did it get this way", churn, vestigial structure); **Drift keys on a design artifact** ("does it still match what we said").
 
 - Runs **only** under `audit --drift intent=<path>`. The `<path>` is an explicit design / spec / ADR / contract artifact.
-- **`--drift` without `intent=` is a usage error** — report it and stop; never auto-discover an intent artifact (auto-discovery would reopen the prospector collision).
-- Reports **divergence only**. It must never silently re-derive friction from scratch — that is prospector's job.
+- **`--drift` without `intent=` is a usage error** — report it and stop; never auto-discover an intent artifact (auto-discovery would reopen the improvement-discovery collision).
+- Reports **divergence only**. It must never silently re-derive friction from scratch — that is recon improvement discovery's job.
 - Without `--drift`, the Drift section is **neither produced nor advertised** (no dead-by-default section).
 - **Drift carries the Systemic-Only Rule (I8):** a single-reproduction intent-divergence (one site bypassing a documented contract, with a concrete reproduction) is a delve instance — route it to `/delve`, do not report it as a Drift finding. A divergence-from-intent with no single repro is an audit Drift finding: a PATTERN divergence recurs across **two or more sites**, while a whole-subsystem STRUCTURAL divergence (e.g. a mandated layer/store the subsystem lacks entirely) may carry a **single** representative site or the `sites: [whole-subsystem]` marker — mirroring the Code Finding Schema's category-conditioned `sites` rule. Drift findings carry `sites`.
 

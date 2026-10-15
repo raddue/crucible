@@ -16,7 +16,7 @@ Autonomous migration planning and execution: analyzes a migration target, maps b
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Purpose:** Bridge between prospector discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. /migrate makes it autonomous.
+**Purpose:** Bridge between recon improvement discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. /migrate makes it autonomous.
 
 **Two modes:**
 - **Plan + Execute** (default) -- produces a phased migration plan, then executes each phase through build
@@ -223,7 +223,7 @@ Dispatch the **Migration Analyzer** (Opus, Agent tool, Explore subagent) using `
 **Input:**
 - Migration description from user
 - Cartographer data (if available)
-- Framework context from dependency manifests (following prospector's Phase 0.5 pattern: read package.json, *.csproj, requirements.txt, go.mod, Cargo.toml, etc.)
+- Framework context from dependency manifests (following improvement discovery's Phase 0.5 pattern: read package.json, *.csproj, requirements.txt, go.mod, Cargo.toml, etc.)
 
 **The analyzer investigates:**
 - Changelog / migration guide (CHANGELOG.md, MIGRATION.md, UPGRADING.md in repo or dependency)
