@@ -1036,7 +1036,7 @@ _worktree_fallback() {
   # `scripts/grudge_append.py`'s `resolve_repo()` keys a record by
   # `git rev-parse --show-toplevel`, i.e. the WORKTREE, whenever no
   # `--repo`/`--repo-root` is given, which is how both `skills/grudge/SKILL.md`
-  # write mode and `skills/merge-pr/SKILL.md` Step 7.5 call it. So a correctly
+  # write mode and `skills/finish/merge.md` Step 7.5 call it. So a correctly
   # recorded grudge was invisible to step 13 and the candidate blocked anyway,
   # to MAX_BLOCKS and then to an unenforced give-up. Querying the identities
   # step 7 arms on restores that invariant.

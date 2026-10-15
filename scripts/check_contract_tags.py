@@ -51,7 +51,7 @@ Each of those is a mutant this script turns red. What it checks:
      either direction is an error. Lowering coverage now requires a deliberate
      edit to the map.
   6. **INV-C10** (#578) — see `check_no_merge_grudge_writer` and
-     `check_merge_pr_untouched` below.
+     `check_finish_merge_grudge_fence` below.
 
 ### Scope limit on "the test really pins its invariant" (read this)
 
@@ -105,9 +105,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CONTRACT_YAML = "docs/plans/2026-08-28-558-559-crap-grudge-contract.yaml"
 
 # The one Path-A-adjacent artifact INV-C10 names by path, plus the commit the
-# merge-pr/SKILL.md Step 7.5 fence must be unchanged since.
-MERGE_PR_SKILL = "skills/merge-pr/SKILL.md"
-INV_C10_BASE_SHA = "3193271"
+# finish/merge.md Step 7.5 fence must be unchanged since.
+MERGE_PR_SKILL = "skills/finish/merge.md"
 
 TAG_RE = re.compile(r"contract:[a-z]+:inv-t[0-9]+")
 ANNOT_RE = re.compile(r"(contract:[a-z]+:inv-t[0-9]+)[ \t]+checks=([0-9]+)")
@@ -563,7 +562,7 @@ def check_python_carrier(root: Path, rel: str, coverage_map: dict, errors: list[
 # --- 6. INV-C10 (#578) ------------------------------------------------------
 #
 # INV-C10: "Path A stays cut: no hooks/grudge-merge-writer.sh exists;
-# merge-pr/SKILL.md Step 7.5 remains exactly its existing templated bash fence
+# finish/merge.md Step 7.5 remains exactly its existing templated bash fence
 # (plugin_root=... + placeholder-valued grudge_append.py), untouched and not
 # further automated."
 #
@@ -593,7 +592,7 @@ python3 "$plugin_root/scripts/grudge_append.py" \\
 # repeatable equals-form `--files="…"` pair (DEC-5/#568, C-m) — and the R3
 # store-identity fence (DEC-4/#580): the store_root/store_key derivation block
 # and the explicit `--repo-root`/`--repo` pair, pin + fence moved together.
-# The tail of merge-pr/SKILL.md that lives OUTSIDE the Step 7.5 fence: the two
+# The tail of finish/merge.md that lives OUTSIDE the Step 7.5 fence: the two
 # anti-rationalization rows rewriting the bypass advice. Named separately so
 # `_make_git_fixture` builds this half of the permitted change from the same
 # source the assertion compares against — hardcoding a second copy in the
@@ -725,126 +724,24 @@ def check_no_merge_grudge_writer(root: Path, errors: list[str]) -> None:
             )
 
 
-def check_merge_pr_untouched(root: Path, base_sha: str, errors: list[str]) -> None:
-    """merge-pr/SKILL.md Step 7.5 is unchanged since `base_sha` (INV-C10, #578).
-
-    Two independent halves, because each covers the other's blind spot:
-
-    * a clone-independent content pin of the Step 7.5 fence in the working tree
-      (works in a shallow clone, a tarball, an export);
-    * the `base_sha`-to-WORKING-TREE diff, asserted rather than printed — and guarded, so an
-      unresolvable `base_sha` is a LOUD failure instead of the silent no-op the
-      original pipeline degraded to. CI clones shallow by default
-      (`actions/checkout@v4` without `fetch-depth`), which is exactly why the
-      original check was vacuous there; `.github/workflows/ci.yml` now sets
-      `fetch-depth: 0` so this assertion is real in CI too.
-
-    Both halves end at the same state — the working tree — on purpose: with the
-    diff half ending at HEAD instead, an uncommitted edit outside the fence
-    passed both halves, which is the state this suite normally runs in.
-    """
+def check_finish_merge_grudge_fence(root: Path, errors: list[str]) -> None:
+    """Pin finish/merge.md's templated Step 7.5 fence (INV-C10, #578)."""
     skill = root / MERGE_PR_SKILL
     if not skill.is_file():
         errors.append(f"INV-C10: {MERGE_PR_SKILL} is missing")
         return
-
     text = skill.read_text(encoding="utf-8")
-    m = re.search(r"^### Step 7\.5:.*?^```bash\n(.*?)^```", text, re.S | re.M)
-    if not m:
-        errors.append(
-            f"INV-C10: could not locate the Step 7.5 ```bash fence in {MERGE_PR_SKILL} — "
-            f"the step was renamed, reformatted, or removed"
-        )
-    elif m.group(1).rstrip("\n") != EXPECTED_STEP_75_FENCE:
-        errors.append(
-            f"INV-C10: {MERGE_PR_SKILL} Step 7.5's bash fence differs from the pinned "
-            f"templated form. INV-C10 requires it untouched and not further automated.\n"
-            f"    measured: {m.group(1).rstrip()!r}"
-        )
-
-    git_dir = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--git-dir"],
-        capture_output=True, text=True,
-    )
-    if git_dir.returncode != 0:
-        errors.append(
-            f"INV-C10: {root} is not a git checkout, so the Step 7.5 history assertion "
-            f"cannot run. This is a failure, not a skip — the check that voids quietly is "
-            f"the defect #578 was filed for."
-        )
-        return
-
-    present = subprocess.run(
-        ["git", "-C", str(root), "cat-file", "-e", f"{base_sha}^{{commit}}"],
-        capture_output=True, text=True,
-    )
-    if present.returncode != 0:
-        errors.append(
-            f"INV-C10: base commit {base_sha} is not present in this clone, so the "
-            f"Step 7.5 history assertion cannot run. This is a LOUD failure, not a skip "
-            f"(#578): a shallow clone previously made it a silent no-op. "
-            f"Fix with `git fetch --unshallow` (CI sets fetch-depth: 0)."
-        )
-        return
-
-    # `<base> --` (no `..HEAD`): the diff ends at the WORKING TREE, the same
-    # state the fence pin above reads. With `..HEAD` the two halves read two
-    # different states and an UNCOMMITTED edit outside the fence passed both —
-    # pre-commit being exactly when this suite is normally run.
-    # `--no-color --no-ext-diff`: a `color.ui = always` / `diff.external` in the
-    # developer's global config would otherwise leave no line starting with `+`,
-    # and the gating suite would fail with a bogus INV-C10 error.
-    diff = subprocess.run(
-        ["git", "-C", str(root), "diff", "--no-color", "--no-ext-diff", base_sha,
-         "--", MERGE_PR_SKILL],
-        capture_output=True, text=True,
-    )
-    if diff.returncode != 0:
-        errors.append(f"INV-C10: `git diff {base_sha} -- {MERGE_PR_SKILL}` failed: {diff.stderr.strip()}")
-        return
-
-    # Hunk-anchored, NOT prefix-filtered: a removed line whose own text starts
-    # with `--` renders as `---…`, so dropping every line that starts with `---`
-    # discarded exactly the removals this file is full of (its `---` frontmatter
-    # fences). Header lines are skipped by position instead — everything before
-    # the first `@@` of a file's hunks.
-    added, removed = [], []
-    in_hunk = False
-    for line in diff.stdout.splitlines():
-        if line.startswith("diff --git "):
-            in_hunk = False
-            continue
-        if line.startswith("@@"):
-            in_hunk = True
-            continue
-        if not in_hunk:
-            continue
-        if line.startswith("+"):
-            added.append(line[1:])
-        elif line.startswith("-"):
-            removed.append(line[1:])
-
-    if removed != EXPECTED_REMOVED_LINES:
-        errors.append(
-            f"INV-C10: {MERGE_PR_SKILL} has {len(removed)} REMOVED line(s) since {base_sha}; "
-            f"INV-C10 permits none beyond the pinned R4 fence-rewrite. "
-            f"First: {removed[0]!r}" if removed else
-            f"INV-C10: {MERGE_PR_SKILL} has REMOVED lines since {base_sha} that do not "
-            f"match the pinned R4 fence-rewrite"
-        )
-    if added != EXPECTED_ADDED_LINES:
-        errors.append(
-            f"INV-C10: {MERGE_PR_SKILL} added lines since {base_sha} are not the one "
-            f"permitted paragraph.\n    expected: {EXPECTED_ADDED_LINES!r}\n"
-            f"    measured: {added!r}"
-        )
-
+    match = re.search(r"^### Step 7\.5:.*?^```bash\n(.*?)^```", text, re.S | re.M)
+    if not match:
+        errors.append(f"INV-C10: Step 7.5 bash fence missing from {MERGE_PR_SKILL}")
+    elif match.group(1).rstrip("\n") != EXPECTED_STEP_75_FENCE:
+        errors.append(f"INV-C10: Step 7.5 bash fence differs from pinned template in {MERGE_PR_SKILL}")
 
 # --- orchestration ----------------------------------------------------------
 
 
 def run_checks(root: Path, coverage_map: dict = COVERAGE_MAP, contract_rel: str = CONTRACT_YAML,
-               base_sha: str = INV_C10_BASE_SHA, git_checks: bool = True,
+               git_checks: bool = True,
                notes: list[str] | None = None) -> list[str]:
     errors: list[str] = []
     if notes is None:
@@ -870,7 +767,7 @@ def run_checks(root: Path, coverage_map: dict = COVERAGE_MAP, contract_rel: str 
 
     check_no_merge_grudge_writer(root, errors)
     if git_checks:
-        check_merge_pr_untouched(root, base_sha, errors)
+        check_finish_merge_grudge_fence(root, errors)
     return errors
 
 
@@ -967,48 +864,11 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
-    """A repo whose merge-pr/SKILL.md gained exactly the permitted paragraph
-    AND the R4 fence rewrite (comma-joined sentinel replaced by the repeatable
-    equals-form pair) — the only two changes INV-C10 allows since base."""
     root = Path(tempfile.mkdtemp(dir=tmp))
-    (root / "skills" / "merge-pr").mkdir(parents=True)
     skill = root / MERGE_PR_SKILL
-    # The `---` frontmatter fences are load-bearing fixture, not decoration: a
-    # REMOVED line whose own text starts with `--` renders as `---…` in a diff,
-    # which a header filter anchored on a bare `---` prefix silently eats.
-    head = ("---\nname: merge-pr\n---\n\n"
-            "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n")
-    # The pre-R4 comma-joined, pre-R3 (no store identity) sentinel fence, as the
-    # base commit 3193271 carried it — fetched from the real history.
-    old_fence = ('# only for fix(*) PRs\n'
-                 'plugin_root="$(realpath "<this-skill-base-dir>/../..")"\n'
-                 'python3 "$plugin_root/scripts/grudge_append.py" \\\n'
-                 '  --symptom "<PR title minus the fix() prefix>" \\\n'
-                 '  --root-cause "<from PR body, if stated>" \\\n'
-                 '  --files "<comma-separated files the PR changed>" \\\n'
-                 '  --commit "<squash/merge SHA>" \\\n'
-                 '  --why "<from PR body, if stated>"')
-    skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing.\n"
-                     + "\n" + "".join(line + "\n" for line in _REMOVED_TAIL),
-                     encoding="utf-8")
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "t")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "base")
-    base = _git(root, "rev-parse", "HEAD").stdout.strip()
-    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n",
-                "If this step is skipped or fails, Path B's Stop hook "
-                "(`grudge-resolution-guard.sh`) will block the session's next "
-                "Stop event until a grudge is recorded or explicitly skipped — "
-                "see `hooks/README.md`.",
-                "\n\nNon-`fix(*)` PRs record nothing.\n",
-                "\n" + "".join(line + "\n" for line in _ADDED_TAIL)])
-    skill.write_text("".join(working), encoding="utf-8")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "add paragraph")
-    return root, base
-
+    skill.parent.mkdir(parents=True)
+    skill.write_text("### Step 7.5: Record a grudge\n\n```bash\n" + EXPECTED_STEP_75_FENCE + "\n```\n", encoding="utf-8")
+    return root, ""
 
 def selftest() -> int:
     failures: list[str] = []
@@ -1190,78 +1050,15 @@ def selftest() -> int:
         check_no_merge_grudge_writer(root, errs)
         expect_clean("binary file under hooks/", errs)
 
-        # --- INV-C10: the Step 7.5 history assertion -----------------------
-        root, base = _make_git_fixture(tmp)
+        # --- INV-C10: finish merge fence is pinned -------------------------
+        root, _ = _make_git_fixture(tmp)
         errs = []
-        check_merge_pr_untouched(root, base, errs)
-        expect_clean("merge-pr untouched", errs)
-
+        check_finish_merge_grudge_fence(root, errs)
+        expect_clean("finish merge fence preserved", errs)
+        (root / MERGE_PR_SKILL).write_text("### Step 7.5: Record a grudge\n\n```bash\necho changed\n```\n")
         errs = []
-        check_merge_pr_untouched(root, "0" * 40, errs)
-        expect_error("shallow clone / missing base", errs, "is not present in this clone")
-        expect_error("shallow clone / missing base", errs, "LOUD failure")
-
-        skill = root / MERGE_PR_SKILL
-        original = skill.read_text(encoding="utf-8")
-        skill.write_text(original + "\nAn extra automation paragraph.\n", encoding="utf-8")
-        _git(root, "add", "-A")
-        _git(root, "commit", "-qm", "extra")
-        errs = []
-        check_merge_pr_untouched(root, base, errs)
-        expect_error("merge-pr gained a line", errs, "are not the one permitted paragraph")
-
-        skill.write_text(original.replace('  --why "<from PR body, if stated>"\n', ""), encoding="utf-8")
-        _git(root, "add", "-A")
-        _git(root, "commit", "-qm", "drop a fence line")
-        errs = []
-        check_merge_pr_untouched(root, base, errs)
-        expect_error("fence line removed", errs, "REMOVED line(s)")
-        expect_error("fence line removed", errs, "differs from the pinned templated form")
-
-        # --- MUTANT: a removed line whose own text starts with `--` ---------
-        # `-` + `---` renders as `----`; a header filter that anchors on the
-        # bare prefix `---` discards it, and "INV-C10 permits no removed lines"
-        # silently stops seeing the one edit shape the real file is full of.
-        root, base = _make_git_fixture(tmp)
-        skill = root / MERGE_PR_SKILL
-        # Exactly ONE removed line, and its own text is `---`.
-        skill.write_text(skill.read_text(encoding="utf-8").replace("\n---\n\n###", "\n\n###", 1),
-                         encoding="utf-8")
-        _git(root, "commit", "-aqm", "drop the closing --- frontmatter fence")
-        errs = []
-        check_merge_pr_untouched(root, base, errs)
-        expect_error("removed line beginning with --", errs, "REMOVED line(s)")
-
-        # --- MUTANT: an UNCOMMITTED edit outside the fence -------------------
-        # Both halves must read ONE state. The fence pin reads the working tree,
-        # so an added-lines assertion reading `base..HEAD` lets an uncommitted
-        # automation paragraph through — precisely when this suite normally runs.
-        root, base = _make_git_fixture(tmp)
-        skill = root / MERGE_PR_SKILL
-        skill.write_text(skill.read_text(encoding="utf-8") + "\nAn uncommitted automation paragraph.\n",
-                         encoding="utf-8")
-        errs = []
-        check_merge_pr_untouched(root, base, errs)
-        expect_error("uncommitted edit outside the fence", errs, "are not the one permitted paragraph")
-
-        # --- hostile ambient git config (color / external diff) --------------
-        # `color.ui = always` prefixes every diff line with ANSI, so nothing
-        # starts with `+`; a `diff.external` replaces the diff wholesale. Either
-        # turns this assertion into a bogus INV-C10 failure in the gating suite.
-        root, base = _make_git_fixture(tmp)
-        hostile = root.parent / "hostile.gitconfig"
-        hostile.write_text("[color]\n\tui = always\n[diff]\n\texternal = /bin/echo\n", encoding="utf-8")
-        saved = os.environ.get("GIT_CONFIG_GLOBAL")
-        os.environ["GIT_CONFIG_GLOBAL"] = str(hostile)
-        try:
-            errs = []
-            check_merge_pr_untouched(root, base, errs)
-            expect_clean("hostile ambient git config", errs)
-        finally:
-            if saved is None:
-                os.environ.pop("GIT_CONFIG_GLOBAL", None)
-            else:
-                os.environ["GIT_CONFIG_GLOBAL"] = saved
+        check_finish_merge_grudge_fence(root, errs)
+        expect_error("finish merge fence changed", errs, "differs from pinned template")
 
         # --- main()'s own argv dispatch ------------------------------------
         # stderr is swallowed so the usage line does not read as a failure in

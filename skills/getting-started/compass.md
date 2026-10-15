@@ -29,7 +29,7 @@ A single `docs/compass.md` per repo that answers "where am I, what's the next mo
 | File is at the 40-line cap | `compass compress` |
 | Suspect schema drift or parse error | `compass doctor` |
 
-Most users never invoke compass directly — it fires automatically through `build`, `merge-pr`, and `finish`.
+Most users never invoke compass directly — it fires automatically through `build` and `finish`.
 
 ## File location
 
@@ -88,7 +88,7 @@ Compass is auto-maintained at four lifecycle moments. Direct invocation is rarel
 | Skill | Event | Fields written |
 |-------|-------|----------------|
 | `build` | After Gate Ledger Initialization + resume decision, before Phase 1 IN_PROGRESS. Skipped on resume path. | `current_arc` |
-| `merge-pr` | After `gh pr merge` succeeds and post-merge CI passes. | `last_meaningful_commit` |
+| `finish` safe PR merge subflow | After `gh pr merge` succeeds and post-merge CI passes. | `last_meaningful_commit` |
 | `finish` Option 1 | After local merge + tests pass. | `last_meaningful_commit` + arc-closure (`current_arc=''`, `next_move`) |
 | `finish` Option 2 | After `gh pr checks --watch` returns green. | provisional arc-closure only (`current_arc=''`, `next_move`) |
 
