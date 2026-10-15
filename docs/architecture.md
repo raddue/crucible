@@ -15,7 +15,7 @@ Phase 4 also runs a conditional security pass and a supply-chain scan around the
 
 ## Knowledge accelerators
 
-The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom — including defect signatures that surface known bug patterns proactively). Both accumulate across sessions.
+The **forge** retrospective workflow (`getting-started/forge.md`) and **cartographer** skill are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom — including defect signatures that surface known bug patterns proactively). Both accumulate across sessions.
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
@@ -43,9 +43,9 @@ The **replay** skill provides crash recovery and A/B experimentation for any pip
 
 ## Session continuity
 
-The **recall** skill queries the session activity index — a searchable log of file edits, git operations, test runs, and errors maintained by PostToolUse hooks. Compaction recovery steps in build, debugging, and spec re-read session state after context compression. Skills emit semantic events (phase transitions, design decisions) via an outbox pattern for cross-skill continuity.
+The **recall** workflow (`getting-started/recall.md`) queries the session activity index — a searchable log of file edits, git operations, test runs, and errors maintained by PostToolUse hooks. Compaction recovery steps in build, debugging, and spec re-read session state after context compression. Skills emit semantic events (phase transitions, design decisions) via an outbox pattern for cross-skill continuity.
 
-The **compass** skill maintains per-repo arc-state in `docs/compass.md` (current arc, last meaningful commit, open loops, next move, don't-forget items). It is auto-maintained by build, merge-pr, and finish, and read by getting-started, so a new session can recover *where the work was* without re-deriving it from git.
+The **compass** workflow (`getting-started/compass.md`) maintains per-repo arc-state in `docs/compass.md` (current arc, last meaningful commit, open loops, next move, don't-forget items). It is auto-maintained by build, merge-pr, and finish, and read by the getting-started bootstrap, so a new session can recover *where the work was* without re-deriving it from git.
 
 ## Calibration and regression memory
 

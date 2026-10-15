@@ -203,6 +203,8 @@ run python3 scripts/check_warden_structure.py --selftest
 run python3 scripts/check_warden_structure.py
 run python3 scripts/check_build_clean_tree_contract.py --selftest
 run python3 scripts/check_build_clean_tree_contract.py
+run python3 scripts/check_build_scratch_isolation.py --selftest
+run python3 scripts/check_build_scratch_isolation.py
 run python3 scripts/check_warden_integration.py --selftest
 run python3 scripts/check_warden_integration.py
 

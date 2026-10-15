@@ -18,6 +18,8 @@ class PackageReleaseTest(unittest.TestCase):
         )
         (root / "agents").mkdir()
         (root / "agents" / "demo.md").write_text("# Demo agent\n", encoding="utf-8")
+        (root / "agents" / "pi").mkdir()
+        (root / "agents" / "pi" / "demo.md").write_text("# Pi agent\n", encoding="utf-8")
         (root / "hooks").mkdir()
         (root / "hooks" / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         (root / "hooks" / "check.sh").chmod(0o755)
@@ -40,6 +42,7 @@ class PackageReleaseTest(unittest.TestCase):
         )
         for name in ("LICENSE", "PLATFORMS.md", "PRIVACY.md", "CLAUDE.md"):
             (root / name).write_text(name, encoding="utf-8")
+        (root / "AGENTS.md").symlink_to("CLAUDE.md")
 
     def init_git(self, root):
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -62,6 +65,18 @@ class PackageReleaseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must be greater than latest tag"):
                 package_release.validate_release(root)
 
+    def test_release_notes_skip_leading_unversioned_sections(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            (root / "CHANGELOG.md").write_text(
+                "## Unreleased\n\nPending.\n\n## v1.2.3 - Demo release\n\nChanges.\n",
+                encoding="utf-8",
+            )
+            self.init_git(root)
+            self.assertEqual(package_release.validate_release(root), "1.2.3")
+            self.assertNotIn("Pending", package_release.release_notes(root, "1.2.3"))
+
     def test_build_is_byte_identical_and_normalizes_metadata(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "repo"
@@ -82,6 +97,9 @@ class PackageReleaseTest(unittest.TestCase):
                     self.assertEqual((archive.getinfo("hooks/check.sh").external_attr >> 16) & 0o777, 0o755)
                     self.assertEqual(archive.namelist(), sorted(archive.namelist()))
                     self.assertNotIn("docs/", "\n".join(archive.namelist()))
+                    self.assertIn("AGENTS.md", archive.namelist())
+                    self.assertEqual(archive.read("AGENTS.md"), archive.read("CLAUDE.md"))
+                    self.assertIn("agents/pi/demo.md", archive.namelist())
 
     def test_build_smoke_checks_extracted_archive(self):
         with tempfile.TemporaryDirectory() as temp:

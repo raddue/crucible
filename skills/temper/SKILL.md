@@ -488,7 +488,7 @@ This is the single canonical statement of the rule; the workflow sections below 
 
 **Ad-hoc development:** Temper before merge, when stuck, after a complex bug fix. The user dispatches `crucible:test-coverage` afterward if behavioral changes were made.
 
-**Migration note — pre-rename retrospectives.** `crucible:forge` retrospectives written before 2026-05-17 are tagged with `code_review`. Forge's consult-past-lessons step does not auto-alias; if you want the old lessons to surface for `temper`, query both keys. (Out of temper's scope to fix; flagged here so users know.)
+**Migration note — pre-rename retrospectives.** `crucible:getting-started` (`forge.md`) retrospectives written before 2026-05-17 are tagged with `code_review`. Forge's consult-past-lessons step does not auto-alias; if you want the old lessons to surface for `temper`, query both keys. (Out of temper's scope to fix; flagged here so users know.)
 
 ## Red Flags
 

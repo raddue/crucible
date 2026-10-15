@@ -117,7 +117,7 @@ Karpathy rules) and apply here too.
 
 These skills are installed (symlinked into your harness's skills dir) and auto-activate
 by description — including while you work on Crucible itself. Full tour:
-`/workshop`.
+`/getting-started` (workshop tour reference).
 
 Headline orchestrators:
 - `/build` — idea → working code (design → plan → TDD → quality-gate → PR)
@@ -128,6 +128,6 @@ Headline orchestrators:
 - `/recon` — investigate unfamiliar code before starting a task
 - `/audit` / `/siege` — adversarial subsystem review / security audit
 - `/anvil` — create, modify, and eval skills in *this* repo
-- `/finish`, `/handoff`, `/forge` — wrap-up, session handoff, retrospective
+- `/finish` — wrap-up; `/getting-started` also bundles session handoff, forge retrospective, compass arc state, recall
 
 Run `/skills` for the full catalog.

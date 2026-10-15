@@ -14,7 +14,7 @@ from pathlib import Path
 
 VERSION_FILE = ".claude-plugin/plugin.json"
 INCLUDED_DIRS = ("skills", "agents", "hooks", "scripts", "mcp-servers", ".claude-plugin")
-INCLUDED_FILES = ("README.md", "LICENSE", "CHANGELOG.md", "PLATFORMS.md", "PRIVACY.md", "CLAUDE.md")
+INCLUDED_FILES = ("README.md", "LICENSE", "CHANGELOG.md", "PLATFORMS.md", "PRIVACY.md", "CLAUDE.md", "AGENTS.md")
 EXCLUDED_PARTS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 ZIP_EPOCH = (2020, 1, 1, 0, 0, 0)
 
@@ -28,11 +28,6 @@ def version(root):
 
 def release_notes(root, value):
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-    first_heading = re.search(r"^##\s*\S.*$", text, re.M)
-    if not first_heading:
-        raise ValueError("CHANGELOG.md has no section headings")
-    if not re.match(rf"^## v{re.escape(value)}(?:\s|$)", first_heading.group(0)):
-        raise ValueError(f"CHANGELOG.md must begin its first section with ## v{value}")
     match = re.search(rf"^## v{re.escape(value)}(?:\s|$).*?(?=^## |\Z)", text, re.M | re.S)
     if not match:
         raise ValueError(f"CHANGELOG.md missing heading for v{value}")
@@ -80,12 +75,15 @@ def files(root, ref):
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         for member in archive.getmembers():
             rel = member.name
-            if not member.isfile() or not (rel in allowed or rel.startswith(tuple(f"{d}/" for d in INCLUDED_DIRS))):
+            if not (rel in allowed or rel.startswith(tuple(f"{d}/" for d in INCLUDED_DIRS))):
                 continue
             if any(part in EXCLUDED_PARTS for part in Path(rel).parts):
                 continue
-            source = archive.extractfile(member)
-            result.append((rel, source.read(), 0o755 if member.mode & 0o111 else 0o644))
+            if rel == "AGENTS.md" and member.issym() and member.linkname == "CLAUDE.md":
+                # ZIP install keeps the root harness entrypoint without following arbitrary links.
+                result.append((rel, archive.extractfile("CLAUDE.md").read(), 0o644))
+            elif member.isfile():
+                result.append((rel, archive.extractfile(member).read(), 0o755 if member.mode & 0o111 else 0o644))
     return sorted(result)
 
 
@@ -156,7 +154,7 @@ def smoke_check(root):
         agent_links = list(agents_dir.iterdir()) if agents_dir.is_dir() else []
         if not skill_links or not all(p.is_symlink() and p.is_dir() for p in skill_links) or not any((p / "SKILL.md").is_file() for p in skill_links):
             raise ValueError("README skill symlinks did not resolve extracted skills")
-        if not agent_links or not all(p.is_symlink() and p.is_file() for p in agent_links):
+        if not agent_links or not all(p.is_symlink() and (p.is_file() or p.is_dir()) for p in agent_links) or not any(p.is_file() or (p.is_dir() and any(p.glob("*.md"))) for p in agent_links):
             raise ValueError("README agent symlinks did not resolve extracted agents")
 
 
