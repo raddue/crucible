@@ -4,6 +4,22 @@ version: 1
 
 # Cairn Convention (Invariant Cairn — Layer 3)
 
+## Contents
+
+- [Purpose](#purpose)
+- [File Layout](#file-layout)
+- [Schema (rigid, four sections)](#schema-rigid-four-sections)
+- [Write Rules (Non-Negotiable)](#write-rules-non-negotiable)
+- [Read Rules](#read-rules)
+- [Shedding License](#shedding-license)
+- [Phase Entry Check](#phase-entry-check)
+- [Reconciliation Pass](#reconciliation-pass)
+- [Budget](#budget)
+- [Recovery Protocol](#recovery-protocol)
+- [Composition with Layers 1 and 2](#composition-with-layers-1-and-2)
+- [Integration Checklist for Pilot Skills](#integration-checklist-for-pilot-skills)
+- [Version History](#version-history)
+
 > Canonical reference for the orchestrator's per-run cairn file — the authoritative
 > substitute for the orchestrator's own context trail.
 >

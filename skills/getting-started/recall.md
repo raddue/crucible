@@ -1,10 +1,13 @@
----
-name: recall
-description: Query session history from the persistent activity index. Returns event logs, summaries, and filtered views that survive context compaction.
-origin: crucible
----
-
 # Recall
+
+## Contents
+
+- [Session Index Discovery](#session-index-discovery)
+- [Query Modes](#query-modes)
+- [Output Format](#output-format)
+- [Event Schema Reference](#event-schema-reference)
+- [Integration with Pipeline Skills](#integration-with-pipeline-skills)
+- [Red Flags](#red-flags)
 
 Query the session activity index for event history, file change logs, decisions, and errors. The session index is written continuously by the PostToolUse hook and persists across compaction events.
 

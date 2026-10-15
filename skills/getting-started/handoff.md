@@ -1,10 +1,14 @@
----
-name: handoff
-description: Write a handoff doc for the next session — either continuing the current arc, or proposing the natural next pickup if the current arc is wrapping up.
-origin: crucible
----
-
 # Handoff
+
+## Contents
+
+- [Step 0 — Nothing-to-hand-off check](#step-0--nothing-to-hand-off-check)
+- [Two modes — pick one](#two-modes--pick-one)
+- [What goes in a Continuation handoff](#what-goes-in-a-continuation-handoff)
+- [What goes in a Backlog handoff](#what-goes-in-a-backlog-handoff)
+- [Process](#process)
+- [Output Contract](#output-contract)
+- [Quality bar](#quality-bar)
 
 Write a handoff document so a fresh agent (with no memory of this conversation) can pick up where we left off.
 

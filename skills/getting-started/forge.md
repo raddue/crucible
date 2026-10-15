@@ -1,9 +1,21 @@
----
-name: forge
-description: Use when a significant task completes and you need a retrospective, when starting a new task and want to consult past lessons, or when 10+ retrospectives have accumulated and skill improvements should be proposed
----
-
 # Forge
+
+## Contents
+
+- [Overview](#overview)
+- [Cairn (Layer 3)](#cairn-layer-3)
+- [When to Use](#when-to-use)
+- [Storage](#storage)
+- [Trajectory Capture (Opt-In)](#trajectory-capture-opt-in)
+- [Mode 1: Post-Task Retrospective](#mode-1-post-task-retrospective)
+- [Mode 2: Pre-Task Feed-Forward](#mode-2-pre-task-feed-forward)
+- [Mode 3: Skill Mutation Proposals](#mode-3-skill-mutation-proposals)
+- [Integration](#integration)
+- [Quick Reference](#quick-reference)
+- [Red Flags](#red-flags)
+- [Rationalization Prevention](#rationalization-prevention)
+- [Common Mistakes](#common-mistakes)
+- [Prompt Templates](#prompt-templates)
 
 ## Overview
 

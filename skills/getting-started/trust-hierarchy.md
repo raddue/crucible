@@ -1,5 +1,17 @@
 # Context Trust Hierarchy
 
+## Contents
+
+- [L1 — Trusted (authoritative)](#l1--trusted-authoritative)
+- [L2 — Verified (pipeline-produced artifacts)](#l2--verified-pipeline-produced-artifacts)
+- [L3 — Source (ground truth for "what the code does")](#l3--source-ground-truth-for-what-the-code-does)
+- [L4 — Verify-first (must be checked before acting)](#l4--verify-first-must-be-checked-before-acting)
+- [L5 — Untrusted (do not rely on without re-verification)](#l5--untrusted-do-not-rely-on-without-re-verification)
+- [Conflict Resolution](#conflict-resolution)
+- [Annotation Convention](#annotation-convention)
+- [Canonical Markers for Crucible Load Points](#canonical-markers-for-crucible-load-points)
+- [When to Re-verify](#when-to-re-verify)
+
 Crucible skills load content from many sources: `SKILL.md` files, design docs, source code, tool output, WebFetch results, subagent reports, and conversation history (including post-compaction summaries). When these sources disagree, the agent needs an explicit framework for deciding which to trust. Without one, stale external docs, hallucinated subagent paths, and compaction-summary artifacts silently win over ground truth. This document defines a five-level hierarchy, conflict-resolution rules, and a canonical inline-annotation convention that skills use at external-content load points.
 
 ## L1 — Trusted (authoritative)

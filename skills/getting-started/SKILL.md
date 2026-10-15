@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: Use when starting any conversation - establishes how to find and use skills, requiring skill activation before ANY response including clarifying questions. This is the conversation-start bootstrap protocol, not the user-facing catalog tour (for "what skills exist / which one for X", use workshop).
+description: Use when starting any conversation - establishes how to find and use skills, requiring skill activation before ANY response including clarifying questions (the conversation-start bootstrap protocol). Also the session-continuity hub - triggers on "compass", "current arc", "project state", "arc state", "where was I" (read/update/doctor/compress docs/compass.md); "retrospective", "forge", "consult past lessons", "propose skill improvements" (forge retrospective, feed-forward, 10+ retrospective mutation proposals); "handoff", "write a handoff", "end of session" (handoff doc); "recall", "session history", "what did I edit", "recall errors" (activity-index queries); and "skills available", "what skills are available?", "where do I start?", "what should I use for X?", "tour", "give me a tour of Crucible" (workshop catalog tour).
 ---
 
 # Using Crucible Skills
@@ -9,17 +9,17 @@ description: Use when starting any conversation - establishes how to find and us
 
 <!-- CANONICAL: shared/compass-protocol.md -->
 
-Read current arc state before the dispatch table. Silent no-op on non-Crucible repos or missing compass file (the script's `read()` fast-returns empty on `FileNotFoundError`).
+Read current arc state before the dispatch table. Requires Python 3 (stdlib only, no install). Silent no-op on non-Crucible repos or missing compass file (the script's `read()` fast-returns empty on `FileNotFoundError`).
 
 ```bash
 test -f scripts/compass.py && python scripts/compass.py read --compact 2>/dev/null || true
 ```
 
-If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this skill — getting-started reads only.
+If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this bootstrap step — the bootstrap reads only. Writes happen only through the lifecycle callers (`build`, `merge-pr`, `finish`) or an explicit user request handled via [compass.md](compass.md).
 
 ## Repo Memory
 
-Read committed decisions and rules after compass state. This is L2 context, not authority over `CLAUDE.md`/`AGENTS.md` or accepted ADRs.
+Read committed decisions and rules after compass state. Requires Python 3 (stdlib only); falls back to `grep`. This is L2 context, not authority over `CLAUDE.md`/`AGENTS.md` or accepted ADRs.
 
 ```bash
 plugin_root="$(realpath "<this-skill-base-dir>/../..")"
@@ -27,6 +27,20 @@ python3 "$plugin_root/scripts/memory.py" read --limit 30 2>/dev/null \
   || { test -f docs/memory.md && grep -E '^- \[(decision|rule)\] ' docs/memory.md | tail -30; } \
   || true
 ```
+
+## Bundled References
+
+These former standalone skills live here as flat reference files. Invoke `getting-started`, then read and follow only the matching file — its mechanics are authoritative and unchanged. Legacy `/compass`, `/forge`, `/handoff`, `/recall`, `/workshop` phrasing routes here.
+
+| Request | Reference | Mechanics |
+|---------|-----------|-----------|
+| Arc state: "compass", "current arc", "project state", "where was I" | [compass.md](compass.md) | Requires Python 3 stdlib: `python scripts/compass.py read [--compact]`, `update`, `append`, `update-many`, `doctor`, `compress`; `docs/compass.md` 40-line arc-state convention; canonical protocol [compass-protocol.md](../shared/compass-protocol.md) |
+| Retrospective, feed-forward, skill mutation proposals | [forge.md](forge.md) | Retrospective → `patterns.md`; feed-forward before design/planning/build; mutation proposals only after 10+ retrospectives and 3+ of one deviation type; never auto-modify skills. Prompt templates sit beside it (`retrospective-prompt.md`, `feed-forward-prompt.md`, `mutation-proposal-prompt.md`, `diagnostic-extraction-prompt.md`, `extraction-analyst-prompt.md`) |
+| Handoff doc for the next session | [handoff.md](handoff.md) | Step 0 nothing-to-hand-off check, mode A/B, Output Contract ending `Read this doc and continue: <absolute path>` then END THE TURN |
+| Session history: "recall", "what did I edit", "recall errors" | [recall.md](recall.md) | Activity-index discovery, summary / keyword / type / time-range views, 20-entry cap |
+| Catalog tour: "skills available", "where do I start?", "tour" | [workshop.md](workshop.md) | Headline orchestrators by task, trigger-phrase table, pipelines |
+
+Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that auto-invoke these (`build`, `finish`, `merge-pr`, `debugging`, `design`, `spec`, `migrate`) name `crucible:getting-started` plus the reference file; behavior is identical to the former standalone skills.
 
 ## The Rule
 
@@ -53,6 +67,8 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 | Claiming work is done | verify → finish |
 | Receiving code review feedback | review-feedback |
 | Onboarding to an unfamiliar codebase | project-init |
+| Significant task just completed | getting-started → [forge.md](forge.md) retrospective |
+| Ending a session | getting-started → [handoff.md](handoff.md) |
 
 ### Build-shaped work routes through /build
 

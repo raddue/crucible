@@ -4,6 +4,24 @@ version: 1
 
 # Dispatch Convention
 
+## Contents
+
+- [Harness bindings](#harness-bindings)
+- [When to Use](#when-to-use)
+- [Dispatch Directory](#dispatch-directory)
+- [File Naming](#file-naming)
+- [Dispatch File Header](#dispatch-file-header)
+- [Pointer Prompt Format](#pointer-prompt-format)
+- [Scope Anchoring (opt-in)](#scope-anchoring-opt-in)
+- [Graphify Consult](#graphify-consult)
+- [Pipeline-Active Marker](#pipeline-active-marker)
+- [Compaction Recovery](#compaction-recovery)
+- [Dispatch Manifest](#dispatch-manifest)
+- [Receipt Ledger](#receipt-ledger)
+- [Cleanup](#cleanup)
+- [Failure Handling](#failure-handling)
+- [Template Comment Header](#template-comment-header)
+
 > Canonical reference for disk-mediated subagent dispatch across all orchestrator skills.
 > Each orchestrator SKILL.md references this file via `<!-- CANONICAL: shared/dispatch-convention.md -->`.
 >
