@@ -5,6 +5,22 @@ description: Use when encountering any bug, test failure, or unexpected behavior
 
 # Systematic Debugging
 
+## Overview
+
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
+Random fixes waste time and create new bugs. Quick patches mask underlying issues.
+
+**Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
+
+**Violating the letter of this process is violating the spirit of debugging.**
+
+**Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
+
+
+
 ## Grudge regression oracle — read/write mechanics (#271)
 
 ## Where grudges live (read this first)
@@ -170,21 +186,6 @@ approach is rejected.
 
 No semantic search (glob + regex only); no cross-**user** shared grudgebook
 (sanitized community grudges — v1.1 candidate); no `settings.json` hook.
-
-## Overview
-
-<!-- CANONICAL: shared/dispatch-convention.md -->
-All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
-
-Random fixes waste time and create new bugs. Quick patches mask underlying issues.
-
-**Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
-
-**Violating the letter of this process is violating the spirit of debugging.**
-
-**Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
-
-
 
 
 ## Communication Requirement (Non-Negotiable)
