@@ -109,11 +109,11 @@ Each line in `events.jsonl` follows this schema (see `skills/shared/session-inde
 
 ## Integration with Pipeline Skills
 
-Pipeline skills can invoke `/recall` internally after compaction to supplement CSB-based recovery:
+Pipeline skills can run this recall reference (`/getting-started recall <query>`) internally after compaction to supplement CSB-based recovery:
 
 1. **Existing recovery:** Read CSB / pipeline-status.md / handoff manifest
 2. **Supplementary:** Read `summary.md` from the session index for narrative context
-3. **Targeted:** Query specific events via `/recall` for focused context (e.g., `/recall errors` to recover error history)
+3. **Targeted:** Query specific events via `/getting-started recall <query>` for focused context (e.g., `/getting-started recall errors` to recover error history)
 
 This is additive -- it does not replace existing recovery mechanisms.
 
