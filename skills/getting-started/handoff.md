@@ -26,7 +26,7 @@ Before writing anything, sanity-check that there's actually something to hand of
 
 1. **Git detect.** Run `git rev-parse --is-inside-work-tree`. If it fails (not a git repo), ask the user where to write the file and what scope counts as "the project," then proceed using whatever they say. Skip git-specific verification steps in the rest of the process when in this mode. **This step always runs first regardless of `$ARGUMENTS`.**
 2. **Argument check.** If `$ARGUMENTS` (see bottom of this file) is non-empty, treat it as sufficient evidence of an arc and skip step 3. Proceed to Mode selection.
-3. **Work-existence check.** Is there session work, in-flight changes (`git status` shows modifications/staged), recent commits on a non-default branch, or an active line of investigation in the conversation? If **none of the above** apply (fresh session, clean tree, no real conversation history): tell the user there's nothing to hand off, suggest they invoke `/handoff` again after doing some work, and **stop**. Do not create a file.
+3. **Work-existence check.** Is there session work, in-flight changes (`git status` shows modifications/staged), recent commits on a non-default branch, or an active line of investigation in the conversation? If **none of the above** apply (fresh session, clean tree, no real conversation history): tell the user there's nothing to hand off, suggest they request a handoff (`/getting-started` → `handoff.md`) again after doing some work, and **stop**. Do not create a file.
 
 ## Two modes — pick one
 

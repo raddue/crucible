@@ -81,7 +81,7 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 ### Step 2.75: Forge Retrospective
 
-**RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
+**RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
 
 ### Step 3.5: Noticed But Not Touching — Optional Issue Conversion
 
@@ -465,7 +465,7 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
 
 **Recommended:**
 - **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)
-- **crucible:forge** — Retrospective between test audit and red-team (Step 2.75)
+- **crucible:getting-started** (`forge.md`) — Retrospective between test audit and red-team (Step 2.75)
 - **crucible:merge-pr** — Handles merge execution with CI verification (Step 6, Option 2)
 
 ## Gate Execution Ledger

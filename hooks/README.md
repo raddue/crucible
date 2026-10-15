@@ -4,7 +4,7 @@ Hook scripts for Claude Code's lifecycle events.
 
 ## Session Activity Index
 
-The session activity index continuously logs high-value session events (file edits, git operations, test runs, errors) to a persistent JSONL file on disk. This index survives context compaction and powers the `/recall` skill.
+The session activity index continuously logs high-value session events (file edits, git operations, test runs, errors) to a persistent JSONL file on disk. This index survives context compaction and powers the recall workflow (`skills/getting-started/recall.md`).
 
 ### Setup
 
@@ -66,7 +66,7 @@ Pipeline skills can emit semantic events (decisions, phase changes) by writing t
 
 ### Disabling
 
-Remove the `PostToolUse` entry from your `settings.json`. Existing session index data remains on disk and can be queried with `/recall` until it ages out (7-day retention).
+Remove the `PostToolUse` entry from your `settings.json`. Existing session index data remains on disk and can be queried with the recall workflow (`skills/getting-started/recall.md`) until it ages out (7-day retention).
 
 ### Dependencies
 

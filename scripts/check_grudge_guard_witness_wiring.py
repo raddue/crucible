@@ -7,7 +7,7 @@ round-2 shape T-x replaced: a wired-nothing pair satisfiable by a flag that
 argparse accepts but nothing runs. Three assertions:
 
   1. **Wiring clauses** — `grudge_guard_doctor --grudge-guard` appears inside the
-     `## Process` section of `skills/handoff/SKILL.md` and inside the
+     `## Process` section of `skills/getting-started/handoff.md` and inside the
      `### Step 5.5` section of `skills/finish/SKILL.md` (clause-presence
      within a NAMED executable step section, NOT a whole-file substring and
      NOT a fenced example or comment — the check_handoff_stop_contract.py
@@ -30,7 +30,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DELIVERABLE = ROOT / "scripts" / "grudge_guard_doctor.py"
-HANDOFF = ROOT / "skills" / "handoff" / "SKILL.md"
+HANDOFF = ROOT / "skills" / "getting-started" / "handoff.md"
 FINISH = ROOT / "skills" / "finish" / "SKILL.md"
 
 INVOCATION = "grudge_guard_doctor --grudge-guard"
@@ -40,7 +40,7 @@ _INVOCATION_RE = re.compile(r"grudge_guard_doctor(?:\.py)? --grudge-guard")
 # Named executable-step section per skill; the invocation must appear inside
 # the section BODY, after fenced blocks are removed.
 SECTIONS = {
-    "skills/handoff/SKILL.md": re.compile(r"^## Process\b.*?(?=^## |\Z)",
+    "skills/getting-started/handoff.md": re.compile(r"^## Process\b.*?(?=^## |\Z)",
                                           re.DOTALL | re.MULTILINE),
     "skills/finish/SKILL.md": re.compile(r"^### Step 5\.5\b.*?(?=^###|\Z)",
                                          re.DOTALL | re.MULTILINE),
@@ -131,7 +131,7 @@ def selftest() -> int:
     # 1. GOOD wiring samples per skill pass; per-clause RED when the
     #    invocation is removed from the named section.
     good_docs = {
-        "skills/handoff/SKILL.md": "## Process\n\n- run `grudge_guard_doctor "
+        "skills/getting-started/handoff.md": "## Process\n\n- run `grudge_guard_doctor "
         "--grudge-guard` here.\n--\n## Next\n",
         "skills/finish/SKILL.md": "### Step 5.5: Pre-Push Validation\n\nrun "
         "`grudge_guard_doctor --grudge-guard`.\n\n### Step 6\n",
@@ -149,7 +149,7 @@ def selftest() -> int:
     #    inside ``` fences.
     fenced = ("## Process\n\n```bash\ngrudge_guard_doctor --grudge-guard\n```\n"
               "--\n")
-    if not check_wiring(fenced, "skills/handoff/SKILL.md"):
+    if not check_wiring(fenced, "skills/getting-started/handoff.md"):
         errs.append("fenced-only invocation satisfied the wiring clause")
     # 3. Reader executability RED arm: analytic shape — since run_reader
     #    executes the tracked script, iterate the same checks over an
@@ -179,7 +179,7 @@ def main() -> int:
         return selftest()
 
     errors: list[str] = []
-    for rel in ("skills/handoff/SKILL.md", "skills/finish/SKILL.md"):
+    for rel in ("skills/getting-started/handoff.md", "skills/finish/SKILL.md"):
         p = ROOT / rel
         if not p.is_file():
             errors.append(f"{rel} is missing")

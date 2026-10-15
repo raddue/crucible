@@ -127,7 +127,7 @@ Before `agent start`, write the worker's fleet record with its returned workspac
 
 Dispatch its first task with `herdr agent prompt <name> '<message>'` (this submits; `pane send-text` only types — it won't fire until someone presses enter). Assemble the message from this template rather than rolling a fresh one per worker:
 
-> Work `<worktree-path>` on branch `<branch>`. Task: `<issue/task summary>`. Run `<crucible-skill>` (e.g. `/build`, `/quality-gate`). Stay inside this worktree — never touch another live worktree or the main checkout. Use `/caveman` output mode for the rest of this session — it cuts your own token burn ~75% with no loss of technical accuracy. Follow step 6 for status reporting: Claude workers use `SendMessage`; non-Claude workers use Herdr notifications while I poll their pane state. Report whenever you're blocked, need a decision, or are done — don't wait for me to check in. Run `/handoff` and stop once you cross ~20-30% context remaining or finish the task; I'll rotate you.
+> Work `<worktree-path>` on branch `<branch>`. Task: `<issue/task summary>`. Run `<crucible-skill>` (e.g. `/build`, `/quality-gate`). Stay inside this worktree — never touch another live worktree or the main checkout. Use `/caveman` output mode for the rest of this session — it cuts your own token burn ~75% with no loss of technical accuracy. Follow step 6 for status reporting: Claude workers use `SendMessage`; non-Claude workers use Herdr notifications while I poll their pane state. Report whenever you're blocked, need a decision, or are done — don't wait for me to check in. Run the handoff workflow (`/getting-started` → `handoff.md`) and stop once you cross ~20-30% context remaining or finish the task; I'll rotate you.
 
 The fleet entry already exists at this point; update it from `dispatched` to the observed live status after the prompt. Never leave a newly launched worker unlisted while planning to “reconcile later.”
 
@@ -204,7 +204,7 @@ herdr agent read <name> --source visible --lines 10
 
 Agree a threshold with the user if they haven't given you one (something in the 20-30% range is a reasonable default — it leaves real headroom for a handoff write-up plus whatever the next worker needs to read back in). When a worker crosses it, or finishes its task, have it write a handoff before it stops:
 
-> Run `/handoff` before you stop — I'll spin a fresh worker from that doc and retire this session.
+> Run the handoff workflow (`/getting-started` → `handoff.md`) before you stop — I'll spin a fresh worker from that doc and retire this session.
 
 You're delivering this to the worker's own pane, so `herdr agent prompt` is fine either way (step 6) — `SendMessage` also works for a `claude`-kind worker if it's more convenient.
 

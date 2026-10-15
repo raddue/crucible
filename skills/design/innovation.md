@@ -51,7 +51,7 @@ Keep the existing `memory/innovate/` scratch path for recovery of prior runs aft
 
 Files (written by the orchestrator, not the subagent):
 
-- `invocation.md` — Written before dispatch. Strict YAML frontmatter followed by a markdown body. The frontmatter MUST be valid YAML, parseable by any standard YAML parser. The `sweep-id` field MUST be present: either a **double-quoted string** matching the sweep-id regex when in sweep mode (quoting is mandatory to avoid YAML type coercion — sweep-id values that would otherwise be parsed as booleans, numbers, or null must still be treated as strings), or the literal YAML value `null` (unquoted, not missing, not empty string) when in single-run mode. `run-id` and `target` fields must also be double-quoted. This makes parsing unambiguous across all edge cases. The `## Project Context` and `## Kill-Criteria` markdown headers in the body are informational (for human readers and `/recall` queries) — NOT structured fields that any orchestrator programmatically parses. Only the YAML frontmatter is parsed.
+- `invocation.md` — Written before dispatch. Strict YAML frontmatter followed by a markdown body. The frontmatter MUST be valid YAML, parseable by any standard YAML parser. The `sweep-id` field MUST be present: either a **double-quoted string** matching the sweep-id regex when in sweep mode (quoting is mandatory to avoid YAML type coercion — sweep-id values that would otherwise be parsed as booleans, numbers, or null must still be treated as strings), or the literal YAML value `null` (unquoted, not missing, not empty string) when in single-run mode. `run-id` and `target` fields must also be double-quoted. This makes parsing unambiguous across all edge cases. The `## Project Context` and `## Kill-Criteria` markdown headers in the body are informational (for human readers and recall queries (`getting-started/recall.md`)) — NOT structured fields that any orchestrator programmatically parses. Only the YAML frontmatter is parsed.
 
   ```
   ---
@@ -85,7 +85,7 @@ After compaction, the post-compaction orchestrator reads `active-run.md` if pres
 
 **Scratch is append-only. Never delete or overwrite `proposal.md` or `alternatives.md` after write.** Each run produces its own `<run-id>/` directory; later runs create new directories, they do not touch earlier ones.
 
-Rationale: today's #2 proposal is often tomorrow's #1 when context shifts. Ranking is ephemeral; the proposal itself is the durable unit. Downstream consumers (future audit skills, `/recall` queries, sweep rankings) require access to the complete historical set.
+Rationale: today's #2 proposal is often tomorrow's #1 when context shifts. Ranking is ephemeral; the proposal itself is the durable unit. Downstream consumers (future audit skills, recall queries (`getting-started/recall.md`), sweep rankings) require access to the complete historical set.
 
 **No file inside `scratch/` is ever rewritten.** A sweep's `ranked.md` (see Sweep Mode below) is rewritten between runs, but it lives in a sibling `sweeps/<sweep-id>/` tree — not under `scratch/` — and is explicitly a view layer over persistent scratch, not authoritative content.
 

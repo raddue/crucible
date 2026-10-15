@@ -481,13 +481,13 @@
       "dimension": "direct",
       "boundary": "onboarding-entry",
       "prompt": "I'm new to Crucible. What skills are available and which should I use for what?",
-      "expected_skill": "workshop",
+      "expected_skill": "getting-started",
       "common_mistakes": [
-        "getting-started",
-        "project-init"
+        "project-init",
+        "recon"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
-      "reasoning": "workshop is the on-demand tour of the Crucible workshop \u2014 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. project-init is codebase onboarding, not skill-suite onboarding.",
+      "reasoning": "getting-started bundles the workshop catalog tour (getting-started/workshop.md) for \"what skills are available / which should I use\". project-init onboards a codebase, not the skill catalog.",
       "difficulty": "easy"
     },
     {
@@ -509,12 +509,12 @@
       "dimension": "negative",
       "boundary": "onboarding-entry",
       "prompt": "Where do I start with these tools? Give me a tour.",
-      "expected_skill": "workshop",
+      "expected_skill": "getting-started",
       "common_mistakes": [
-        "getting-started"
+        "project-init"
       ],
       "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
-      "reasoning": "An explicit tour-of-the-tools request is workshop, even though 'where do I start' echoes getting-started's 'starting any conversation'. getting-started is the always-on bootstrap that fires regardless of utterance; the user-facing tour is workshop. The 'give me a tour' signal disambiguates to workshop.",
+      "reasoning": "\"Give me a tour\" of the tools routes to getting-started\u2019s workshop tour reference, not codebase onboarding (project-init).",
       "difficulty": "hard"
     },
     {
@@ -525,7 +525,7 @@
       "expected_skill": "project-init",
       "common_mistakes": [
         "recon",
-        "workshop"
+        "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task \u2014 whole-repo structural context.",
       "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
@@ -714,12 +714,12 @@
       "dimension": "negative",
       "boundary": "decision-record",
       "prompt": "Write up what we decided this session for whoever picks this up next",
-      "expected_skill": "handoff",
+      "expected_skill": "getting-started",
       "common_mistakes": [
         "design"
       ],
       "context": "The user wants a session-to-session handoff note, not a durable architectural decision record.",
-      "reasoning": "handoff writes session handoff docs. design\u2019s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
+      "reasoning": "getting-started\u2019s handoff reference (handoff.md) writes session handoff docs. design\u2019s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
       "difficulty": "medium"
     },
     {
@@ -767,12 +767,12 @@
       "dimension": "negative",
       "boundary": "decision-record",
       "prompt": "Why did we choose X for the ledger?",
-      "expected_skill": "recall",
+      "expected_skill": "getting-started",
       "common_mistakes": [
         "design"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
-      "reasoning": "recall/recon own the read side (they mine docs/decisions/). design\u2019s decision-record subflow writes and refuses on a settled decision \u2014 it has no answer output.",
+      "reasoning": "recall (getting-started/recall.md) and recon own the read side (they mine docs/decisions/). design\u2019s decision-record subflow writes and refuses on a settled decision \u2014 it has no answer output.",
       "difficulty": "medium"
     },
     {
@@ -838,6 +838,115 @@
       ],
       "context": "Ordinary design request without a finalized artifact.",
       "reasoning": "design runs its investigated-question flow, not innovation-pass mode by default.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "session-hub-compass-01",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "What's the current arc? Show me the project state from compass.",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "recon",
+        "finish"
+      ],
+      "context": "User wants per-repo arc state from docs/compass.md.",
+      "reasoning": "getting-started bundles compass (getting-started/compass.md): `compass read` prints arc state. recon investigates code; finish wraps up work.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "session-hub-compass-02",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "Where was I? Run compass doctor and check if the arc state file is stale.",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "debugging"
+      ],
+      "context": "Session reorientation plus compass schema validation.",
+      "reasoning": "compass read/doctor live in getting-started/compass.md; nothing is broken, so debugging is wrong.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "session-hub-forge-01",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "That build just finished. Run a retrospective and record lessons learned.",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "finish",
+        "verify"
+      ],
+      "context": "Significant task completed; user wants a forge retrospective.",
+      "reasoning": "getting-started bundles forge (getting-started/forge.md) retrospective mode. finish integrates the branch; verify checks completion claims.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "session-hub-forge-02",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "We have 12 retrospectives now and the same deviation keeps recurring. Propose skill improvements.",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "anvil"
+      ],
+      "context": "10+ retrospectives with a recurring deviation type.",
+      "reasoning": "forge mutation proposals (getting-started/forge.md Mode 3) produce proposals only once 10+ retrospectives exist; anvil edits/evals a skill after a human accepts a proposal.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "session-hub-handoff-01",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "I'm out of context budget. Write a handoff doc so the next session can continue.",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "finish",
+        "checkpoint"
+      ],
+      "context": "End of session with in-flight work.",
+      "reasoning": "Handoff docs come from getting-started/handoff.md. finish integrates completed work; checkpoint snapshots git state for rollback.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "session-hub-recall-01",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "Recall errors from this session \u2014 what failed before compaction?",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "debugging",
+        "replay"
+      ],
+      "context": "Query the session activity index for error events.",
+      "reasoning": "recall (getting-started/recall.md) queries session history from the activity index. debugging fixes bugs; replay resumes crashed pipelines.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "session-hub-recall-02",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "Show my session history: what files did I edit in the last hour?",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "recon"
+      ],
+      "context": "Time-range/keyword query over the session activity index.",
+      "reasoning": "recall's time-range and type-filter views live in getting-started/recall.md; recon investigates the codebase, not session events.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "session-hub-tour-01",
+      "dimension": "direct",
+      "boundary": "session-hub",
+      "prompt": "Which skills are available, and what should I use for a flaky test?",
+      "expected_skill": "getting-started",
+      "common_mistakes": [
+        "debugging",
+        "project-init"
+      ],
+      "context": "Catalog question before choosing a tool.",
+      "reasoning": "The workshop catalog tour (getting-started/workshop.md) answers which skill fits; the user has not asked to start debugging yet.",
       "difficulty": "medium"
     }
   ]

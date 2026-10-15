@@ -24,7 +24,7 @@ version: 1
 > substitute for the orchestrator's own context trail.
 >
 > **This is a shared skill reference, not a CLAUDE.md directive.** Long-running
-> orchestrator skills (`/build`, `/quality-gate`, `/siege`, `/forge`, `/design` innovation sweeps)
+> orchestrator skills (`/build`, `/quality-gate`, `/siege`, forge in `/getting-started`, `/design` innovation sweeps)
 > reference this file via `<!-- CANONICAL: shared/cairn-convention.md -->`.
 > Skill bodies do not duplicate the schema — they link here.
 
@@ -202,7 +202,7 @@ Whenever the orchestrator might be post-auto-compaction (unfamiliar context, mid
 
 ## Integration Checklist for Pilot Skills
 
-Each long-running orchestrator skill (`/build`, `/quality-gate`, `/siege`, `/forge`, `/design` innovation sweeps) must:
+Each long-running orchestrator skill (`/build`, `/quality-gate`, `/siege`, forge in `/getting-started`, `/design` innovation sweeps) must:
 
 1. Add `<!-- CANONICAL: shared/cairn-convention.md -->` near the top of its SKILL.md.
 2. Add a `## Cairn (Layer 3)` section declaring:

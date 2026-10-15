@@ -45,7 +45,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | spec | Subagent dispatch for per-ticket investigation | Tickets processed sequentially |
 | migrate | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
 | checkpoint | Shadow git snapshots for pipeline rollback | No automatic rollback; manual git recovery |
-| compass | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
+| getting-started (compass reference) | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
 | merge-pr | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
 | distill | External document converters (pandoc, pdftotext, LibreOffice) | Cannot ingest binary document formats |
 | dependency-audit | External auditors (npm/cargo/pip-audit) | No supply-chain signal produced |
@@ -58,11 +58,11 @@ These skills require features specific to Claude Code. They will not work on oth
 | Skill | Platform Dependency | Why It Can't Degrade |
 |-------|-------------------|---------------------|
 | build | Agent teams (TeamCreate, TaskCreate, SendMessage) | Orchestrates 20+ subagents across 4 phases; sequential fallback exists but is Claude Code-specific |
-| forge | Persistent memory (`~/.claude/projects/<hash>/memory/forge/`) | Retrospectives must persist across sessions to provide value |
+| getting-started (forge reference) | Persistent memory (`~/.claude/projects/<hash>/memory/forge/`) | Retrospectives must persist across sessions to provide value |
 | cartographer-skill | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
 | project-init | Persistent cartographer memory + subagent scan | Onboarding output must persist across sessions, like cartographer's |
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
-| recall | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
+| getting-started (recall reference) | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
 | consensus | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
 | temper-eval-calibrate | Session-dispatch eval harness (Claude Code) | Wraps live session invocations; no portable equivalent |

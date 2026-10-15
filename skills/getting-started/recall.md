@@ -38,6 +38,8 @@ The session index lives at:
 
 ## Query Modes
 
+`/recall <query>` below is legacy shorthand: invoke `getting-started` with the recall request; the query modes are unchanged.
+
 ### No Arguments: `/recall`
 
 Return the full contents of `summary.md`. If `summary.md` does not exist but `events.jsonl` does, read the last 20 entries from `events.jsonl` and format them as a table.

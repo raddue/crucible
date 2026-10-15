@@ -630,7 +630,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
-- **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+- **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
@@ -1235,7 +1235,7 @@ After all tasks complete:
    - A tree that is **still** dirty or untracked *after* the commit/gitignore step is a **surfaced build/test defect** — surface it (error out) and stop; do NOT silently sweep it into the gate's first commit. End state: `git status --porcelain` empty (tracked **and** untracked), identical to the review gate's entry precondition.
 3. **REQUIRED SUB-SKILL:** Use crucible:warden on the full implementation — the consolidated pre-push review gate. Pass `reviewer-set: full`, `Phase: code`, and `PipelineID: <current PipelineID>`. warden runs the full reviewer set (temper + delve + red-team[quality-gate leg] + siege[conditional, same security-signal trigger] + inquisitor[unconditional in full]) as one disjunction-of-native-gates over a fully-clean tree (Step 2.5 guaranteed it), drives and commits every leg's fixes (non-`fix:` subjects), and emits the single build-`PipelineID` aggregate verdict marker. On `BLOCKED`, halt the pipeline (fail-closed). Do NOT separately invoke temper / inquisitor / siege / quality-gate here — warden is the sole code-leg gate-driver (I-W4).
 6b. **Verify warden's aggregate verdict marker and write Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
-7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:
    - Read the metrics log at `/tmp/crucible-metrics-<session-id>.log` for duration and subagent counts
@@ -1413,7 +1413,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
 **Recommended sub-skills:**
-- **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
+- **crucible:getting-started** (`forge.md`) — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 

@@ -191,7 +191,7 @@ entry. Trajectory capture is a nice-to-have — it must never leak sensitive dat
 
 ### When to Trigger
 
-After any skill that completes a significant task reports success. The calling skill (or orchestrator) invokes `crucible:forge` in retrospective mode.
+After any skill that completes a significant task reports success. The calling skill (or orchestrator) invokes `crucible:getting-started` (`forge.md`) in retrospective mode.
 
 ### The Process
 
