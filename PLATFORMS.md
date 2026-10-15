@@ -31,11 +31,9 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
 | anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
-| assay | Subagent dispatch for approach evaluation (Opus evaluator) | Evaluates approaches in-context |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
-| design | Subagent dispatch for parallel investigation + Challenger | Investigation/challenge run in-context |
-| innovate | Subagent dispatch for the Innovation proposer (Opus) | Proposal generated in-context |
+| design | Subagent dispatch for parallel investigation, Challenger, approach evaluation, and innovation | Investigation, evaluation, challenge, and proposal run in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |
 | worktree | Git worktree creation | Standard branch-based isolation |
 | stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
@@ -45,7 +43,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | prospector | Subagent dispatch for parallel exploration | Explores sequentially |
 | siege | Parallel attacker-perspective agents (scales 3–6) | Perspectives run sequentially |
 | spec | Subagent dispatch for per-ticket investigation | Tickets processed sequentially |
-| migrate | Subagent dispatch (recon/assay); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
+| migrate | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
 | checkpoint | Shadow git snapshots for pipeline rollback | No automatic rollback; manual git recovery |
 | compass | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
 | merge-pr | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
