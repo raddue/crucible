@@ -19,8 +19,6 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 **Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
 
-
-
 ## Grudge regression oracle — read/write mechanics (#271)
 
 ## Where grudges live (read this first)

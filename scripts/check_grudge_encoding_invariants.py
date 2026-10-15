@@ -209,7 +209,7 @@ _FAIL_EXPECT = [
      'subprocess.run(["python3", "--files", "a.py"])\n'),
     ("C-m space form", "hooks/grudge-resolution-guard.sh", "[C-m]",
      'python3 "$AP" --by-files "$csv"  # two tokens\n'),
-    ("C-d comma value", "skills/debugging/SKILL.md", "[C-d]", 
+    ("C-d comma value", "skills/debugging/SKILL.md", "[C-d]",
      '  --files "src/a.py,src/b.py" \\\n'),
     ("C-o unguarded declare", "hooks/grudge-resolution-guard.sh", "[C-o]",
      "declare -a \"F_$badsha\"\n"),
