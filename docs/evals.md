@@ -48,7 +48,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Recon mode consolidation (#720)
 
-The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. A four-prompt trigger smoke test using `skills/anvil/scripts/run_eval.py` on Claude CLI did **not** detect the temporary skill command in any run (0/4 triggers; the harness creates `.claude/commands/` entries, while this repo exposes skills through plugin metadata). This is a harness incompatibility, not an A/B quality delta. No valid with-skill/baseline output comparison has been completed; therefore no measured A/B delta is available yet, and the consolidation must not be represented as having a positive measured delta.
+The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison is in progress; the measured delta will be added here before PR creation. Do not interpret the trigger smoke test as an A/B quality score.
 
 ## Key Findings
 

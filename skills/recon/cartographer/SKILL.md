@@ -417,15 +417,15 @@ owns derived structure. See `shared/dispatch-convention.md` ("Graphify Consult")
 for when a dispatch should point an agent at a fresh graph — cartographer
 maintains no call graph and should not replicate one.
 
-### Skills That Should Call Cartographer
+### Caller Integration for Persistent-Map Mode
 
 | Calling Skill | Mode | When | What to Pass |
 |---------------|------|------|--------------|
-| `crucible:build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
-| `crucible:build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
-| `crucible:build` | Record | Phase 4, after completion | Files explored, modules touched |
-| `crucible:debugging` | Load | Phase 1 investigator dispatch | Module names |
-| `crucible:debugging` | Record | After fix verified | What was learned |
+| `/build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
+| `/build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
+| `/build` | Record | Phase 4, after completion | Files explored, modules touched |
+| `/debugging` | Load | Phase 1 investigator dispatch | Module names |
+| `/debugging` | Record | After fix verified | What was learned |
 
 **Cartographer is RECOMMENDED, not REQUIRED.** Like Forge, it is a knowledge accelerator, not a quality gate.
 

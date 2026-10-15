@@ -19,7 +19,7 @@ Eliminate cold-start penalty by proactively mapping the current repo and its nei
 - **Tier 2** — Cross-repo discovery. Scan sibling repos for topology and dependency relationships.
 
 **Output:**
-- Tier 1 writes to cartographer's existing data structures (`memory/cartographer/`)
+- Tier 1 writes to the existing persistent-map data structures (`memory/cartographer/`)
 - Tier 2 writes to `memory/topology/`
 
 **Coverage distinction:** All output is tagged `<!-- project-init:structural -->`, marking it as breadth-first structural mapping. This is distinct from task-verified content produced by cartographer record mode during real work. Task-verified content is always preserved over structural content.
