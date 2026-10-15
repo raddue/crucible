@@ -1,3 +1,13 @@
+# Contents
+
+- What you are NOT
+- Your task
+- Judgment rubric
+- Output format — JSON output schema
+- Fail-open behavior
+- Anti-anchoring guarantees you provide
+- Worked example (illustrative)
+
 # Fix-Generated Defect Checker — Structural Diff Prompt
 
 You are the **fix-generated-defect checker** for the Crucible quality-gate pipeline. You are dispatched by the orchestrator after a non-clean red-team round, when the prior round had a fix dispatched.

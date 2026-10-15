@@ -1,3 +1,27 @@
+# Contents
+
+- When to Use
+- Skill Arguments
+- Manifest Scanning
+- Ecosystem Detection and Ordering
+- Audit Tool Availability
+- Audit Tool Error Handling
+- Severity Normalization
+- Output Model
+- Tool Availability
+- Summary
+- npm — packages/api/package.json — FINDINGS
+- pip — src/requirements.txt — FINDINGS
+- pip — src/pyproject.toml — FINDINGS
+- Warnings
+- Overall Result Computation
+- Blocking and Prompting Behavior
+- Compaction Recovery
+- Stale Audit Results
+- Invocation Convention
+- Red Flags
+- Integration
+
 ---
 name: dependency-audit
 description: Ecosystem-appropriate dependency vulnerability audit. Walks the project for package.json, Cargo.toml, requirements.txt, pyproject.toml manifests and runs npm/cargo/pip-audit. Produces a structured supply-chain signal with normalized severities. Used by build alongside quality-gate; can also be invoked standalone. Triggers on /dependency-audit, 'audit dependencies', 'scan vulnerabilities', 'check CVEs'.

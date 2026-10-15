@@ -1,3 +1,7 @@
+# Contents
+
+- Full reference
+
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 

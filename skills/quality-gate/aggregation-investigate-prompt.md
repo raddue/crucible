@@ -1,3 +1,17 @@
+# Contents
+
+- Model Responses
+- Original Context
+- Your Job
+- 1. Merge and Deduplicate Findings
+- 2. Track Provenance
+- 3. Flag Contradictory Findings
+- 4. Mark Model-Unique Discoveries
+- 5. Synthesize a Combined Recommendation
+- 6. Evaluate on Reasoning Merit
+- 7. Group Findings by Theme
+- Output Format
+
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 

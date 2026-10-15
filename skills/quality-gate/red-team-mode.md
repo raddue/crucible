@@ -1,3 +1,30 @@
+# Contents
+
+- Overview
+- Skill Arguments (added by #303)
+- When to Use
+- The Iterative Loop
+- Rules
+- Stagnation Detection
+- Issue Classification
+- Per-Round Ledger and Cost-Cap Signals (standalone mode only, #303)
+- Accepted
+- Deferred (v1.0 — empty in v0.1)
+- How to Use
+- 1. Determine artifact type and fix mechanism
+- 2. Dispatch Devil's Advocate
+- 3. Process findings
+- 4. Re-review after fixes
+- What the Devil's Advocate is NOT
+- Depth Calibration
+- The Iron Law
+- Rationalization Prevention
+- Red Flags
+- Dual-Mode Operation
+- Terminal Verdict Emit
+- External Model Review (Optional)
+- Integration
+
 ---
 name: red-team
 description: Use when you need adversarial review of any artifact — design docs, implementation plans, code, PRs, or documentation. Iterates until clean or stagnation.

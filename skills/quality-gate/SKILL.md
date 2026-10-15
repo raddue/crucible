@@ -1,6 +1,6 @@
 ---
 name: quality-gate
-description: Iterative red-teaming of any artifact (design docs, plans, code, hypotheses). Loops until clean or stagnation. Invoked by artifact-producing skills or their parent orchestrator.
+description: Iterative adversarial review and remediation of artifacts until clean or stagnation. Use for quality gate, red-team this design/plan/code/PR/documentation, adversarial review, multi-model consensus or stagnation judge, audit dependencies, scan vulnerabilities, and check CVEs; includes standalone red-team mode and dependency-audit preflight lane.
 origin: crucible
 ---
 

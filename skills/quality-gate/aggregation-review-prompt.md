@@ -1,3 +1,18 @@
+# Contents
+
+- Model Responses
+- Original Artifact
+- Your Job
+- 1. Merge and Deduplicate Findings
+- 2. Assign Per-Finding Confidence
+- 3. Classify Severity
+- 4. Include Provenance
+- 5. Order Results
+- 6. Evaluate on Reasoning Merit
+- 7. Identify Agreements and Disagreements
+- 8. Surface Unique Findings
+- Output Format
+
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 
