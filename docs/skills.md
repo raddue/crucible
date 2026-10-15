@@ -50,7 +50,7 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 
 | Skill | Description |
 |---|---|
-| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, and post-fix quality gate with test gap writer (dedup-aware, auto-retry on failures). Shadow git checkpoints before fix cycles, sibling fixes, and quality gate for structured rollback. Phase 4.5 "Where Else?" blast radius scan finds and fixes sibling locations with the same bug pattern, then persists the defect signature in cartographer for future proactive prevention. |
+| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, post-fix quality gate with test gap writer, and grudge regression-oracle read/write mechanics. Queries machine-local per-repo grudges before work; records confirmed fixes. Shadow git checkpoints before fix cycles, sibling fixes, and quality gate for structured rollback. |
 
 ## Knowledge & Learning
 
@@ -58,7 +58,6 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 |---|---|
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Auto-detects skill-worthy workflows via 5 trigger heuristics and proposes extraction (never auto-creates). Opt-in trajectory capture records skill invocations as structured JSONL for eval generation. Pre-task feed-forward surfaces relevant warnings and recent failure patterns. Periodic mutation analysis proposes concrete skill edits for human review. |
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
-| **grudge** | The Book of Grudges — cross-session bug graveyard. Every fixed bug is recorded as a structured "grudge"; before touching code, skills query the grudgebook for the files in scope and surface past regressions as forced "DO NOT REPEAT" context. Read mode (pre-flight) and write mode (on bug resolution / fix(*) PR). Machine-local, per-repo, never committed. Triggers on /grudge, "check grudges", "record a grudge", "any past bugs here", "regression oracle", "bug graveyard". |
 | **compass** | Read or update the per-repo arc-state file (docs/compass.md). Tracks current arc, last meaningful commit, open loops, next move, and don't-forget items. Auto-maintained by build, merge-pr, finish; read by getting-started. Use "compass read" to inspect project state, "compass update" to set a field, "compass doctor" to validate, "compass compress" when at cap. Triggers on "compass", "current arc", "project state", "what am I working on", "arc state", "where was I". |
 
 ## Utilities

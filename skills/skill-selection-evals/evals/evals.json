@@ -725,16 +725,29 @@
       "difficulty": "medium"
     },
     {
-      "id": "decision-record-grudge-01",
-      "dimension": "negative",
-      "boundary": "decision-record",
+      "id": "debugging-grudge-record-01",
+      "dimension": "positive",
+      "boundary": "debugging-grudge",
       "prompt": "Record this bug so we don't repeat it",
-      "expected_skill": "grudge",
+      "expected_skill": "debugging",
       "common_mistakes": [
         "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-      "reasoning": "grudge is the book of grudges \u2014 bug regression memory. design\u2019s decision-record subflow records decisions with alternatives, not bugs.",
+      "reasoning": "debugging owns grudge read/write mechanics, including recording a fixed bug; design records architectural decisions with alternatives.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "debugging-grudge-preflight-01",
+      "dimension": "positive",
+      "boundary": "debugging-grudge",
+      "prompt": "Check grudges for these files before we investigate",
+      "expected_skill": "debugging",
+      "common_mistakes": [
+        "recall"
+      ],
+      "context": "The user asks for regression-oracle pre-flight against files in scope, not conversation history.",
+      "reasoning": "debugging performs pre-flight grudge queries and carries matching DO NOT REPEAT context; recall searches session history.",
       "difficulty": "easy"
     },
     {
