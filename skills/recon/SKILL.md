@@ -7,17 +7,12 @@ description: "Investigate codebases before tasks, map whole repositories and nei
 
 ## Modes
 
-Select exactly one mode with the `mode` parameter; default is `task-investigation`:
-
-```
-/recon
-  mode: "task-investigation" | "whole-repo-onboarding" | "persistent-map" | "improvement-discovery"
-```
+Select exactly one mode from user intent. The `mode` parameter below is an internal routing label, not user-facing invocation syntax; callers may request a mode in natural language:
 
 - **`task-investigation`** (default): follow the core brief and optional depth-module workflow below.
-- **`whole-repo-onboarding`:** follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
-- **`persistent-map`:** follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
-- **`improvement-discovery`:** follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
+- **`whole-repo-onboarding`:** select for first-time full-repository mapping; follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
+- **`persistent-map`:** select for consulting or updating accumulated codebase knowledge; follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
+- **`improvement-discovery`:** select for open-ended improvement discovery; follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
 
 These are modes of `/recon`, not separate skills. For specialized output instructions, read the selected mode guide and its prompt/reference files before dispatching. In whole-repo-onboarding mode, announce the mode and follow its tiered workflow. In persistent-map mode, perform the requested consult/load/record action. In improvement-discovery mode, preserve its advisory/read-only boundary and route proposals to `/design`.
 
