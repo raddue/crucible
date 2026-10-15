@@ -68,8 +68,8 @@ array entries, oldest first). **Consensus reviewer keying (S3/S7, round 2).** Th
 `consensus` only when the emitter actually received and used a **completed or
 partial consensus REVIEW result for this round** — the
 `consensus_query(mode="review")` call that produces red-team findings at
-`skills/quality-gate/loop.md`. Two pitfalls are fixed here:
-- **Mode (S7):** `skills/quality-gate/loop.md` and `skills/quality-gate/stagnation.md` also invoke
+`skills/quality-gate/loop.md` › Multi-Model Red-Team Review. Two pitfalls are fixed here:
+- **Mode (S7):** `skills/quality-gate/receipt-consensus.md` and `skills/quality-gate/stagnation.md` also invoke
   `consensus_query(mode="verdict")` for the stagnation judge *later in the same
   round*. That result's `per_model` describes the **judge**, not the artifact
   reviewer, and the two arrays can differ (separate call, separate
