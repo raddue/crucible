@@ -163,8 +163,7 @@
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
-        "red-team",
-        "inquisitor"
+        "red-team"
       ],
       "context": "Full feature assembled from multiple components. Need to find integration issues across component boundaries, not review a single artifact or existing subsystem.",
       "reasoning": "Inquisitor full-feature mode runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Inquisitor per-task mode finds edge cases in one implementation.",
@@ -595,7 +594,6 @@
       "prompt": "I just finished the JWT parser. Write tests that try to break this one function.",
       "expected_skill": "inquisitor",
       "common_mistakes": [
-        "inquisitor",
         "test-coverage"
       ],
       "context": "A single completed implementation; the ask is to write tests that break that one component.",

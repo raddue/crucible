@@ -1058,7 +1058,7 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 After the test gap writer completes (or is skipped), dispatch **Inquisitor per-task mode** (Opus) using `skills/inquisitor/break-it-prompt.md`:
 
 1. Input: Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`), project test conventions, cartographer module context (if available)
-2. Inquisitor per-task mode identifies the top 5 most likely failure modes, writes one test per mode, and runs them
+2. Inquisitor per-task mode ranks failure modes by likelihood and impact, then writes and runs up to 5 tests (fewer when fewer candidates are meaningful).
 3. Outcome handling:
    - **All tests PASS:** Implementation is robust. Log results and proceed to task complete.
    - **Some tests FAIL:** Real weaknesses found. Dispatch implementer to fix. Re-run all tests (including adversarial). If pass → task complete. If fail → one more fix attempt, then escalate to user.

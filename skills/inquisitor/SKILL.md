@@ -22,6 +22,46 @@ Use after implementation to find unknown runtime weaknesses within one task's di
 
 Use `./break-it-prompt.md` for per-task dispatches. Emit its `## ADVERSARIAL TEST REPORT` format, not the full-feature `## INQUISITOR REPORT` format. Do not run the full-feature ledger-emission step for per-task results; the canonical ledger entry describes the inquisitor multi-dimension gate and is not defined for a per-task test proposal.
 
+#### Per-Task Procedure
+
+1. Read the full diff of the implementation changes. Identify:
+   - Public APIs and method signatures
+   - State transitions and mutations
+   - Boundary conditions (min/max values, empty collections, null inputs)
+   - Error paths and exception handling
+   - Assumptions made by the implementer
+2. Brainstorm 8–10 ways the implementation could break at runtime. Think like an attacker:
+   - What inputs would cause unexpected behavior?
+   - What state combinations weren't considered?
+   - What happens at boundaries (zero, negative, overflow, empty)?
+   - What concurrent or ordering scenarios could fail?
+   - What dependencies could be missing or misconfigured?
+3. Rank each candidate by:
+   - **Likelihood:** How easily triggered in normal use (High/Medium/Low)
+   - **Impact:** Severity of consequence if triggered (High/Medium/Low)
+
+   Select the top 5. If fewer than 5 candidates are meaningful, write fewer -- don't pad with trivial tests.
+4. For each selected failure mode, write one focused test that:
+   - Tests observable behavior, not implementation details
+   - Follows project test conventions (naming, framework, AAA pattern)
+   - Is independent — runs in isolation, with no shared mutable state
+   - Includes a brief comment explaining the attack vector
+5. Run each test and record the result:
+   - **PASS** -- Implementation handles this failure mode correctly
+   - **FAIL** -- Weakness found; the implementation breaks under this condition
+   - **ERROR** -- Test itself is broken (compilation error, setup failure)
+6. Report the adversarial test report defined by `./break-it-prompt.md`.
+
+**Standalone outcome handling:** After running the tests, report all PASS as robust against the identified failure modes. For some FAIL, report results and fix guidance; if continuing to fix, follow `crucible:test-driven-development` discipline. For all ERROR, report that tests could not be written correctly and review test setup.
+
+**Skip Condition**
+
+The **orchestrator** (not this skill) decides whether to skip. When used standalone, use your judgment:
+- Skip if the changes are pure config, documentation, or scaffolding with no behavioral logic
+- If borderline, run the process -- you can report “No behavioral logic to attack” if the diff genuinely has nothing to test.
+
+**Uses:** `crucible:test-driven-development` patterns for test writing.
+
 ## Why Full-Feature Mode Exists
 
 Per-task testing sees one task's diff and catches bugs within its scope. Bugs that appear only after assembly live in the **seams** -- wiring that's almost right, state initialized in one task but consumed in another, and edge cases that require the full feature. Full-feature mode sees the complete diff and attacks those interactions.
@@ -257,7 +297,7 @@ The build orchestrator handles per-task and full-feature inquisitor modes as sep
 
 ## Standalone Usage
 
-Invoke directly with `/inquisitor` when you want to attack one task's implementation or an assembled feature branch. Select the per-task or full-feature mode based on scope. For full-feature mode:
+Invoke directly with `/inquisitor` when you want to attack one task's implementation or an assembled feature branch. Select the per-task or full-feature mode based on scope. Per-task mode identifies 8–10 candidate failure modes, ranks them by likelihood and impact, then writes and runs **up to 5** tests (fewer when fewer candidates are meaningful). For full-feature mode:
 
 1. Determine base branch (default: `main`, or user-specified)
 2. Compute merge-base: `git merge-base HEAD <base-branch>`
