@@ -96,7 +96,8 @@ import collections, pathlib, re, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "<!-- MODEL-TIER: security-hard-out -->"
 
-DIR_ALLOWLIST = ("skills/siege/", "skills/dependency-audit/")
+DIR_ALLOWLIST = ("skills/siege/",)
+EXPLICIT_SECURITY_SKILLS = {"skills/quality-gate/dependency-audit.md"}
 EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md"}
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
@@ -661,7 +662,7 @@ def is_security_surface(rel: str, text: str) -> bool:
     """Membership in the machine-checkable security-surface set."""
     if rel.startswith(CARVE_OUTS):
         return False
-    if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES:
+    if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES or rel in EXPLICIT_SECURITY_SKILLS:
         return True
     base = pathlib.PurePosixPath(rel).name.lower()
     if any(stem in base for stem in NAME_STEMS):

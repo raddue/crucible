@@ -230,8 +230,8 @@ The `generated-at` timestamp marks when results were produced. Results are valid
 
 `dependency-audit` is invoked:
 
-- **By build** — alongside `crucible:quality-gate` on phase 4 (code-artifact gate). Both run in parallel; build's gate ledger integrates the results.
-- **By the user** — directly via `/dependency-audit`.
+- **By build** — as quality-gate’s independent preflight lane on code artifacts. Build’s gate ledger integrates the result.
+- **By the user** — via `/quality-gate` dependency-audit mode (also accepts the legacy request phrase `/dependency-audit`).
 - **By schedule** — via `/loop` or `/schedule` for periodic supply-chain scans.
 
 The dependency-audit lane does not invoke quality-gate red-team mode. It produces its own signal; consumption is the caller's responsibility.

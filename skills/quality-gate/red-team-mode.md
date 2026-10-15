@@ -41,7 +41,7 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 
 **Core principle:** Fresh eyes every round. No anchoring, no confirmation bias.
 
-**Announce at start:** "I'm using the red-team skill to adversarially review this artifact."
+**Announce at start:** "I'm using quality-gate red-team mode to adversarially review this artifact."
 
 ## Skill Arguments (added by #303)
 
@@ -50,7 +50,7 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 | `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis defaults) | Standalone-mode only: LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. |
 | `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Standalone-mode only: count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). |
 
-These args apply ONLY in standalone-mode iterative-loop invocations. When red-team is invoked single-pass by `crucible:quality-gate`, QG owns the loop and these args are ignored — QG emits its own ledger.
+These args apply ONLY in standalone-mode iterative-loop invocations. When quality-gate red-team mode is invoked single-pass by the full quality-gate loop, QG owns the loop and these args are ignored — QG emits its own ledger.
 
 **Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
 
@@ -267,7 +267,7 @@ Red-team operates in two modes depending on the caller:
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
+**Direct red-team mode only.** When operating in single-pass mode (invoked by the full quality-gate loop), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
 
 When the iterative loop reaches its terminal verdict (clean — no Fatal/Significant — or an escalation exit: stagnation / architectural concern), emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
@@ -277,7 +277,7 @@ When the iterative loop reaches its terminal verdict (clean — no Fatal/Signifi
 
 ## External Model Review (Optional)
 
-**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate handles its own external review integration.
+**Direct red-team mode only.** When operating in single-pass mode (invoked by the full quality-gate loop), skip this section entirely — quality-gate handles its own external review integration.
 
 After dispatching the host red-team subagent, call the `external_review` MCP tool with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`

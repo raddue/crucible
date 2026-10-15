@@ -17,7 +17,7 @@ The gate maintains an Invariant Cairn per `shared/cairn-convention.md`. Each gat
 
 Shared iterative red-teaming mechanism invoked at the end of artifact-producing skills. Provides rigorous adversarial review as the core quality mechanism.
 
-**Announce at start:** "Running quality gate on [artifact type]."
+**Announce at start:** "Running quality gate on [artifact type]." For direct red-team and dependency-audit modes use their preserved mode-specific announcements instead.
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 

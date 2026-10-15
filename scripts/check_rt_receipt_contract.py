@@ -9,9 +9,9 @@ Acceptance test for #366 (design:
 `docs/plans/2026-06-06-366-rt-qg-receipt-contract-design.md`). Asserts the design's
 acceptance criteria over exactly FOUR named skill-methodology Markdown files:
 
-    skills/red-team/red-team-prompt.md   — Report Format / RCPT v1.1 / worked examples
+    skills/quality-gate/red-team-prompt.md   — Report Format / RCPT v1.1 / worked examples
     skills/quality-gate/SKILL.md         — consumption + fix-agent supersession + writer-inversion
-    skills/red-team/SKILL.md             — standalone consumption (Tier-1 lint, no Layer-2 sweep)
+    skills/quality-gate/red-team-mode.md             — standalone consumption (Tier-1 lint, no Layer-2 sweep)
     skills/shared/return-convention.md   — kind=grep artifact/range clarification
 
 Each assertion is keyed to a design AC and carries an ID prefix ([A1], [C13], …) in
@@ -77,7 +77,7 @@ def _negates(anchor: str, scope: str) -> bool:
     negation of whatever follows it in prose — without the `(?!-)` guard,
     the literal state name "NOT-SATISFIABLE" false-positives every polarity
     check on an anchor phrase appearing anywhere in the same clause after
-    it, live-verified against `skills/red-team/SKILL.md` step 4's own
+    it, live-verified against `skills/quality-gate/red-team-mode.md` step 4's own
     NOT-SATISFIABLE treatment sentence."""
     return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b(?!-)[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
 
