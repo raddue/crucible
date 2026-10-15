@@ -380,7 +380,7 @@ missing). No `git` dependency beyond the optional repo-root resolution (absent �
 
 ## Grudge Resolution Guard
 
-Blocking **Stop** hook enforcing grudge write-discipline for this repo (#559). It is crucible's first Stop hook and its first hook that blocks the turn: while a `fix(*)` commit that landed in this session's window — and touched at least one non-`.md` file — still has neither a grudge record nor a `skips.log` entry, the hook exits 2 and Claude Code refuses the Stop. It backstops the LLM-authored grudge-recording steps in `skills/debugging/SKILL.md` and `skills/merge-pr/SKILL.md` Step 7.5: those still do the recording, this catches the case where they were skipped. Every block is bounded — see MAX_BLOCKS below — so a session can never be trapped.
+Blocking **Stop** hook enforcing grudge write-discipline for this repo (#559). It is crucible's first Stop hook and its first hook that blocks the turn: while a `fix(*)` commit that landed in this session's window — and touched at least one non-`.md` file — still has neither a grudge record nor a `skips.log` entry, the hook exits 2 and Claude Code refuses the Stop. It backstops the LLM-authored grudge-recording steps in `skills/debugging/SKILL.md` and `skills/finish/merge.md` Step 7.5: those still do the recording, this catches the case where they were skipped. Every block is bounded — see MAX_BLOCKS below — so a session can never be trapped.
 
 ### Setup (opt-in — NOT committed; #604)
 

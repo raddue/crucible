@@ -15,7 +15,7 @@ Read current arc state before the dispatch table. Requires Python 3 (stdlib only
 test -f scripts/compass.py && python scripts/compass.py read --compact 2>/dev/null || true
 ```
 
-If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this bootstrap step — the bootstrap reads only. Writes happen only through the lifecycle callers (`build`, `merge-pr`, `finish`) or an explicit user request handled via [compass.md](compass.md).
+If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this bootstrap step — the bootstrap reads only. Writes happen only through the lifecycle callers (`build`, `finish`) or an explicit user request handled via [compass.md](compass.md).
 
 ## Repo Memory
 
@@ -47,7 +47,7 @@ Compass, forge, handoff, recall, and the workshop tour live here as flat referen
 | Session history: "recall", "what did I edit", "recall errors" | [recall.md](recall.md) | Activity-index discovery, summary / keyword / type / time-range views, 20-entry cap |
 | Catalog tour: "skills available", "where do I start?", "tour" | [workshop.md](workshop.md) | Headline orchestrators by task, trigger-phrase table, pipelines |
 
-Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that recommend forge (e.g. `build`, `finish`, `debugging`, `design`, `spec`, `migrate`, `prospector`) name `crucible:getting-started` plus `forge.md`; `build`, `merge-pr`, and `finish` keep emitting compass updates via `scripts/compass.py` directly. Forge stays RECOMMENDED, handoff runs on request — behavior is identical to the former standalone skills.
+Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that recommend forge (e.g. `build`, `finish`, `debugging`, `design`, `spec`, `migrate`, `prospector`) name `crucible:getting-started` plus `forge.md`; `build` and `finish` keep emitting compass updates via `scripts/compass.py` directly. Forge stays RECOMMENDED, handoff runs on request — behavior is identical to the former standalone skills.
 
 ## The Rule
 

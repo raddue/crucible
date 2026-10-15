@@ -45,7 +45,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | migrate | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
 | checkpoint | Shadow git snapshots for pipeline rollback | No automatic rollback; manual git recovery |
 | getting-started (compass reference) | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
-| merge-pr | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
+| finish (safe PR merge subflow) | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
 | distill | External document converters (pandoc, pdftotext, LibreOffice) | Cannot ingest binary document formats |
 | quality-gate dependency-audit lane | External auditors (npm/cargo/pip-audit) | No supply-chain signal produced |
 | source-driven-development | Live documentation fetch (web access) | Falls back to (possibly stale) training recall |

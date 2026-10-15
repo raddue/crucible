@@ -30,9 +30,9 @@ Four integration points, in lifecycle order:
 | Caller | Event | Fields written |
 |--------|-------|----------------|
 | `build` | After Gate Ledger Initialization completes AND resume decision resolves, BEFORE Phase 1 IN_PROGRESS transition. NOT during crash-recovery branches. SKIPPED if user chose resume (prior arc's `current_arc` already correct). | `current_arc` |
-| `merge-pr` | After `gh pr merge` succeeds AND post-merge CI passes. | `last_meaningful_commit` |
+| `finish` safe PR merge subflow | After `gh pr merge` succeeds AND post-merge CI passes. | `last_meaningful_commit` |
 | `finish` Option 1 | After local merge + tests pass. | `last_meaningful_commit` + arc-closure patch (`current_arc=''`, `next_move`) |
-| `finish` Option 2 | After `gh pr checks --watch` returns green. Does NOT emit `last_meaningful_commit` — CI green != merged; the subsequent `/merge-pr` invocation writes the SHA. | provisional arc-closure patch only |
+| `finish` Option 2 | After `gh pr checks --watch` returns green. Does NOT emit `last_meaningful_commit` — CI green != merged; the safe PR merge subflow writes the SHA after merge and post-merge CI. | provisional arc-closure patch only |
 
 `finish` Options 3 and 4 emit nothing. `getting-started` reads (never writes)
 via `compass read --compact` before the dispatch table.

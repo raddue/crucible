@@ -741,11 +741,24 @@
       "prompt": "The PR just landed, let's wrap this up",
       "expected_skill": "finish",
       "common_mistakes": [
-        "design",
-        "merge-pr"
+        "design"
       ],
       "context": "The work is complete and the user wants to integrate it.",
       "reasoning": "finish wraps up completed work. design’s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "finish-merge-existing-pr-01",
+      "dimension": "positive",
+      "boundary": "finish-merge",
+      "prompt": "Merge PR 42 to dev; CI is green, but check the repo rules and monitor the target branch afterward.",
+      "expected_skill": "finish",
+      "common_mistakes": [
+        "build",
+        "verify"
+      ],
+      "context": "The user explicitly requests safe PR merging; finish owns merge-time verification and post-merge monitoring.",
+      "reasoning": "The finish skill now handles both completion decisions and explicit PR merges through its safe PR merge subflow.",
       "difficulty": "medium"
     },
     {
