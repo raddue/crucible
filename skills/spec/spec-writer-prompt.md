@@ -113,36 +113,36 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
     - **Direct resolution** (no technical implications, obvious answer): Decide immediately
       with a one-sentence rationale. No investigation agents needed.
 
-    ### Assay Dispatch (Deep Dive Architectural Dimensions)
+    ### Design Approach Evaluation (Deep Dive Architectural Dimensions)
 
-    For architectural dimensions investigated via Deep Dive, dispatch /assay after
+    For architectural dimensions investigated via Deep Dive, run `crucible:design`'s approach-evaluation subflow (`design/approach-evaluation.md`) after
     investigation completes:
 
     ```
-    /assay
+    design approach-evaluation
       question: "<dimension question>"
       context: { recon brief + investigation findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
       decision_type: "architecture"
       cascading_decisions: [<prior decisions from decisions log>]
     ```
 
-    Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence on what the investigation explicitly could not determine.
+    Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds the evaluator's confidence on what the investigation explicitly could not determine.
 
-    Use assay's recommendation as the starting point for autonomous decision-making.
+    Use the evaluator's recommendation as the starting point for autonomous decision-making.
     Apply confidence-based routing:
-    - **high** confidence: Accept assay recommendation. Log decision. Proceed.
-    - **medium** confidence: Accept recommendation but emit terminal alert with assay's
+    - **high** confidence: Accept evaluator recommendation. Log decision. Proceed.
+    - **medium** confidence: Accept recommendation but emit terminal alert with the evaluator's
       `missing_information` field (now grounded by recon's Open Questions).
     - **low** confidence: Emit `block` terminal alert with `missing_information` items and their `Resolvable by:` metadata so the user knows exactly what to investigate. Log as uncertain decision.
 
-    On assay failure: "Assay evaluation failed: [reason]. Proceeding with manual
+    On evaluator failure: "Approach evaluation failed: [reason]. Proceeding with manual
     synthesis." Make decision based on investigation findings (existing behavior).
 
     ### Complexity Flag Behavior
 
     If `[COMPLEXITY_FLAG]` is "complex":
     - Use **quick-scan** investigation for ALL dimensions, regardless of their natural
-      depth classification. Do not dispatch deep dives or assay.
+      depth classification. Do not dispatch deep dives or approach evaluation.
     - Read the recon brief for each dimension. Summarize each finding to 2-3 sentences
       before proceeding to the next dimension.
     - This reduces context consumption for tickets with many design dimensions (5+ dimensions

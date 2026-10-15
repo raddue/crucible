@@ -182,6 +182,7 @@ run python3 scripts/check_crossref.py
 run python3 scripts/check_canonical_links.py --selftest
 run python3 scripts/check_canonical_links.py
 run python3 scripts/catalog.py check
+# Design's decision-record output retains the ADR integrity gate after skill consolidation.
 run python3 scripts/check_adr_integrity.py --selftest
 run python3 scripts/check_adr_integrity.py
 
@@ -424,6 +425,9 @@ run python3 scripts/check_qg_closure_modes.py
 run python3 scripts/test_orchestrator_fleet.py
 run python3 scripts/test_orchestrator_scan.py
 run python3 scripts/test_orchestrator_ping.py
+
+run python3 scripts/test_check_skill_best_practices.py
+run python3 scripts/check_skill_best_practices.py
 
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then

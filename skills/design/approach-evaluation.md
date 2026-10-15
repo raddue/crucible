@@ -1,16 +1,11 @@
----
-name: assay
-description: "Recon-informed approach evaluator. Weighs competing options against codebase constraints and returns structured recommendations with confidence scoring, kill criteria, and evidence grounding. Consumes recon briefs or caller context. Used by design, spec, migrate. Triggers on /assay, 'evaluate approaches', 'which option', 'compare alternatives'."
----
-
-# Assay
+# Design Approach Evaluation
 
 ## Overview
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
-Evaluate competing approaches against codebase constraints. Returns a structured Assay Report with a recommendation, alternatives with kill criteria, and confidence scoring. Evidence-grounded — recommendations cite specific file:line references, not generic best practices.
+Evaluate competing approaches against codebase constraints. Returns a structured Approach Evaluation Report with a recommendation, alternatives with kill criteria, and confidence scoring. Evidence-grounded — recommendations cite specific file:line references, not generic best practices.
 
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
@@ -18,14 +13,12 @@ Evaluate competing approaches against codebase constraints. Returns a structured
 - Evaluator agent: Opus (synthesis/judgment work needs the best model)
 - Orchestrator: runs on whatever model the session uses
 
-**Announce at start:** "I'm using the assay skill to evaluate competing approaches."
-
-**Name origin:** In metallurgy, an assay tests raw material to determine its quality and composition before committing it to the forge.
+**Announce at start:** "I'm using design's approach-evaluation subflow to evaluate competing approaches."
 
 ## Invocation API
 
 ```
-/assay
+/design approach-evaluation
   question: "How should the auth middleware handle token refresh?"
   context: { ... }
   decision_type: "architecture"
@@ -65,7 +58,7 @@ When context contains unrecognized keys, the evaluator treats them as additional
 
 ### Phase 2: Dispatch Evaluator
 
-Dispatch a single Opus agent using `skills/assay/assay-evaluator-prompt.md`.
+Dispatch a single Opus agent using `skills/design/approach-evaluator-prompt.md`.
 
 Fill template placeholders before writing the dispatch file:
 - `{{QUESTION}}` — the decision question
@@ -103,7 +96,7 @@ The evaluator adapts scoring weights based on decision type:
 | `diagnosis` | Evidence strength, testability | Explanation coverage, simplicity |
 | `optimization` | Measurable improvement | Disruption cost, reversibility |
 
-## Output: Assay Report
+## Output: Approach Evaluation Report
 
 ```json
 {
@@ -187,13 +180,13 @@ These make decisions revisitable without re-running the full analysis.
 | `/spec` | `architecture` | Recon brief + cascading decisions (autonomous — confidence routing) | Evaluator generates |
 | `/migrate` | `strategy` | Recon brief + migration analysis | Evaluator generates |
 
-**Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not assay), `/recon` improvement-discovery mode (competing design evaluation is more sophisticated than assay for this use case). See #147 for rationale.
+**Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not design approach evaluation), `/recon` improvement-discovery mode (competing redesign exploration is more specialized than this subflow). See #147 for rationale.
 
 ### Consumer Dispatch Examples
 
 **From `/design`:**
 ```
-/assay
+/design approach-evaluation
   question: "How should components communicate in the new auth module?"
   context: { recon brief with project_structure, existing_patterns }
   decision_type: "architecture"
@@ -202,17 +195,17 @@ These make decisions revisitable without re-running the full analysis.
 
 **From `/spec`:**
 ```
-/assay
+/design approach-evaluation
   question: "How should the auth middleware handle token refresh?"
   context: { recon brief + investigation findings }
   decision_type: "architecture"
   cascading_decisions: [{ decision: "Using Redis for session store", reasoning: "..." }]
 ```
-Spec consumes assay output autonomously: high confidence = accept, medium = terminal alert, low = block alert.
+Spec consumes approach-evaluation output autonomously: high confidence = accept, medium = terminal alert, low = block alert.
 
 **From `/migrate`:**
 ```
-/assay
+/design approach-evaluation
   question: "What migration strategy minimizes risk for the React 18→19 upgrade?"
   context: { recon brief + migration_target: "React 19", breaking_changes: [...] }
   decision_type: "strategy"
@@ -221,13 +214,13 @@ Spec consumes assay output autonomously: high confidence = accept, medium = term
 ### Standalone Usage
 
 ```
-/assay question: "Should we use PostgreSQL or SQLite for this project?"
+/design approach-evaluation question: "Should we use PostgreSQL or SQLite for this project?"
   context: "Small team, <10K users, read-heavy workload, deployed on single server"
 ```
 
 ### Dispatches
 
-- Evaluator agent (Opus) via `skills/assay/assay-evaluator-prompt.md`
+- Evaluator agent (Opus) via `skills/design/approach-evaluator-prompt.md`
 
 ### Does NOT
 

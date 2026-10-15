@@ -702,7 +702,7 @@ After context compaction:
 - **Complementary to:** `crucible:audit` — audit finds systemic defects, recon improvement discovery finds structural improvements. Run discovery before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
 - **Does NOT use:** `crucible:quality-gate` (improvement discovery is advisory, not a fix loop), `crucible:red-team`
-- **Does not dispatch /recon** -- organic exploration serves a different purpose than structured investigation. Does not dispatch /assay -- competing design evaluation is more specialized than assay for this use case. See #147 for rationale.
+- Does not dispatch task investigation; organic exploration serves a different purpose than structured investigation. It does not dispatch design approach evaluation; competing redesign exploration is a distinct discovery output. See #147 for rationale.
 
 ## Subagent Dispatch Summary
 

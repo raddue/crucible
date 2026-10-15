@@ -19,11 +19,11 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 
 Recon's whole-repo-onboarding mode accelerates onboarding — run `/recon` on an unfamiliar repo for structural context before `/build` or `/design`, with optional sibling-repo topology. It produces persistent-map data tagged as structural scaffolding that task-verified findings can later refine.
 
-The **adr** skill records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with trigger hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
+The **design** decision-record workflow records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
 
 ## Investigation and decision layers
 
-The **recon** and **assay** skills provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Assay evaluates competing approaches with constraint_fit scoring and kill criteria. Both are dispatched automatically by design (Phase 2), spec (per-ticket investigation), migrate (Phase 0 + User Gate), and audit (Phase 1 scoping). They're also usable standalone — `/recon` before any task, `/assay` for any architectural decision.
+**Recon** and **design** provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Design's approach-evaluation subflow evaluates competing approaches with constraint_fit scoring and kill criteria. Design uses both in Phase 2; spec and migrate consume the same subflow for their decisions. `/recon` remains usable before any task; `/design` can evaluate approaches standalone.
 
 ## Spec → build handoff
 

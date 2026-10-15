@@ -8,7 +8,7 @@ version: 1
 > substitute for the orchestrator's own context trail.
 >
 > **This is a shared skill reference, not a CLAUDE.md directive.** Long-running
-> orchestrator skills (`/build`, `/quality-gate`, `/siege`, `/forge`, `/innovate`)
+> orchestrator skills (`/build`, `/quality-gate`, `/siege`, `/forge`, `/design` innovation sweeps)
 > reference this file via `<!-- CANONICAL: shared/cairn-convention.md -->`.
 > Skill bodies do not duplicate the schema — they link here.
 
@@ -133,7 +133,7 @@ Inputs:
 1. **LEDGER dispatch count consistency.** For each `LEDGER` line `<phase>/<counter> | dispatches=N receipts=N …`, `receipt-ledger.jsonl` must contain exactly N entries whose `phase` field equals `<parent-skill>:<phase>/<counter>` (skill-qualified with THIS cairn's `parent-skill`). (Every ledger entry carries a skill-qualified `phase` field per `shared/return-convention.md`; the `dispatch-id` is the phase-less file basename `<N>-<template-name>` and is NOT used for this grouping.) **Per-cairn:** this rule counts only entries whose `phase` matches THIS cairn's skill-qualified phase strings — a sub-skill sharing the dispatch directory writes its own cairn's skill-qualified phases, so parent and child entries partition cleanly in a shared ledger. The skill prefix makes the phase globally unique across all cairns sharing one dispatch directory, so the per-cairn partition holds by construction: no phase-name-disjointness precondition is needed, and sibling sub-skills that independently use `round/N` (e.g. `siege` and `quality-gate`) are disambiguated by their distinct skill prefixes.
    - **Local repair (append-only, narrow scope):** permitted ONLY when PHASE and LEDGER-tail agree on the current phase AND the only discrepancy is trailing receipts for the in-progress phase. Append missing receipts via a single atomic Write. Any other section mismatch is NOT locally repairable.
    - **Escalate** in all other cases, including any INVARIANTS or OPEN_OBLIGATIONS drift.
-   - **Receipt-less cairns.** For a receipt-less cairn (a cairn-maintaining skill that writes no `receipt-ledger.jsonl` entries — e.g. `innovate`, `forge`), Rule 1 is a no-op: its LEDGER lines carry `dispatches=0` — because they record no receipts (their subagents do not adopt `shared/return-convention.md`), NOT because they invoke no subagents — and there are no qualified entries to count.
+   - **Receipt-less cairns.** For a receipt-less cairn (a cairn-maintaining skill that writes no `receipt-ledger.jsonl` entries — e.g. design innovation sweeps, `forge`), Rule 1 is a no-op: its LEDGER lines carry `dispatches=0` — because they record no receipts (their subagents do not adopt `shared/return-convention.md`), NOT because they invoke no subagents — and there are no qualified entries to count.
 
 2. **OPEN_OBLIGATIONS closure evidence.** For every `[x]` obligation, the `[closed-by: …]` trailer must be one of:
    - `[closed-by: <receipt-prefix-12>]` — direct close. The 12-hex-char prefix resolves against the **first 12 hex chars of a `receipt-ledger.jsonl` entry's `rcpt_sha256`**, and that resolution MUST be to a **unique** entry — a 12-char-prefix collision across the run is a reconciliation failure → escalate (mirroring the Layer 2 SUPERSEDES uniqueness rule). The resolved receipt must have `verdict=PASS`. If the obligation was promoted from a Layer 2 `ran=SKIPPED` witness (obligation carries a `[ref: <receipt-prefix-12>]`), the closing receipt's WITNESS MUST have `ran=TRACE#N` (not SKIPPED/UNRUNNABLE). The orchestrator observes this `ran=` disposition directly from the closing receipt **at obligation-close time** — it is holding (and has just linted) that receipt as it processes the `[closed-by:]` trailer — NOT from a `receipt-ledger.jsonl` field; the ledger's 4-key tuple `{dispatch_id, phase, rcpt_sha256, verdict}` supplies only the presence + verdict resolution.
@@ -177,7 +177,7 @@ Whenever the orchestrator might be post-auto-compaction (unfamiliar context, mid
 6. Set internal phase state to PHASE's `phase:` value. Re-read INVARIANTS, OPEN_OBLIGATIONS, LEDGER fully into working context.
 7. Continue the run from where the cairn says we are. No retroactive re-dispatch — Layer 1's `receipt-ledger.jsonl` and Layer 2's manifest are authoritative for what happened; the cairn is authoritative for what's **load-bearing**.
 
-**Termination.** At the run's terminal phase sealing, delete `active-run.md` and leave `cairn-<run-id>.md` in place (append-only retention — same rationale as innovate scratch). "Terminal phase" is skill-specific; each pilot skill's `## Cairn (Layer 3)` section declares what terminal means for it.
+**Termination.** At the run's terminal phase sealing, delete `active-run.md` and leave `cairn-<run-id>.md` in place (append-only retention — same rationale as design innovation scratch). "Terminal phase" is skill-specific; each pilot skill's `## Cairn (Layer 3)` section declares what terminal means for it.
 
 ## Composition with Layers 1 and 2
 
@@ -186,7 +186,7 @@ Whenever the orchestrator might be post-auto-compaction (unfamiliar context, mid
 
 ## Integration Checklist for Pilot Skills
 
-Each long-running orchestrator skill (`/build`, `/quality-gate`, `/siege`, `/forge`, `/innovate`) must:
+Each long-running orchestrator skill (`/build`, `/quality-gate`, `/siege`, `/forge`, `/design` innovation sweeps) must:
 
 1. Add `<!-- CANONICAL: shared/cairn-convention.md -->` near the top of its SKILL.md.
 2. Add a `## Cairn (Layer 3)` section declaring:
@@ -198,4 +198,4 @@ Each long-running orchestrator skill (`/build`, `/quality-gate`, `/siege`, `/for
 
 ## Version History
 
-- **v1** (2026-04-20) — Initial Invariant Cairn convention. Pilot in `/build`, `/quality-gate`, `/siege`, `/forge`, `/innovate`. Bulk rollout across other long-running skills is a follow-up.
+- **v1** (2026-04-20) — Initial Invariant Cairn convention. Pilot in `/build`, `/quality-gate`, `/siege`, `/forge`, `/design` innovation sweeps. Bulk rollout across other long-running skills is a follow-up.

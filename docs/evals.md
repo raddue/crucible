@@ -48,7 +48,15 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Recon mode consolidation (#720)
 
-The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison is in progress; the measured delta will be added here before PR creation. Do not interpret the trigger smoke test as an A/B quality score.
+The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison was blocked because four Claude CLI calls failed authentication before outputs existed. No scored outputs or valid A/B delta are available; do not claim a measured quality improvement.
+
+## Design consolidation A/B (#720, 2026-10-15)
+
+`/anvil` paired old `design` snapshot against merged `design` on two bounded simulation cases (innovation on a finalized invoice design; ADR for a settled storage decision with explicit rejected-alternative reasons). The same prompts and assertions graded both arms: **12/12 with merged design vs 12/12 with old design, Δ 0 pp**. Innovation retained one concrete addition, alternatives, impact and cost in both arms; the ADR case retained eligibility, convention and rejected reasons. This small, read-only simulation does **not** replace the historical Opus 4.8 execution result (`innovate` +14 pp), prove live dispatch/scratch behavior, or establish statistical non-regression. Workspace: `skills/design-workspace/iteration-1/` (ignored); anvil benchmark and static viewer generated there. Source mechanics remain in `skills/design/innovation.md` and `innovation-prompt.md`, not paraphrased away.
+
+### Full-flow recheck after PR #723 review (2026-10-15)
+
+`/anvil` paired the pre-merge design/build snapshots against revised merged design/build instructions on **two full-flow scenarios**: standalone `/design` (investigation → approval → document/contract → quality gate, no automatic innovation), and `/build` (interactive design → Phase 1 innovation → design gate → plan review → separate plan innovation → plan gate → implementation handoff). **11/11 assertions per arm, Δ 0 pp.** A fresh paired build-flow rerun added the contract-reconciliation check after review found that innovation can change API/invariants; both arms updated and reapproved the contract before gate/handoff. Both arms simulated stage order and artifacts without actual user approval, nested dispatch, gate execution, or repository writes. This checks the reviewed flow boundary, not live behavior or statistical parity; the historic innovation +14 pp remains distinct. Ignored anvil workspace and benchmark: `skills/design-workspace/flow-ab/iteration-1/`.
 
 ## Key Findings
 

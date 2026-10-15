@@ -354,16 +354,16 @@ For cross-repo migrations: each wave entry includes repo name, estimated effort 
 
 After Phase 5, the orchestrator consolidates all outputs into `scratch/<run-id>/migration-plan.md`.
 
-Before presenting the plan to the user, dispatch `/assay` for structured strategy evaluation:
+Before presenting the plan to the user, run `crucible:design`'s approach-evaluation subflow (`design/approach-evaluation.md`) for structured strategy evaluation:
 
 ```
-/assay
+design approach-evaluation
   question: "Is this migration approach the best strategy for <migration target>?"
   context: { recon brief + migration analysis + blast radius summary }
   decision_type: "strategy"
 ```
 
-**On assay failure:** "Assay evaluation failed: [reason]. Presenting plan without structured evaluation." Present the plan without assay's scoring (existing behavior).
+**On evaluator failure:** "Approach evaluation failed: [reason]. Presenting plan without structured evaluation." Present the plan without the evaluator's scoring (existing behavior).
 
 Present the complete plan:
 
@@ -376,9 +376,9 @@ Present the complete plan:
 **Estimated total effort:** [estimate]
 **Cross-repo scope:** [yes/no, N repos]
 
-**Strategy Confidence:** [from assay — high/medium/low]
-**Kill Criteria:** [from assay — when to abort this migration approach]
-**Missing Information:** [from assay — what would increase confidence]
+**Strategy Confidence:** [from evaluator — high/medium/low]
+**Kill Criteria:** [from evaluator — when to abort this migration approach]
+**Missing Information:** [from evaluator — what would increase confidence]
 
 #### Phase Summary
 [table of phases with descriptions, affected files, effort, build mode]
@@ -497,7 +497,7 @@ Escalate to the user when:
 | Skill | How Used | When |
 |-------|----------|------|
 | `crucible:recon` | Consumer-registry module | Phase 0 (structural context + direct consumer discovery). Fallback: Blast Radius Mapper discovers consumers from scratch. |
-| `crucible:assay` | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without assay scoring. |
+| `crucible:design` approach evaluation | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without scoring. |
 | `/recon` persistent-map mode | Consult mode | Phase 0 (module boundaries for blast radius) |
 | `/recon` persistent-map mode | Record mode | Phase 8 (record migration discoveries) |
 | `crucible:forge` | Feed-forward | Phase 0 (past migration lessons) |

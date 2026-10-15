@@ -905,4 +905,4 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 
 **Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design). Improvement discovery and whole-repo onboarding are modes of this skill, not callers. See #147 for the remaining rationale.
 
-**Pairs with:** `/assay` (sequential — recon produces evidence, assay evaluates options)
+**Pairs with:** `/design` approach evaluation (sequential — recon produces evidence, design evaluates options)

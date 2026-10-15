@@ -791,4 +791,4 @@ Each analysis template includes:
 - **Dispatches:** Code audit templates (architecture, consistency [2 agents], robustness-systemic, test-health, blind-spots; drift when `--drift`) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback). Instance bugs delegated to the `/delve` skill on `--bugs`.
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns
 - **Called by:** Standalone only (user invokes directly). Not part of any pipeline.
-- **Does NOT use:** `crucible:quality-gate` (audit is not a fix loop), `crucible:red-team` (designed for single artifacts), `crucible:assay` (audit is find-and-report, not decision evaluation)
+- **Does NOT use:** `crucible:quality-gate` (audit is not a fix loop), `crucible:red-team` (designed for single artifacts), `crucible:design` approach evaluation (audit is find-and-report, not decision evaluation)

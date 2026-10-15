@@ -1,9 +1,4 @@
----
-name: innovate
-description: Use when a design doc or implementation plan is finalized and you want a divergent creativity injection before adversarial review. Proposes the single most impactful addition.
----
-
-# Innovate
+# Design Innovation Pass
 
 ## Overview
 
@@ -11,23 +6,23 @@ description: Use when a design doc or implementation plan is finalized and you w
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
-Sweep-mode runs (multiple innovate invocations against the same target) maintain an Invariant Cairn per `shared/cairn-convention.md`. Single-run invocations do NOT — they're too short. See `## Cairn (Layer 3)` below.
+Sweep-mode runs (multiple innovation-pass invocations against the same target) maintain an Invariant Cairn per `shared/cairn-convention.md`. Single-run invocations do NOT — they're too short. See `## Cairn (Layer 3)` below.
 
 Divergent creativity injection. Dispatches an Innovation subagent to propose the single most impactful addition to an artifact. One shot, not iterative — the red-team that follows is the quality gate.
 
 **Core principle:** The best ideas often come from asking "what's missing?" after you think you're done.
 
-**Announce at start:** "I'm using the innovate skill to explore potential improvements."
+**Announce at start:** "I'm using design's innovation pass to explore potential improvements."
 
 ## Cairn (Layer 3)
 
-Per `shared/cairn-convention.md`. Innovate-specific bindings:
+Per `shared/cairn-convention.md`. Innovation-pass bindings:
 
-- **Applies to sweep mode only.** A single-invocation innovate run is one dispatch and doesn't need a cairn. Sweep mode (≥ 3 invocations against the same target, per the `sweep-id` context key) does.
-- **Phase mapping.** One cairn phase per sweep run: `run/1`, `run/2`, …. Each sweep run's `scratch/<run-id>/` directory already exists from the innovate convention; the cairn adds the cross-run continuity layer.
+- **Applies to sweep mode only.** A single-invocation innovation run is one dispatch and doesn't need a cairn. Sweep mode (≥ 3 invocations against the same target, per the `sweep-id` context key) does.
+- **Phase mapping.** One cairn phase per sweep run: `run/1`, `run/2`, …. Each sweep run's `scratch/<run-id>/` directory already exists from the innovation convention; the cairn adds the cross-run continuity layer.
 - **Terminal phase.** The last sweep run seals its `ranked.md` view.
-- **Mandatory-invariant categories.** Each sweep run-exit MUST capture the run's proposal as an invariant (≤240 chars distillation) with `[ref: <innovate-run-id-as-receipt-prefix>]` — so later sweep runs can distinguish "already proposed" from "not yet" without re-reading every prior `proposal.md`.
-- **Reconciliation.** Full 5-rule pass. Rule 4 (invariant-receipt liveness) applies only to invariants that carry `[ref: <receipt-prefix-12>]`. Innovate doesn't produce Layer 2 receipts (the orchestrator writes `proposal.md`/`alternatives.md` directly), so sweep-run invariants should use a phase/counter-based `[ref:]` of the form documented in the cairn convention's explicit-discharge path, OR omit `[ref:]` entirely (which forfeits the shedding license for those invariants — acceptable since innovate runs are not context-constrained the way /build is).
+- **Mandatory-invariant categories.** Each sweep run-exit MUST capture the run's proposal as an invariant (≤240 chars distillation), so later runs distinguish "already proposed" from "not yet" without re-reading every prior `proposal.md`. New proposal invariants omit `[ref:]`: innovation writes no Layer 2 receipt.
+- **Reconciliation and legacy cairns.** Run the full 5-rule pass. Keep existing `[ref: <innovate-run-id-as-receipt-prefix>]` entries in historical cairns unchanged; a real 12-hex receipt reference still resolves under Rule 4. A run-id or phase/counter placeholder without a matching receipt cannot be given a shedding license: report the reconciliation blocker rather than silently stripping or rewriting its append-only invariant. New receipt-less invariants have no shedding license, so retain their surrounding reasoning.
 
 ## When to Use
 
@@ -52,7 +47,7 @@ Per `shared/cairn-convention.md`. Innovate-specific bindings:
 
 **Canonical path:** `~/.claude/projects/<project-hash>/memory/innovate/scratch/<run-id>/`
 
-The `<run-id>` is a timestamp generated at invocation start with millisecond precision: `YYYY-MM-DDTHH-mm-ss-<ms>` (e.g., `2026-04-19T10-30-00-427`), where `<ms>` is zero-padded milliseconds. Dashes are used as the time separator (not colons) so the path is filesystem-safe — this is a deliberate deviation from literal ISO-8601. If the target directory already exists on disk (rare), append `-2`, `-3`, etc. until a fresh path is found.
+Keep the existing `memory/innovate/` scratch path for recovery of prior runs after consolidation. The `<run-id>` is a timestamp generated at invocation start with millisecond precision: `YYYY-MM-DDTHH-mm-ss-<ms>` (e.g., `2026-04-19T10-30-00-427`), where `<ms>` is zero-padded milliseconds. Dashes are used as the time separator (not colons) so the path is filesystem-safe — this is a deliberate deviation from literal ISO-8601. If the target directory already exists on disk (rare), append `-2`, `-3`, etc. until a fresh path is found.
 
 Files (written by the orchestrator, not the subagent):
 
@@ -98,7 +93,7 @@ Rationale: today's #2 proposal is often tomorrow's #1 when context shifts. Ranki
 
 ## Sweep Mode (Optional)
 
-When `/innovate` is invoked as part of a sweep (multiple invocations against the same target, e.g. "run /innovate six times for missed features"), the caller passes a `sweep-id` in the invocation context. Sweep-id can be auto-derived (e.g. hash of target + date) or user-supplied.
+When `/design` innovation-pass mode is invoked as part of a sweep (multiple invocations against the same target, e.g. "run design's innovation pass six times for missed features"), the caller passes a `sweep-id` in the invocation context. Sweep-id can be auto-derived (e.g. hash of target + date) or user-supplied.
 
 ### Channel
 
@@ -144,7 +139,7 @@ Generate `<run-id>` per the format specified in Scratch Directory above. Write `
 
 ### 2. Dispatch Innovation subagent
 
-Use the `innovate-prompt.md` template in this directory. Provide:
+Use the `innovation-prompt.md` template in this directory. Provide:
 - The full artifact content
 - Project context (existing systems, constraints, tech stack)
 - What the artifact is trying to accomplish
@@ -187,7 +182,7 @@ If `sweep-id` was set, rewrite `sweeps/<sweep-id>/ranked.md` per the Sweep Mode 
 - Skipping `invocation.md` on single-run invocations (persistence applies to all invocations, not just sweeps)
 - Generating a sweep's `ranked.md` without linking each entry back to its source `scratch/<run-id>/proposal.md`
 - Silently sanitizing a malformed `sweep-id` instead of rejecting with an error (silent sanitization can collide distinct sweep-ids)
-- Passing the HTML-commented sweep instructions in `innovate-prompt.md` as prompt text to the subagent (comments are orchestrator-only)
+- Passing the HTML-commented sweep instructions in `innovation-prompt.md` as prompt text to the subagent (comments are orchestrator-only)
 - Treating a scratch directory with `proposal.md` but no `alternatives.md` as a complete run — this is a mid-write crash state, not a sealed directory
 - Failing to write `active-run.md` at invocation start, or failing to delete it on completion
 
@@ -198,6 +193,6 @@ If `sweep-id` was set, rewrite `sweeps/<sweep-id>/ranked.md` per the Sweep Mode 
 - **User or future sweep orchestrator** — standalone invocations and multi-run sweeps are supported via the `sweep-id` dispatch context key (see Sweep Mode above)
 
 **Pairs with:**
-- **crucible:quality-gate** — always runs after innovate to validate the addition
+- **crucible:quality-gate** — always runs after the innovation pass to validate the addition
 
-See prompt template: `innovate/innovate-prompt.md`
+See prompt template: `skills/design/innovation-prompt.md`
