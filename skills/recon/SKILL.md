@@ -282,7 +282,7 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 
 ## Verification Ledger
 
-See [`verification-ledger.md`](verification-ledger.md) for scope, entry format, empty state, and falsification instructions.
+See [`verification-ledger.md`](verification-ledger.md) for scope, entry format, empty state, and falsification instructions. In a repo with `docs/decisions/`, falsifications belong under the trailing `## Falsifications` heading. <!-- CONTRACT:adr-falsification-home -->
 
 ## Design Principles and Guardrails
 
