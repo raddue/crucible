@@ -507,7 +507,7 @@ Escalate to the user when:
 | `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase; explicit immutable mode) |
 | `crucible:quality-gate` | Plan gate | After Phase 5 (artifact type: plan, on migration plan; explicit immutable mode) |
 | `crucible:test-coverage` | Per-phase audit | Phase 7 (test alignment after each phase) |
-| `/recon` improvement-discovery mode | Upstream | Prospector discovers "modernize X"; migrate plans the transition |
+| `/recon` improvement-discovery mode | Upstream | Recon improvement discovery identifies modernization friction; migrate plans the transition |
 
 ## Prompt Templates
 

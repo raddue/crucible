@@ -538,8 +538,8 @@
       "prompt": "Before I add OAuth, investigate how auth currently works in this repo.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon whole-repo-onboarding mode",
-        "recon improvement-discovery mode"
+        "workshop",
+        "audit"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
       "reasoning": "Select task-scoped investigation to map the auth surface for a specific upcoming change. Whole-repo onboarding is not task-scoped; improvement discovery searches for architectural friction, not how auth works.",
@@ -552,7 +552,7 @@
       "prompt": "Where are the structural problems in this codebase? What should I refactor?",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon task-investigation mode",
+        "workshop",
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
@@ -566,8 +566,8 @@
       "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon task-investigation mode",
-        "recon improvement-discovery mode"
+        "workshop",
+        "getting-started"
       ],
       "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for recon whole-repo-onboarding mode over recon.",
       "reasoning": "Select whole-repo onboarding for first-time mapping and sibling-repo topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
@@ -580,8 +580,8 @@
       "prompt": "Explore the payment module so I understand it before I touch the refund flow.",
       "expected_skill": "recon",
       "common_mistakes": [
-        "recon whole-repo-onboarding mode",
-        "recon improvement-discovery mode"
+        "workshop",
+        "audit"
       ],
       "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
       "reasoning": "Select task-scoped investigation: this is one module in service of a specific upcoming change. Whole-repo onboarding is unnecessary; improvement discovery is for architectural friction, not understanding the current refund flow.",

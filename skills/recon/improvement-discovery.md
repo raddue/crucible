@@ -1,24 +1,17 @@
-- [Purpose and invocation](#purpose)
-- [Communication and budget](#communication-requirement-non-negotiable)
-- [Friction discovery](#phase-0-5-framework-detection)
-- [Genealogy and root cause](#phase-1-5-friction-genealogy)
-- [Analysis and prioritization](#phase-3-structured-analysis)
-- [Competing redesign proposals](#phase-5-design-competition)
-- [Proposal handoff to design](#phase-8-output)
-- [Scratch, trajectory, and integration](#trajectory-snapshot)
-
-
 # Improvement Discovery Mode
 
 ## Contents
 
-- [Purpose](#purpose)
-- [Invocation and communication](#invocation)
-- [Friction exploration](#phase-1-explore-organic-discovery)
-- [Genealogy and root cause](#phase-1-5-friction-genealogy)
-- [Analysis and design competition](#phase-2-root-cause-analysis)
-- [Proposal output](#phase-8-output)
-- [Trajectory and integration](#trajectory-snapshot)
+- [Invocation](#invocation)
+- [Communication](#communication-requirement-non-negotiable)
+- [Friction discovery](#phase-0-5-framework-detection)
+- [Organic exploration](#phase-1-explore-organic-discovery)
+- [Genealogy](#phase-15-friction-genealogy)
+- [Root cause](#phase-2-root-cause-analysis)
+- [Structured analysis](#phase-3-structured-analysis-enhanced)
+- [Competing redesigns](#phase-5-frame-the-problem-space)
+- [Output and proposal handoff](#phase-8-output)
+- [Integration](#integration)
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -622,7 +615,7 @@ After presenting the selected proposal, ask the user:
 > (c) Keep the proposal for now
 > (d) Explore another candidate from the list"
 
-**Option (a):** Invoke `/design` with the selected proposal and supporting friction analysis. `/design` owns creating and quality-gating any design doc. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
+**Option (a):** Invoke `/design` with the selected proposal and supporting friction analysis. `/design` owns creating and quality-gating any design doc. If the user later asks to implement it, `/build` runs its own Phase 1 normally (including blast radius analysis, impact manifest, and contract tests).
 
 **Option (b):** File the friction findings as an issue using available tracker tools. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
 
@@ -718,6 +711,7 @@ After context compaction:
 - **Called by:** Standalone only (user invokes directly)
 - **Does NOT use:** `crucible:quality-gate` (improvement discovery is advisory, not a fix loop), `crucible:red-team`
 - Does not dispatch task investigation; organic exploration serves a different purpose than structured investigation. It does not dispatch design approach evaluation; competing redesign exploration is a distinct discovery output. See #147 for rationale.
+- **Triggered by:** user requests for prospector-style architectural friction discovery, refactor candidates, or “what should I refactor?”
 
 ## Subagent Dispatch Summary
 

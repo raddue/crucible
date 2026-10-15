@@ -2,22 +2,22 @@
   "skill_name": "recon",
   "evals": [
     {
-      "id": "task-investigation",
+      "id": 1,
       "prompt": "Before I add OAuth, investigate how auth currently works in this repo and give me a short brief on the relevant modules, existing patterns, and likely impact.",
       "expected_output": "Task-scoped Investigation Brief with structure, patterns, scope boundaries, prior art, and impact-relevant findings; avoids full-repo onboarding or speculative redesign.",
       "files": [],
-      "assertions": [
+      "expectations": [
         "Scopes investigation to auth and the OAuth task",
         "Includes existing patterns and prior art",
         "Does not launch whole-repo onboarding or propose redesigns"
       ]
     },
     {
-      "id": "whole-repo-onboarding",
+      "id": 2,
       "prompt": "I just cloned this repo and have never seen it. Map the whole repository and any local sibling repos it depends on so I have structural context before my first task.",
       "expected_output": "Runs whole-repo-onboarding mode, performs partitioned scanning and optional local sibling-repo topology discovery, writes structural-tagged bootstrap content to the existing persistent cartographer map data, preserving task-verified data precedence.",
       "files": [],
-      "assertions": [
+      "expectations": [
         "Selects whole-repo-onboarding mode rather than default task investigation",
         "Preserves partition completeness/partial-scan reporting and sibling topology behavior",
         "Uses existing persistent map storage and structural markers",
@@ -25,11 +25,11 @@
       ]
     },
     {
-      "id": "persistent-map-record-and-consult",
+      "id": 3,
       "prompt": "I traced the payment retry flow and found a non-obvious invariant. Check the existing codebase map for payment-module context, then record the verified invariant so future implementers see it.",
       "expected_output": "Uses persistent-map mode to consult and record through the existing cartographer storage and recorder workflow, without changing repository source.",
       "files": [],
-      "assertions": [
+      "expectations": [
         "Selects persistent-map mode",
         "Consults relevant map/module files and landmines before recording",
         "Uses recorder guidance and existing memory paths",
@@ -37,11 +37,11 @@
       ]
     },
     {
-      "id": "improvement-discovery-to-design",
+      "id": 4,
       "prompt": "Where are the structural problems in this codebase? Find high-leverage refactor candidates, trace how the leading friction developed, compare competing redesign approaches, and tell me the best next step.",
       "expected_output": "Runs improvement-discovery mode with friction discovery, genealogy, analysis, prioritization, and competing proposals; returns selected proposal for /design, without writing design content or modifying code.",
       "files": [],
-      "assertions": [
+      "expectations": [
         "Selects improvement-discovery mode, not task investigation",
         "Distinguishes symptoms from root causes and includes evidence/genealogy",
         "Compares alternatives and prioritizes friction opportunities",

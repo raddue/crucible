@@ -33,7 +33,7 @@ Every significant design question is backed by parallel investigation agents tha
 ### Phase 1: Context Gathering
 
 - **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons
-- **RECOMMENDED:** Use /recon persistent-map mode (consult mode) — review codebase map
+- **RECOMMENDED:** Use `/recon` (persistent-map mode) (consult mode) — review codebase map
 - Check current project state (files, docs, recent commits)
 - Read committed repo decisions and rules after compass state, before exploring:
   ```bash

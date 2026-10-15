@@ -1,6 +1,6 @@
 ---
 name: recon
-description: "Investigate unfamiliar code before a task, onboard to a whole repository and local neighbors, consult or maintain a persistent codebase map, or discover architectural friction and refactor candidates. Use for codebase investigation, first-time repository mapping, codebase maps, architecture friction, and refactor opportunity discovery."
+description: "Investigate unfamiliar code before a task, onboard to a whole repository and local neighbors, consult or maintain a persistent codebase map, or discover architectural friction and refactor candidates. Use for codebase investigation, first-time repository mapping, codebase maps, architecture friction, refactor discovery, project initialization, and “what should I refactor?” requests; search for cartographer and prospector tasks to route them to the matching recon mode."
 ---
 
 # Recon
@@ -12,7 +12,10 @@ description: "Investigate unfamiliar code before a task, onboard to a whole repo
 - [Invocation API](#invocation-api)
 - [Communication requirements](#communication-requirements-non-negotiable)
 - [Investigation workflow](#investigation-workflow)
-- [Output and recovery](#output-and-return)
+- [Output and return](#output-and-return)
+- [Scratch directory](#scratch-directory-and-context-management)
+- [Compaction recovery](#compaction-recovery)
+- [Error handling](#error-handling)
 - [Brief schema](#brief-schema-stability)
 - [Verification ledger](#verification-ledger)
 - [Guardrails](#design-principles-and-guardrails)
@@ -177,9 +180,9 @@ Follow [`investigation-workflow.md`](investigation-workflow.md) for the full Pha
 Return the Investigation Brief as the agent output (inline return to parent skill).
 
 The brief follows the exact core template assembled in
-[Phase 3 — Assemble the Investigation Brief](#assemble-the-investigation-brief)
+[Phase 3 — Assemble the Investigation Brief](investigation-workflow.md#assemble-the-investigation-brief)
 (metadata block + core sections through the Verification Ledger). Do not re-echo
-that template here — it is the single source so the two copies cannot drift.
+that template here — it is the authoritative template in `investigation-workflow.md`.
 
 When depth modules ran, append their sections after a `---` separator, in this
 order (only the requested modules' sections appear):

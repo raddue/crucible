@@ -1,3 +1,7 @@
+# Whole-Repo Onboarding Mode
+
+## Contents
+
 - [Overview](#overview)
 - [Scope estimation](#pre-flight-scope-estimation)
 - [Tier 1: Single repo](#tier-1-single-repo-deep-scan)
@@ -7,7 +11,6 @@
 - [Prompt templates](#prompt-templates)
 
 
-# Whole-Repo Onboarding Mode
 
 ## Overview
 

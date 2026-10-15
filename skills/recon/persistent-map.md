@@ -1,3 +1,7 @@
+# Persistent Map
+
+## Contents
+
 - [Overview](#overview)
 - [When to Use](#when-to-use)
 - [Storage and size caps](#storage)
@@ -7,7 +11,6 @@
 - [With Forge and Graphify](#integration)
 
 
-# Cartographer
 
 ## Overview
 

@@ -60,7 +60,7 @@ If Phase 3's re-scan finds zero causal-keyword matches, the ledger is:
 
 ```
 ## Verification Ledger
-<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per skills/recon/verification-ledger.md. -->
 ```
 
 The same placeholder comment is used for both empty and populated states

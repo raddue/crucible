@@ -89,7 +89,7 @@ Rationale: today's #2 proposal is often tomorrow's #1 when context shifts. Ranki
 
 **No file inside `scratch/` is ever rewritten.** A sweep's `ranked.md` (see Sweep Mode below) is rewritten between runs, but it lives in a sibling `sweeps/<sweep-id>/` tree — not under `scratch/` — and is explicitly a view layer over persistent scratch, not authoritative content.
 
-**Note on prospector parity:** Improvement discovery uses second-precision run-ids (`2026-03-18T14-30-00`). Innovate uses millisecond precision because sweep mode can invoke multiple times per second; improvement discovery's multi-phase, multi-gate structure inherently spaces invocations further apart. This is a justified divergence, not an inconsistency.
+**Note on improvement-discovery parity:** Improvement discovery uses second-precision run-ids (`2026-03-18T14-30-00`). Innovate uses millisecond precision because sweep mode can invoke multiple times per second; improvement discovery's multi-phase, multi-gate structure inherently spaces invocations further apart. This is a justified divergence, not an inconsistency.
 
 ## Sweep Mode (Optional)
 

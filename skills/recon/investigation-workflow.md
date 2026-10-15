@@ -228,7 +228,7 @@ causal claims only — depth-module (Phase 4) claims are out of scope.
    placeholder:
 
        ## Verification Ledger
-       <!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+       <!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per skills/recon/verification-ledger.md. -->
 
    The same placeholder is used for both empty and populated states —
    see `## Verification Ledger Convention`.
@@ -312,7 +312,7 @@ Build the Investigation Brief markdown with all core sections:
 - **[Question]** — [Why it matters] — Relevant to: [consumer list] — Resolvable by: [specific investigation or human input]
 
 ## Verification Ledger
-<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per skills/recon/verification-ledger.md. -->
 <!-- Populated entries, if any: -->
 - **L-NN** — [claim text] — method: `<method>`, evidence: `<anchor>`, disposition: `<confirmed | demoted | awaiting>`
 ```

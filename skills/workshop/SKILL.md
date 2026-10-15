@@ -34,7 +34,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | Skill | When to reach for it |
 |---|---|
 | `/delve` | Instance-bug review of a diff or path — parallel finder angles + verify gate, prints ranked, verified defects with reproductions. Report-only (no merge verdict, no fix loop; `--fix` / `--comment` are opt-in). Use when "find bugs in this diff", "scan this file for defects", or you want concrete reproducible bugs. |
-| `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/recon` improvement-discovery mode. Use when "this has accumulated cruft nobody's looked at in months." |
+| `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/recon` (improvement discovery). Use when "this has accumulated cruft nobody's looked at in months." |
 | `/siege` | Security audit. Six parallel attacker-perspective Opus agents, iterates until zero Critical/High. Heavy — reserve for security PRs, scheduled reviews, or post-incident. |
 | `/recon` | Codebase investigation: task-scoped brief, whole-repo onboarding, persistent-map maintenance, or improvement discovery. Select mode from intent; redesign proposals route to `/design`. |
 
@@ -61,7 +61,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | "Check the save system for bugs" | `/audit` (systemic) or `/audit --bugs` (+ `/delve` instance sweep) |
 | "Security review" / "Threat model" | `/siege` |
 | "What does X do?" / "How does this codebase work?" | `/recon` |
-| "What should I refactor?" | `/recon` improvement-discovery mode |
+| "What should I refactor?" | `/recon` (improvement discovery) |
 | "Run quality gate on this" | `/quality-gate` |
 | "Upgrade React to 19" / "Remove deprecated APIs" | `/migrate` |
 | "I'm done, what's next?" | `/finish` |

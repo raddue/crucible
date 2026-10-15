@@ -45,7 +45,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
 | TOTAL | 28/39 | 11/39 | 39/39 | 26/39 | 27/39 | 5/39 |
 
-## Violations (141)
+## Violations (140)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
@@ -89,7 +89,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `quality-gate` Frontmatter (1): description lacks when-to-use signal
 - `quality-gate` Scripts (2): SKILL.md:30: script step lacks nearby dependency/setup note (heuristic); SKILL.md:900: script step lacks nearby dependency/setup note (heuristic)
 - `recall` Frontmatter (1): description lacks when-to-use signal
-- `recon` Contents (7): skills/getting-started/trust-hierarchy.md: >100 lines, no contents list in first 20; skills/recon/cartographer/recorder-prompt.md: >100 lines, no contents list in first 20; skills/recon/improvement-discovery.md: >100 lines, no contents list in first 20; … and 4 more
+- `recon` Contents (6): skills/getting-started/trust-hierarchy.md: >100 lines, no contents list in first 20; skills/recon/cartographer/recorder-prompt.md: >100 lines, no contents list in first 20; skills/recon/persistent-map.md: >100 lines, no contents list in first 20; … and 3 more
 - `red-team` Contents (3): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `red-team` Frontmatter (1): description should use third-person, not first/second-person voice
 - `replay` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
