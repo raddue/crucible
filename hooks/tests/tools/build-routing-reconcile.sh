@@ -97,10 +97,15 @@ if [ -z "$SINCE_ISO" ]; then
   exit 2
 fi
 
-# ── Resolve gate-ledger path (marker-writer convention) ────────────────
+# ── Resolve gate-ledger paths (legacy + per-worktree build state) ───────
 REPO_ABS="$(cd "$REPO_PATH" && pwd)"
 PROJECT_HASH="$(echo "$REPO_ABS" | tr '/' '-')"
-LEDGER_PATH="$HOME/.claude/projects/$PROJECT_HASH/memory/build-gate-ledger.md"
+MEMORY_DIR="$HOME/.claude/projects/$PROJECT_HASH/memory"
+# ponytail: discover only the current --repo identity; scanning every project hash risks unrelated ledgers and adds cross-project cost.
+LEDGER_PATHS=("$MEMORY_DIR/build-gate-ledger.md")
+for ledger in "$MEMORY_DIR"/builds/*/build-gate-ledger.md; do
+  [ -f "$ledger" ] && LEDGER_PATHS+=("$ledger")
+done
 
 # ── PR enumeration (primary: gh; fallback: git log --merges) ───────────
 DISCOVERY_PATH="unknown"
@@ -157,20 +162,25 @@ fi
 # grep: look for the PR's merge-commit SHA OR branch name inside the ledger.
 
 has_gate_pass() {
-  local branch="$1" sha="$2"
-  [ ! -f "$LEDGER_PATH" ] && return 1
-  # Accept any of: PR/branch mention within ~20 lines of a "Status: PASS" line.
-  # This heuristic is the best we can do without per-commit ledger history.
-  awk -v b="$branch" -v s="$sha" '
-    /Status: PASS/ { pass=1; for (i=NR-20; i<=NR+20; i++) win[i]=1 }
-    { lines[NR]=$0 }
-    END {
-      for (n in win) {
-        if (lines[n] ~ b || (s != "" && lines[n] ~ substr(s,1,7))) { print "hit"; exit 0 }
+  local branch="$1" sha="$2" ledger
+  for ledger in "${LEDGER_PATHS[@]}"; do
+    [ -f "$ledger" ] || continue
+    # Accept any of: PR/branch mention within ~20 lines of a "Status: PASS" line.
+    # This heuristic is the best we can do without per-commit ledger history.
+    if awk -v b="$branch" -v s="$sha" '
+      /Status: PASS/ { pass=1; for (i=NR-20; i<=NR+20; i++) win[i]=1 }
+      { lines[NR]=$0 }
+      END {
+        for (n in win) {
+          if (lines[n] ~ b || (s != "" && lines[n] ~ substr(s,1,7))) { print "hit"; exit 0 }
+        }
+        exit 1
       }
-      exit 1
-    }
-  ' "$LEDGER_PATH" | grep -q hit
+    ' "$ledger" | grep -q hit; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # ── Classify PRs ───────────────────────────────────────────────────────

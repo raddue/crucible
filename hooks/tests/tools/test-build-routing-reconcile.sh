@@ -45,8 +45,9 @@ trap cleanup EXIT
 REPO_ABS="$(cd "$REPO" && pwd)"
 PROJECT_HASH="$(echo "$REPO_ABS" | tr '/' '-')"
 LEDGER_DIR="$FAKE_HOME/.claude/projects/$PROJECT_HASH/memory"
-mkdir -p "$LEDGER_DIR"
-cat > "$LEDGER_DIR/build-gate-ledger.md" <<EOF
+WORKTREE_KEY="$(printf '%s' "$REPO_ABS" | sha256sum | cut -d' ' -f1)"
+mkdir -p "$LEDGER_DIR/builds/$WORKTREE_KEY"
+cat > "$LEDGER_DIR/builds/$WORKTREE_KEY/build-gate-ledger.md" <<EOF
 # Build Gate Ledger
 
 ## Entry 1
@@ -93,6 +94,14 @@ grep -q "PR #102" "$REPORT_OUT" \
 grep -q "PR #101" "$REPORT_OUT" \
   && { FAIL=$((FAIL+1)); echo "FAIL: PR #101 should NOT be flagged"; cat "$REPORT_OUT"; } \
   || { PASS=$((PASS+1)); echo "PASS: PR #101 not flagged"; }
+
+# Legacy root ledgers remain discoverable during migration.
+mkdir -p "$LEDGER_DIR"
+cp "$LEDGER_DIR/builds/$WORKTREE_KEY/build-gate-ledger.md" "$LEDGER_DIR/build-gate-ledger.md"
+HOME="$FAKE_HOME" PATH="$HIDE_GH:$PATH" bash "$RECON" --since "30 days ago" --repo "$REPO" --output "$REPORT_OUT"
+grep -q "Flagged (no gate-ledger PASS): 1" "$REPORT_OUT" \
+  && { PASS=$((PASS+1)); echo "PASS: legacy ledger remains recognized"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL: legacy ledger ignored during migration"; }
 
 grep -q "Total merged PRs in window: 2" "$REPORT_OUT" \
   && { PASS=$((PASS+1)); echo "PASS: total PRs == 2"; } \
