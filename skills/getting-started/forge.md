@@ -29,7 +29,7 @@ Self-improving retrospective system. After tasks complete, runs structured retro
 
 **Core principle:** The agent that never reviews its own performance never improves. The Forge closes the loop.
 
-**Announce at start:** "I'm using the forge skill to [run a retrospective / consult past lessons / propose skill improvements]."
+**Announce at start:** "I'm using getting-started's forge reference to [run a retrospective / consult past lessons / propose skill improvements]."
 
 ## Cairn (Layer 3)
 

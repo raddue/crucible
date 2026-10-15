@@ -528,7 +528,7 @@
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task \u2014 whole-repo structural context.",
-      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
+      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). getting-started's workshop reference tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
       "difficulty": "medium"
     },
     {
@@ -772,7 +772,7 @@
         "design"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
-      "reasoning": "recall (getting-started/recall.md) and recon own the read side (they mine docs/decisions/). design\u2019s decision-record subflow writes and refuses on a settled decision \u2014 it has no answer output.",
+      "reasoning": "getting-started's recall reference queries session history and recon mines docs/decisions/ \u2014 both read sides. design\u2019s decision-record subflow writes and refuses on a settled decision \u2014 it has no answer output.",
       "difficulty": "medium"
     },
     {
@@ -939,14 +939,14 @@
       "id": "session-hub-tour-01",
       "dimension": "direct",
       "boundary": "session-hub",
-      "prompt": "Which skills are available, and what should I use for a flaky test?",
+      "prompt": "Which skills are available, and which one should I use to review a PR?",
       "expected_skill": "getting-started",
       "common_mistakes": [
-        "debugging",
+        "temper",
         "project-init"
       ],
-      "context": "Catalog question before choosing a tool.",
-      "reasoning": "The workshop catalog tour (getting-started/workshop.md) answers which skill fits; the user has not asked to start debugging yet.",
+      "context": "Catalog question before choosing a tool; the user has not asked for a review yet.",
+      "reasoning": "The workshop catalog tour (getting-started/workshop.md) answers which skill fits and names /temper; invoking temper now would start a review nobody asked for.",
       "difficulty": "medium"
     }
   ]

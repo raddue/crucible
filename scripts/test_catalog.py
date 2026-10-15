@@ -614,7 +614,7 @@ class CatalogChecks(CatalogTestBase):
         # Pins findall/finditer, not search.
         self.build_clean_fixture()  # true n=4, all tokens correct
         n = len(catalog.parse_skill_names(self.root))
-        # getting-started's SKILL.md carries multiple count tokens; keep the FIRST
+        # getting-started's workshop.md carries multiple count tokens; keep the FIRST
         # correct (~4) and drift a LATER one (42-skill). A .search() first-match
         # implementation would false-PASS; only findall/finditer catches it.
         wsfile = self.root / "skills" / "getting-started" / "workshop.md"

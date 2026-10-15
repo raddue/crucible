@@ -40,7 +40,7 @@ These former standalone skills live here as flat reference files. Invoke `gettin
 | Session history: "recall", "what did I edit", "recall errors" | [recall.md](recall.md) | Activity-index discovery, summary / keyword / type / time-range views, 20-entry cap |
 | Catalog tour: "skills available", "where do I start?", "tour" | [workshop.md](workshop.md) | Headline orchestrators by task, trigger-phrase table, pipelines |
 
-Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that auto-invoke these (`build`, `finish`, `merge-pr`, `debugging`, `design`, `spec`, `migrate`) name `crucible:getting-started` plus the reference file; behavior is identical to the former standalone skills.
+Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that recommend forge (e.g. `build`, `finish`, `debugging`, `design`, `spec`, `migrate`, `prospector`) name `crucible:getting-started` plus `forge.md`; `build`, `merge-pr`, and `finish` keep emitting compass updates via `scripts/compass.py` directly. Forge stays RECOMMENDED, handoff runs on request — behavior is identical to the former standalone skills.
 
 ## The Rule
 
@@ -67,8 +67,6 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 | Claiming work is done | verify → finish |
 | Receiving code review feedback | review-feedback |
 | Onboarding to an unfamiliar codebase | project-init |
-| Significant task just completed | getting-started → [forge.md](forge.md) retrospective |
-| Ending a session | getting-started → [handoff.md](handoff.md) |
 
 ### Build-shaped work routes through /build
 

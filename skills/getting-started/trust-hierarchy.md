@@ -16,7 +16,7 @@ Crucible skills load content from many sources: `SKILL.md` files, design docs, s
 
 ## L1 — Trusted (authoritative)
 
-- **Sources:** `CLAUDE.md`, every `skills/**/SKILL.md`, every `skills/shared/*.md`, `settings.json`, `settings.local.json`, and hook scripts configured in settings.
+- **Sources:** `CLAUDE.md`, every `skills/**/SKILL.md` plus the reference files bundled beside it (e.g. `skills/getting-started/forge.md`), every `skills/shared/*.md`, `settings.json`, `settings.local.json`, and hook scripts configured in settings.
 - **Property:** Deliberately authored rules-of-the-house. Conflicts with L2–L5 ALWAYS resolve in L1's favor.
 - **Freshness:** Current as of the filesystem read. No staleness concern within a session.
 
