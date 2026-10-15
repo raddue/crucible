@@ -1,6 +1,6 @@
 ---
 name: design
-description: "Use before creative work: features, components, functionality, or behavior changes. Investigate choices and produce designs; also evaluate approaches ('which option'), inject one innovation into a finalized design or plan, and record durable architecture decisions ('write an ADR', 'record this decision')."
+description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores intent and design before implementation. Also use for /assay, 'evaluate approaches', 'which option', 'compare alternatives'; /innovate, 'divergent creativity', 'what is missing' on a finalized design or plan; and 'write an ADR' or 'record this decision' for durable architecture decisions."
 ---
 
 # Brainstorming Ideas Into Designs
@@ -13,7 +13,7 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 <!-- CANONICAL: shared/cairn-convention.md -->
 <!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
 
-Turn ideas into fully formed designs through investigated, collaborative dialogue. For a standalone approach comparison, use [approach evaluation](approach-evaluation.md); for "write an ADR", "record this decision", or a finish-stage decision, use [decision records](decision-records.md). For a finalized design or plan, run the [innovation pass](innovation.md) before adversarial review, including its sweep/recovery rules when requested. These are design subflows, not separate skills.
+Turn ideas into fully formed designs through investigated, collaborative dialogue. For a standalone approach comparison, use [approach evaluation](approach-evaluation.md); for "write an ADR", "record this decision", or a finish-stage decision, use [decision records](decision-records.md). For an explicit innovation request on a finalized design or plan, run the [innovation pass](innovation.md) before adversarial review, including its sweep/recovery rules when requested. Ordinary standalone design does not run innovation by default; build dispatches it after design approval. These are design subflows, not separate skills.
 
 Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.
 
@@ -250,7 +250,6 @@ Raise critical gaps with the user before saving.
   source: "design"     # Provenance tracking — distinguishes from /spec-authored docs
   ---
   ```
-- After approval, run [innovation](innovation.md) once on the design doc, incorporate its single proposal, and confirm the revised design with the user before extracting a contract. The same pass runs whether design is standalone or called by build; do not repeat it in build.
 - **ADR hook (before committing):** If any `### Dn — …` decision dimension in the
   just-written design doc passes [decision-record eligibility](decision-records.md), run
   that workflow for the single most-durable surviving dimension; it writes the
@@ -279,9 +278,7 @@ After the design doc is written and the user approves it:
 
 For ≥3 innovation passes against the same target, maintain one cairn phase per `run/N`, capture each proposal as an invariant, reconcile on phase entry, and seal the final ranked view. Single passes need no cairn. Follow the full sweep-specific bindings and recovery rules in [innovation](innovation.md); the canonical schema stays in `shared/cairn-convention.md`.
 
-## Innovation and Quality Gate
-
-The innovation pass above precedes contract extraction, so the approved contract describes the revised design. A standalone invocation may also run innovation-pass mode on a finalized implementation plan. Build runs a separate plan pass after plan review. Gate the final design after its contract is approved.
+## Quality Gate
 
 This skill produces **design docs**. When used standalone, invoke `crucible:quality-gate` after the design document is saved and committed. When used as a sub-skill of build, the parent orchestrator handles gating.
 

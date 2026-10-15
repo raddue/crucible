@@ -21,8 +21,8 @@ Per `shared/cairn-convention.md`. Innovation-pass bindings:
 - **Applies to sweep mode only.** A single-invocation innovation run is one dispatch and doesn't need a cairn. Sweep mode (≥ 3 invocations against the same target, per the `sweep-id` context key) does.
 - **Phase mapping.** One cairn phase per sweep run: `run/1`, `run/2`, …. Each sweep run's `scratch/<run-id>/` directory already exists from the innovation convention; the cairn adds the cross-run continuity layer.
 - **Terminal phase.** The last sweep run seals its `ranked.md` view.
-- **Mandatory-invariant categories.** Each sweep run-exit MUST capture the run's proposal as an invariant (≤240 chars distillation), without `[ref:]`; later runs distinguish "already proposed" from "not yet" without re-reading every prior `proposal.md`.
-- **Reconciliation.** Full 5-rule pass. The innovation pass produces no Layer 2 receipts, so these invariants have no shedding license; retain their surrounding reasoning. Rule 4's receipt-liveness check has no references to resolve.
+- **Mandatory-invariant categories.** Each sweep run-exit MUST capture the run's proposal as an invariant (≤240 chars distillation), so later runs distinguish "already proposed" from "not yet" without re-reading every prior `proposal.md`. New proposal invariants omit `[ref:]`: innovation writes no Layer 2 receipt.
+- **Reconciliation and legacy cairns.** Run the full 5-rule pass. Keep existing `[ref: <innovate-run-id-as-receipt-prefix>]` entries in historical cairns unchanged; a real 12-hex receipt reference still resolves under Rule 4. A run-id or phase/counter placeholder without a matching receipt cannot be given a shedding license: report the reconciliation blocker rather than silently stripping or rewriting its append-only invariant. New receipt-less invariants have no shedding license, so retain their surrounding reasoning.
 
 ## When to Use
 

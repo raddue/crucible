@@ -638,15 +638,15 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, including its innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, design's innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
-### Step 2: Red-Team the Design
+### Step 2: Innovate and Red-Team the Design
 
-After the user approves the revised design and its contract, and before starting Phase 2:
+After the user approves the design and before starting Phase 2:
 
-**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching quality-gate on the design doc.
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching design's innovation pass and quality-gate on the design doc.
 
-1. **Innovation already ran inside design before contract extraction.** Do not run it again; the final contract must reflect the revised design.
+1. **Innovation:** Dispatch `crucible:design` in innovation-pass mode (`design/innovation.md`) on the design doc. Plan Writer incorporates the proposal. If it changes the API Surface, Invariants, or integration points, re-extract the contract from the revised design and obtain user approval of the changed contract before the quality gate and handoff.
 2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: design`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
