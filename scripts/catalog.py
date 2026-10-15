@@ -39,7 +39,7 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "Implementation": [
         "test-driven-development", "source-driven-development", "checkpoint",
-        "worktree", "parallel", "adversarial-tester", "inquisitor", "migrate",
+        "worktree", "parallel", "inquisitor", "migrate",
     ],
     "Quality & Audit": [
         "delve", "audit", "siege", "consensus", "quality-gate",
