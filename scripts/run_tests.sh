@@ -425,6 +425,9 @@ run python3 scripts/test_orchestrator_fleet.py
 run python3 scripts/test_orchestrator_scan.py
 run python3 scripts/test_orchestrator_ping.py
 
+run python3 scripts/test_check_skill_best_practices.py
+run python3 scripts/check_skill_best_practices.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo
