@@ -95,7 +95,7 @@ Task tool (general-purpose, model: opus):
     - **Likelihood:** High/Medium/Low
     - **Impact:** High/Medium/Low
     - **Test:** `TestClassName.TestMethodName`
-    - **Result:** PASS/FAIL
+    - **Result:** PASS/FAIL/ERROR
     - **If FAIL — fix guidance:** [what the implementer should change]
 
     [repeat for each failure mode]
