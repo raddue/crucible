@@ -1003,8 +1003,8 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
                 "If this step is skipped or fails, Path B's Stop hook "
                 "(`grudge-resolution-guard.sh`) will block the session's next "
                 "Stop event until a grudge is recorded or explicitly skipped — "
-                "see `hooks/README.md`.\n\n\n"
-                "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.\n",
+                "see `hooks/README.md`.\n\n"
+                "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.\n\n",
                 "\n" + "".join(line + "\n" for line in _ADDED_TAIL)])
     skill.write_text("".join(working), encoding="utf-8")
     _git(root, "add", "-A")
