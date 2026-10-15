@@ -583,7 +583,7 @@ The competing redesign proposals are discovery output, not a completed design. R
 
 ### Trajectory Snapshot
 
-At the end of every run — regardless of whether the user proceeds to build, files an issue, or keeps the design doc — the orchestrator writes a friction trajectory snapshot to persistent storage.
+At the end of every run — regardless of whether the user proceeds to `/design`, files an issue, or keeps the proposal — the orchestrator writes a friction trajectory snapshot to persistent storage.
 
 **File:** `~/.claude/projects/<project-hash>/memory/prospector/trajectory.jsonl`
 
@@ -605,25 +605,25 @@ The trajectory file is append-only. Each run appends N lines (one per approved f
 
 ### User Choice
 
-After returning the selected proposal for `/design`, ask the user:
+After presenting the selected proposal, ask the user:
 
-> "Design doc saved. Would you like to:
-> (a) File this as an issue in your tracker
-> (b) Kick off build in refactor mode to implement it
-> (c) Just keep the design doc for now
+> "Would you like to:
+> (a) Develop this proposal with `/design`
+> (b) File the friction findings as an issue in your tracker
+> (c) Keep the proposal for now
 > (d) Explore another candidate from the list"
 
-**Option (a):** File as an issue using whatever tools are available in the environment. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
+**Option (a):** Invoke `/design` with the selected proposal and supporting friction analysis. `/design` owns creating and quality-gating any design doc. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
 
-**Option (b):** Invoke `crucible:build` in refactor mode with the `/design` artifact as context. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
+**Option (b):** File the friction findings as an issue using available tracker tools. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
 
-**Option (c):** Done. Design doc is committed and available for future reference.
+**Option (c):** Return the concise proposal and its evidence in this run's output. No design doc is created.
 
-**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). New candidate's design doc saved alongside the first.
+**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). Return the newly selected proposal to `/design` if chosen.
 
 ### End-of-Run Cleanup
 
-Delete `scratch/<run-id>/` after all Phase 8 actions are complete (design doc saved, issue filed if requested, or build handoff initiated).
+Delete `scratch/<run-id>/` after all Phase 8 actions are complete (proposal handed to `/design`, issue filed if requested, or concise proposal returned).
 
 ### Cartographer Recording
 
@@ -704,7 +704,7 @@ After context compaction:
 
 - **Consults:** `/recon` persistent-map mode, `crucible:forge` (feed-forward mode)
 - **Records to:** `/recon` persistent-map mode — user-approved friction point locations and classifications only
-- **Hands off to:** `crucible:build` (refactor mode) — design doc becomes context for build's design phase
+- **Hands off to:** `/design` — develops selected redesign proposal into a design doc; `/build` may then implement approved design
 - **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
 - **Does NOT use:** `crucible:quality-gate` (prospector is advisory, not a fix loop), `crucible:red-team`
