@@ -160,4 +160,3 @@ would create non-deterministic stagnation behavior.
   reviews, note which models failed in round output.
 - External review timeout or failure never blocks or delays the host red-team
   round.
-

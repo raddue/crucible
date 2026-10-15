@@ -254,4 +254,3 @@ This preserves the value of the pre-threshold consensus investment without givin
 **Fallback:** If `agreement_level` is unavailable in the consensus response, treat as < 0.75 (do not escalate).
 
 **Round-1 exclusion.** The carve-out requires at least one prior round of findings for the "identical to the prior round's" comparison. It does NOT fire on Round 1, regardless of `suppression_threshold`. For `suppression_threshold ≤ 3`, this means the earliest carve-out is Round 2 (consensus rounds 1, 2, 3; pre-threshold rounds 1 and 2; round 1 excluded by this rule); for `suppression_threshold = 10`, the earliest carve-out is Round 4 (consensus rounds 1, 4, 7, 10; round 1 excluded). In all cases Round 1 is structurally ineligible because no prior-round comparison exists.
-

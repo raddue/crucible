@@ -212,4 +212,3 @@ then promote to `Verdict: STAGNATION, Reason: persistent-finding-corroborated`. 
 **Rationale.** Surface/Structural is a per-finding class that the judge tags only in its **All-new** branch. Persistent findings are by construction Recurring (they match prior-round findings whose verifier verdict was `Unresolved`), so the judge enters its All-recurring or Mixed branch — where Surface/Structural is never tagged — and a classification-level override would have nothing to apply. The persistence signal is therefore promoted at the orchestrator layer, not via classification override.
 
 The stagnation judge's own output is unchanged in both fire and no-fire cases (the judge still wrote `PROGRESS`); the promotion happens entirely in orchestrator post-processing.
-

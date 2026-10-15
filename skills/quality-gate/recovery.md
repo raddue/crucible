@@ -142,4 +142,3 @@ Write the handoff on ALL exit paths with ≥2 rounds:
 - **Clean PASS:** Delete all `pre-qg-fix-round-*` checkpoints from this gate run via the checkpoint skill. They served their purpose; retaining them clutters the shadow git log.
 - **Any escalation (ESCALATED, STAGNATION, SUSTAINED_REGRESSION, ARCHITECTURAL):** Retain all `pre-qg-fix-round-*` checkpoints until the user resolves the escalation. The user may invoke "restore to checkpoint" on any of them. After the user accepts the escalation (continues, restores, or kills the gate), cleanup is the responsibility of the parent orchestrator or the next gate run's stale-cleanup pass (2-hour TTL).
 - **Crash / abandoned run:** The 2-hour stale-cleanup pass at gate start handles abandoned checkpoint sets via mtime check.
-

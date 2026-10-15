@@ -243,4 +243,3 @@ is NOT enforced; install per harness-adapter §8") rather than degrading silentl
 **Anti-anchoring preserved:** The verifier is on the remediation path — its output flows to fix agents only, never to the red-team reviewer. Same isolation as the fix journal itself.
 
 **Round counter unchanged:** The verifier dispatch does not increment the round counter. It is part of the fix step, not a separate review round.
-
