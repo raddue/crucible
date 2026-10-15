@@ -2,12 +2,13 @@
 
 import json
 from unittest.mock import AsyncMock, patch
+from pathlib import Path
 
 import pytest
 
 from config import ConsensusConfig, ExternalReviewConfig, ModelConfig
 from providers import ModelResponse
-from aggregator import ConsensusResult
+from aggregator import ConsensusResult, load_aggregation_prompt
 
 import server as server_mod
 from server import call_tool, list_tools, ServerState
@@ -95,6 +96,10 @@ async def test_call_tool_success(mock_dispatch, mock_aggregate):
 
     mock_dispatch.assert_called_once()
     mock_aggregate.assert_called_once()
+    prompts_dir = mock_aggregate.call_args.kwargs["prompts_dir"]
+    assert Path(prompts_dir).resolve() == Path(__file__).resolve().parents[3] / "skills/quality-gate"
+    for mode in ("review", "verdict", "investigate"):
+        assert f"[MODEL_RESPONSES]" in load_aggregation_prompt(mode, prompts_dir)
 
 
 # ---------------------------------------------------------------------------
