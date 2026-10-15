@@ -29,13 +29,11 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | inquisitor | 5 parallel adversarial dimensions | Dimensions run sequentially |
 | temper | Subagent dispatch for review | Agent reviews in-context |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
-| adversarial-tester | Subagent dispatch for test writing | Agent writes tests in-context |
+| inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
 | anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
-| assay | Subagent dispatch for approach evaluation (Opus evaluator) | Evaluates approaches in-context |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
-| design | Subagent dispatch for parallel investigation + Challenger | Investigation/challenge run in-context |
-| innovate | Subagent dispatch for the Innovation proposer (Opus) | Proposal generated in-context |
+| design | Subagent dispatch for parallel investigation, Challenger, approach evaluation, and innovation | Investigation, evaluation, challenge, and proposal run in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |
 | worktree | Git worktree creation | Standard branch-based isolation |
 | stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
@@ -45,7 +43,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | prospector | Subagent dispatch for parallel exploration | Explores sequentially |
 | siege | Parallel attacker-perspective agents (scales 3–6) | Perspectives run sequentially |
 | spec | Subagent dispatch for per-ticket investigation | Tickets processed sequentially |
-| migrate | Subagent dispatch (recon/assay); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
+| migrate | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
 | checkpoint | Shadow git snapshots for pipeline rollback | No automatic rollback; manual git recovery |
 | compass | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
 | merge-pr | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
@@ -94,9 +92,9 @@ The following Claude Code-specific references appear in skill instructions. Thes
 |----------------------|---------|-------|
 | `subagent_type="general-purpose"` | Full-capability subagent | Default on most platforms |
 | `subagent_type="Explore"` | Fast, read-only codebase search | May not have direct equivalent |
-| `model: opus` | Use strongest model for complex work | Platform selects model; skill still works |
-| `model: sonnet` | Use mid-tier model for routine reviews | Platform selects model; skill still works |
-| `model: haiku` | Use fast model for simple lookups | Platform selects model; skill still works |
+| `model: opus` (requested profile `high`) | Use a high-profile model for complex work | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
+| `model: sonnet` (requested profile `standard`) | Use a standard-profile model for routine reviews | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
+| `model: haiku` (requested profile `fast`) | Use a fast-profile model for simple lookups | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
 
 ### Skill Invocation
 

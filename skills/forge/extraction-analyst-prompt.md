@@ -6,6 +6,8 @@
 Dispatch a Sonnet subagent when trigger heuristics detect a skill-worthy workflow
 in a retrospective entry.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Task tool (general-purpose, model: sonnet):
   description: "Forge skill extraction analysis for [task name]"

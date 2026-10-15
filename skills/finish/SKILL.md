@@ -44,7 +44,7 @@ Stop. Don't proceed to Step 2.
 
 If the branch diff changes a public interface, a data/persistence format, a
 security or trust boundary, a dependency choice, or a cross-skill convention,
-run `crucible:adr` scoped to the branch diff. It promotes any `PROPOSED` ADR
+run `crucible:design`'s decision-record workflow (`design/decision-records.md`) scoped to the branch diff. It promotes any `PROPOSED` ADR
 whose decision the diff now implements to `ACCEPTED` (a state-token edit only),
 and for anything not already recorded, runs the D1 eligibility test and writes
 at most one new `ACCEPTED` ADR. Stage and commit what it writes (`git add

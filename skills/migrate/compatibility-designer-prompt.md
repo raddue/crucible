@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Compatibility Layer Designer agent in Phase 4.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (model: opus):
   description: "Design compatibility layer for migration: [MIGRATION_DESCRIPTION]"

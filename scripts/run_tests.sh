@@ -78,9 +78,44 @@ trap 'rm -rf -- "$_SUITE_TMPDIR"' EXIT
 
 failed=()
 total=0
+# Name of the check currently executing, so a kill can report what was in flight.
+current=""
+
+# --- Partial-result reporting on a wall-clock kill ---
+# The `timeout` re-exec at the top SIGTERMs this shell at the cap. Without a
+# handler, bash dies mid-suite, the summary at the bottom never runs, and all a
+# consumer sees is exit 124 — so a killed run gets recorded as "full suite
+# unverified" and the tally that was already computed is thrown away. Report it
+# instead. Budget is ample: `timeout -k 10` sends SIGKILL only 10s later, and
+# this handler does no I/O beyond stdio.
+_partial_summary() {
+  local rc="$1"
+  echo
+  echo "SUITE KILLED at the wall-clock cap (${_SUITE_TIMEOUT}s) — partial results:"
+  echo "  checks run:  $total"
+  if [ -n "$current" ]; then
+    echo "  in flight:   $current"
+  fi
+  if [ ${#failed[@]} -ne 0 ]; then
+    echo "  FAILED so far (${#failed[@]}):"
+    for f in "${failed[@]}"; do echo "    - $f"; done
+  else
+    echo "  FAILED so far: none"
+  fi
+  echo "  NOT RUN: every check after the one above — unverified, not a PASS."
+  echo "  Adjust with CRUCIBLE_SUITE_TIMEOUT=<seconds> (0 disables the cap)."
+  exit "$rc"
+}
+
+# Register only in the timed child: the outer process exec's into `timeout`.
+if [ -n "${CRUCIBLE_SUITE_TIMED:-}" ]; then
+  trap '_partial_summary 124' TERM
+  trap '_partial_summary 130' INT
+fi
 
 run() {
   total=$((total + 1))
+  current="$*"
   echo "::group::$*"
   if "$@"; then
     echo "::endgroup::"
@@ -88,6 +123,7 @@ run() {
     echo "::endgroup::"
     failed+=("$*")
   fi
+  current=""
 }
 
 # `run_expect <token> <cmd...>` — `run` plus an assertion on the child's OUTPUT
@@ -110,6 +146,7 @@ run_expect() {
   local token="$1"; shift
   local out status
   total=$((total + 1))
+  current="$*"
   echo "::group::$*"
   out="$("$@" 2>&1)"; status=$?
   printf '%s\n' "$out"
@@ -123,12 +160,15 @@ run_expect() {
   else
     echo "::endgroup::"
   fi
+  current=""
 }
 
 # --- Structural / canonical checks ---
 run python3 scripts/check_canonical_drift.py
 run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
+run python3 scripts/check_qg_closure_modes.py --selftest
+run python3 scripts/check_qg_closure_modes.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
@@ -142,6 +182,7 @@ run python3 scripts/check_crossref.py
 run python3 scripts/check_canonical_links.py --selftest
 run python3 scripts/check_canonical_links.py
 run python3 scripts/catalog.py check
+# Design's decision-record output retains the ADR integrity gate after skill consolidation.
 run python3 scripts/check_adr_integrity.py --selftest
 run python3 scripts/check_adr_integrity.py
 
@@ -173,6 +214,11 @@ run python3 scripts/check_change_bundling.py
 # --- Receipt-verify (rcpt_verify) ---
 run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
+run python3 scripts/test_install_rcpt_verify.py
+
+# --- CHAIN-1 confusables table drift (#567) ---
+run python3 scripts/check_chain1_confusables_drift.py --selftest
+run python3 scripts/check_chain1_confusables_drift.py
 run python3 scripts/measure_474_denominators.py
 run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
@@ -217,8 +263,25 @@ run python3 scripts/test_qg_fix_pin.py
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
 
+# --- orchestrator fleet-file CRUD (skills/orchestrator step 2) ---
+run python3 scripts/test_orchestrator_fleet.py
+
+# --- orchestrator passive liveness detector (skills/orchestrator scan) ---
+run python3 scripts/test_orchestrator_scan.py
+run python3 scripts/test_orchestrator_ping.py
+
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
+
+# --- Layer 3 cairn Phase Entry Check + Reconciliation Pass (#643) ---
+run python3 scripts/test_cairn.py
+
+# --- Dispatch manifest bookkeeping (#643) ---
+run python3 scripts/test_dispatch.py
+run python3 scripts/check_gate_provenance.py --selftest
+
+# --- Ambient pipeline status writer (#643) ---
+run python3 scripts/test_pipeline_status.py
 
 # --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
@@ -304,6 +367,7 @@ run python3 scripts/test_aacr_bench_measure.py
 # --- Catalog and release packaging unit suites ---
 run python3 scripts/test_catalog.py
 run python3 scripts/test_package_release.py
+run python3 eval/memory/test_memory.py
 
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh
@@ -312,6 +376,7 @@ run bash hooks/tests/test-session-index.sh
 run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 run bash hooks/tests/test-grudge-resolution-guard.sh
+run python3 hooks/tests/test-grudge-warden.py
 
 # --- Grudge eval suite (first eval/ wirings; #559) ---
 run python3 eval/grudge/test-grudge-core.py
@@ -356,6 +421,14 @@ run python3 scripts/check_grudge_guard_witness_wiring.py --selftest
 run python3 scripts/check_grudge_guard_witness_wiring.py
 run python3 scripts/check_qg_closure_modes.py --selftest
 run python3 scripts/check_qg_closure_modes.py
+
+# --- orchestrator fleet-file helpers + liveness detectors ---
+run python3 scripts/test_orchestrator_fleet.py
+run python3 scripts/test_orchestrator_scan.py
+run python3 scripts/test_orchestrator_ping.py
+
+run python3 scripts/test_check_skill_best_practices.py
+run python3 scripts/check_skill_best_practices.py
 
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then

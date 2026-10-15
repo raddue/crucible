@@ -5,6 +5,8 @@
 
 Use this template when dispatching the structured analysis agent for a friction point. The orchestrator fills in the bracketed sections.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Task tool (general-purpose, model: sonnet):
   description: "Structured analysis for friction point [N]: [brief title]"

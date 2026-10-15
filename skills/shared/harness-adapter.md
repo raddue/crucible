@@ -30,7 +30,7 @@
 | **OpenCode** | `.opencode/commands/<name>.md`, `description`/`agent`/`subtask` frontmatter, `$ARGUMENTS` + `@file` includes | `subtask: true` command (parallel where the host model supports it) | none — BYO reference harness | **Runtime validation: non-gating follow-up #337** |
 | **Codex CLI** | prompt file in the Codex prompts dir, prompt metadata header | sequential in-context (no first-class parallel-subagent primitive) → **degradation fallback** | `@codex review` (closed product feature, optional) | Authored-to; runtime validation deferred |
 | **Cursor** | rule / command file in the Cursor commands location | sequential in-context → **degradation fallback** | Bugbot (closed, server-side, optional) | Authored-to; runtime validation deferred |
-| **Pi** | unknown / BYO | unknown → assume **degradation fallback** until probed | unknown | Unknown / BYO; not authored-against |
+| **Pi** | `~/.pi/agent/agents/<name>.md`; invoke skill by path | `subagent` + disk-mediated dispatch (`shared/dispatch-convention.md`) | none | Authored-to-spec; live validation pending |
 
 > The five mappings below are keyed by these harness names. Where a harness lacks a primitive, the
 > mapping says **which fallback** applies — never "unsupported". A skill that cannot fan out in
@@ -70,14 +70,16 @@ reviewer misses (an Opus orchestrator caught 2 Fatals in 1 round that a Sonnet o
 review tier is enforced independent of the orchestrator. This mapping records the per-role tiers and
 how each harness expresses (or degrades on) the binding.
 
-**Role → model tier (authored intent):**
+**Profile vocabulary (model-agnostic).** Skills request `high`, `standard`, `fast`, or `inherit`; each harness maps those profiles to a supported model. The current Claude Code reference aliases are `high`→`opus`, `standard`→`sonnet`, and `fast`→`haiku`. A missing first-class mapping is not a dispatch fault: omit the unsupported model/effort field, use the operator/session default, record the actual model when the harness exposes it, and continue. `shared/model-tier-policy.md` owns the canonical no-stop resolution order and trust restrictions; this mapping only records how each harness expresses the request.
 
-| Role (agent type) | Tier | Why |
+**Role → profile (authored intent; current Claude Code alias shown):**
+
+| Role (agent type) | Profile / current alias | Why |
 |---|---|---|
-| `crucible-red-team` | **opus** | Recall-critical adversarial review (every **single-model** red-team round, look-harder, Devil's Advocate, depth-calibration second reviewer, re-review). The load-bearing pin. |
-| `crucible-qg-judge` | **sonnet** | Stagnation judge — mechanical cross-round finding comparison; cheap. |
-| `crucible-qg-verifier` | **sonnet** | Fix verifier **+** persistence checker — mechanical structural checks; cheap. One def, reused. |
-| `crucible-qg-fix` | **sonnet** | Fix agent / Plan Writer (main loop, re-reviewed on single-model rounds by the Opus red-team) **+** post-pass minor quick-fix. Cheap under any orchestrator; the **main-loop** fix output is re-reviewed by the Opus red-team on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop) (#537). **Not covered:** the post-pass quick-fix; the two fix-related terminal exits (agent-declared `ARCHITECTURAL_BLOCK`; orchestrator-detected no-op → `ESCALATED`); and any escalation exit (e.g. stagnation, sustained regression, diminishing returns, the 15-round circuit breaker), where a fix that is reviewed but rejected costs gate termination, not an extra round (#528 measures a 38% iatrogenic rate under the pre-#537 `inherit` fixer (tier unrecorded in the issue)); nor is context-window overflow — #537 measured this role's per-turn `cache_read` at 145 K–196 K, the highest of any subagent class, on a bare `sonnet` pin with no `[1m]` suffix (see `check_model_pins.py`'s bracket-suffix convention), and an overflowing dispatch's disposition is undefined by the current spec — the No-Op Fix Detector (`SKILL.md:511-514`) is defined over a produced artifact and cannot fire on a missing one, and the documented crashed-dispatch handling (`:36`, `:673`) records and continues rather than escalating; this is a real gap, not merely "an extra round"; measuring actual headroom is a #539 follow-up item — on consensus-eligible rounds the reviewer tier is operator-owned (see the Consensus-mode caveat / residual (b)), so the bound holds only for single-model rounds. Round-count and calibration-distribution effects of this flip are unmeasured — #539. |
+| `crucible-red-team` | **high** (`opus`) | Recall-critical adversarial review (every **single-model** red-team round, look-harder, Devil's Advocate, depth-calibration second reviewer, re-review). The load-bearing pin. |
+| `crucible-qg-judge` | **standard** (`sonnet`) | Stagnation judge — mechanical cross-round finding comparison; cheap. |
+| `crucible-qg-verifier` | **standard** (`sonnet`) | Fix verifier **+** persistence checker — mechanical structural checks; cheap. One def, reused. |
+| `crucible-qg-fix` | **standard** (`sonnet`) | Fix agent / Plan Writer (main loop, re-reviewed on single-model rounds by the Opus red-team) **+** post-pass minor quick-fix. Cheap under any orchestrator; the **main-loop** fix output is re-reviewed by the Opus red-team on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop) (#537). **Not covered:** the post-pass quick-fix; the two fix-related terminal exits (agent-declared `ARCHITECTURAL_BLOCK`; orchestrator-detected no-op → `ESCALATED`); and any escalation exit (e.g. stagnation, sustained regression, diminishing returns, the 15-round circuit breaker), where a fix that is reviewed but rejected costs gate termination, not an extra round (#528 measures a 38% iatrogenic rate under the pre-#537 `inherit` fixer (tier unrecorded in the issue)); nor is context-window overflow — #537 measured this role's per-turn `cache_read` at 145 K–196 K, the highest of any subagent class, on a bare `sonnet` pin with no `[1m]` suffix (see `check_model_pins.py`'s bracket-suffix convention), and an overflowing dispatch's disposition is undefined by the current spec — the No-Op Fix Detector (`SKILL.md:511-514`) is defined over a produced artifact and cannot fire on a missing one, and the documented crashed-dispatch handling (`:36`, `:673`) records and continues rather than escalating; this is a real gap, not merely "an extra round"; measuring actual headroom is a #539 follow-up item — on consensus-eligible rounds the reviewer tier is operator-owned (see the Consensus-mode caveat / residual (b)), so the bound holds only for single-model rounds. Round-count and calibration-distribution effects of this flip are unmeasured — #539. |
 
 **Consensus-mode caveat.** Consensus-mode red-team rounds (quality-gate's Multi-Model Red-Team Review) resolve their model membership through the operator's `consensus_query` configuration, NOT the `crucible-red-team` pin — on those rounds the operator owns the consensus member tier. The Opus pin scopes to single-model dispatches.
 
@@ -117,9 +119,10 @@ source; to change a role's tier, edit the agent def, not the prose.
 
 | Harness | How the per-role tier is expressed | Status |
 |---|---|---|
-| **Claude Code** | `~/.claude/agents/crucible-<role>.md` with `model:` frontmatter (symlinked from `<repo>/agents/`). The agent-def `model:` binds via the precedence chain above. | **Confirmed** mechanism (docs; runtime-proven by the on-disk transcript read in the enforcement-proof note below). |
-| **OpenCode** | An `agent:` profile per role, named with the intended tier; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #337 confirms. If it cannot, OpenCode degrades to the operator-default floor below. |
-| **Codex / Cursor / Pi** | no first-class per-agent model pin | **Degradation:** model = whatever the harness runs; the recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent. |
+| **Claude Code** | `~/.claude/agents/crucible-<role>.md` with `model:` frontmatter (symlinked from `<repo>/agents/`). Current aliases: `high`→`opus`, `standard`→`sonnet`, `fast`→`haiku`. The agent-def `model:` binds via the precedence chain above. | **Confirmed** mechanism (docs; runtime-proven by the on-disk transcript read in the enforcement-proof note below). |
+| **OpenCode** | An `agent:` profile per role, named with the intended profile; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #337 confirms. If it cannot, OpenCode degrades to the operator-default floor below without stopping dispatch. |
+| **Codex / Cursor** | no first-class per-agent model pin | **Degradation:** omit the unsupported profile/model field; model = whatever the harness runs or operator configures. Record actual model when available. The recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent, never a dispatch stop. |
+| **Pi** | `subagents.agentOverrides.<role>.model` + `thinking` (profile-to-model mapping configured on the machine) | Gate-bearing roles fail closed on missing/unmapped binding or model mismatch; non-gate roles retain no-stop behavior. |
 
 **Enforcement is proven by the on-disk subagent transcript model, not a pre-dispatch intent field
 (#335 cross-link).** Two readouts must not be conflated:
@@ -146,7 +149,7 @@ Where the installed file goes. This is the only path an installer needs to write
 | OpenCode | `.opencode/commands/<name>.md` | `/<name>` |
 | Codex CLI | the Codex prompts directory (prompt file) | the harness's prompt-invocation convention |
 | Cursor | the Cursor commands / rules location | the harness's command-invocation convention |
-| Pi | unknown / BYO | unknown |
+| Pi | `agents/pi/*.md` symlinked to `~/.pi/agent/agents/` | Crucible skills remain loaded from skill paths; subagent profiles use machine-local `agentOverrides`. |
 
 > Shared engine/convention files (`shared/delve-engine.md`, `shared/severity-verdict-contract.md`,
 > `shared/dispatch-convention.md`, **this file**) are *referenced by* the skills via
@@ -165,7 +168,7 @@ harness-specific call inline** (I1); this row is where the abstract name becomes
 | OpenCode | `subtask: true` commands, one per angle | spawn the angle subtasks; the host model runs them concurrently where it can |
 | Codex CLI | **none** → Mapping 4 sequential fallback | run angles as multiple sequential passes (§5) |
 | Cursor | **none** → Mapping 4 sequential fallback | run angles as multiple sequential passes (§5) |
-| Pi | unknown → assume Mapping 4 fallback | sequential passes until a primitive is confirmed |
+| Pi | `subagent` workflow (`runs.all`) | parallel fan-out using roster roles; protocol defined in `shared/dispatch-convention.md` |
 
 **Caller vs. mechanism (design §5.1, r3fix-S5).** This adapter is the dispatch **mechanism** that
 `delve-engine` *invokes* to run its angles — it is **not** a caller of the engine. The engine's two
@@ -345,10 +348,11 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 - **Comments:** Bugbot is a closed accelerator, not a dependency; `--comment` uses the forge CLI rows,
   else paste-mode.
 
-### Pi *(unknown / BYO — not authored-against)*
-- **Where / invoked / frontmatter:** unknown until probed.
-- **Dispatch:** assume **Mapping 4 sequential passes** until a parallel primitive is confirmed.
-- **Comments:** forge CLI rows if a shell is available (unconfirmed for Pi), else paste-mode (the universal floor).
+### Pi *(authored-to-spec; live validation pending)*
+- **Where:** symlink `agents/pi/*.md` to `~/.pi/agent/agents/`; invoke Crucible skills through Pi's skill loader or by reading the skill path.
+- **Agent profiles:** machine-local `subagents.agentOverrides.<role>.{model,thinking}` binds profile to physical model. Gate-bearing roles block on missing/mismatched bindings; do not inherit or self-review.
+- **Dispatch:** `subagent` with the roster role; parallel fan-out via one `runs.all` workflow, per `shared/dispatch-convention.md`.
+- **Comments:** forge CLI rows if a shell is available, else paste-mode.
 
 > **Drift risk (design §9, R5).** This is a documented contract, not a runtime check, so it can drift
 > from a harness's actual behavior as harnesses evolve. The milestone's defense is the #335 portability

@@ -1,15 +1,10 @@
----
-name: adr
-description: Write, supersede, and maintain Architecture Decision Records (docs/decisions/) for technical choices that had real, seriously-considered alternatives and would be costly to reverse. Use on "write an ADR", "record this decision", or when recording a choice that a design or PR already settled. Matches the target repo's existing ADR convention before imposing one, and declines with a reason when a decision does not meet the bar — not for routine design docs, implementation plans, session handoffs, the pre-push/merge wrap-up itself (that belongs to `finish` / `merge-pr`), or answering "why did we choose X" from an ADR that already exists (that's a read, owned by `recall` / `recon`).
----
-
 # Architecture Decision Records
 
 Write, supersede, and maintain Architecture Decision Records. An ADR records a
 decision the user already made — why it was made, what was rejected, and what it
 costs to reverse. It is not a gate, a review, or a prompt to re-decide.
 
-**Announce at start:** "I'm using the adr skill to record a decision."
+**Announce at start:** "I'm using design's decision-record workflow to record a decision."
 
 ## Eligibility — run first, write nothing when it fails
 
@@ -128,4 +123,4 @@ alternative.
 
 **Called by:** `crucible:design` (Hook 1, writes `PROPOSED` at design time) and
 `crucible:finish` (Hook 2, promotes to / writes `ACCEPTED` before the review
-gate). Also usable standalone — `/adr` or "write an ADR".
+gate). Also usable through `/design` on "write an ADR".

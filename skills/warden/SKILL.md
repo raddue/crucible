@@ -346,7 +346,8 @@ commit):
 
 0. **Working-tree-clean precondition (inductive base — ASSERTED).** warden **asserts** a
    **clean working tree at entry** on **all** paths (`git status --porcelain` **fully
-   empty** — no tracked modifications **and no untracked files**) — the base that makes
+   empty** — no tracked modifications **and no untracked files**), except `docs/memory.md`
+   which is committed only at end-of-session and excluded from the mid-session check — the base that makes
    each per-leg residual commit capture only that leg's delta. Standalone `/warden` on a
    **dirty-or-untracked** tree **REFUSES** with an actionable
    error (`commit, stash, or clean untracked files, then re-run /warden`), matching

@@ -148,13 +148,13 @@ COVERAGE_MAP: dict[str, dict] = {
     "contract:group:inv-t20": {"kind": "bash", "carriers": [_G], "checks": 13},
     "contract:group:inv-t21": {"kind": "bash", "carriers": [_G], "checks": 45},
     "contract:hook:inv-t22": {"kind": "bash", "carriers": [_G], "checks": 19},
-    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 93},
+    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 98},
     "contract:hook:inv-t24": {"kind": "bash", "carriers": [_G], "checks": 22},
     "contract:worktree:inv-t25": {"kind": "bash", "carriers": [_G], "checks": 20},
     "contract:cli:inv-t26": {"kind": "bash", "carriers": [_G], "checks": 7},
     "contract:cli:inv-t27": {"kind": "bash", "carriers": [_G], "checks": 7},
     # issue #603: per-Stop wall-clock budget bounds the hook's attacker-chosen inputs
-    "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 8},
+    "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 20},
     # issue #608: by-files clearance must not spend the persisted block counter
     "contract:group:inv-t29": {"kind": "bash", "carriers": [_G], "checks": 23},
 }
@@ -593,6 +593,19 @@ python3 "$plugin_root/scripts/grudge_append.py" \\
 # repeatable equals-form `--files="…"` pair (DEC-5/#568, C-m) — and the R3
 # store-identity fence (DEC-4/#580): the store_root/store_key derivation block
 # and the explicit `--repo-root`/`--repo` pair, pin + fence moved together.
+# The tail of merge-pr/SKILL.md that lives OUTSIDE the Step 7.5 fence: the two
+# anti-rationalization rows rewriting the bypass advice. Named separately so
+# `_make_git_fixture` builds this half of the permitted change from the same
+# source the assertion compares against — hardcoding a second copy in the
+# fixture is what made this selftest fail on the very edit that added the rows.
+_ADDED_TAIL = [
+    '- **Fix:** Never bypass branch protection on your own initiative — see "Merging PRs (branch protection)" in the root instruction file for the one case it permits. Otherwise report the protection rule and let the user resolve it properly.',
+    '- Use `--admin` (or bypass branch protection by any other means) except under the conditions in "Merging PRs (branch protection)" in the root instruction file',
+]
+_REMOVED_TAIL = [
+    '- **Fix:** Never use `--admin` flag. Report the protection rule and let the user resolve it properly.',
+    '- Use `--admin` to bypass branch protection',
+]
 EXPECTED_ADDED_LINES = [
     "# store identity (DEC-4): the git-common-dir parent, shared across linked",
     "# worktrees — NOT this worktree's root, which would lose the record.",
@@ -604,10 +617,10 @@ EXPECTED_ADDED_LINES = [
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
     "",
-]
+] + _ADDED_TAIL
 EXPECTED_REMOVED_LINES = [
     '  --files "<comma-separated files the PR changed>" \\',
-]
+] + _REMOVED_TAIL
 
 # Command words that may precede the real command word in a simple command.
 _BASH_PREFIXES = {
@@ -975,7 +988,8 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
                  '  --files "<comma-separated files the PR changed>" \\\n'
                  '  --commit "<squash/merge SHA>" \\\n'
                  '  --why "<from PR body, if stated>"')
-    skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing.\n",
+    skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing.\n"
+                     + "\n" + "".join(line + "\n" for line in _REMOVED_TAIL),
                      encoding="utf-8")
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@example.com")
@@ -988,7 +1002,8 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
                 "(`grudge-resolution-guard.sh`) will block the session's next "
                 "Stop event until a grudge is recorded or explicitly skipped — "
                 "see `hooks/README.md`.",
-                "\n\nNon-`fix(*)` PRs record nothing.\n"])
+                "\n\nNon-`fix(*)` PRs record nothing.\n",
+                "\n" + "".join(line + "\n" for line in _ADDED_TAIL)])
     skill.write_text("".join(working), encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "add paragraph")

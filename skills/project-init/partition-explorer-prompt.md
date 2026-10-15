@@ -5,6 +5,8 @@
 
 Dispatch one Sonnet subagent per source directory partition to scan and produce a structured inventory.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: Explore, model: sonnet):
   description: "Partition exploration for [partition name]"

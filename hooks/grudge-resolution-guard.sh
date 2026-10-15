@@ -70,7 +70,11 @@ MAX_SECONDS=$(( 10#$MAX_SECONDS ))
 # being asked about arrives as an argument.
 _git() {
   local d="$1"; shift
-  env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
+  if [ "${_GIT_DIAGNOSTIC:-0}" = 1 ]; then
+    env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@"
+  else
+    env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
+  fi
 }
 
 # ── Per-Stop wall-clock budget (issue #603) ─────────────────────────────
@@ -81,8 +85,8 @@ _git() {
 # structural filter can bound wall time (362 s measured on one Stop). The one
 # input-independent bound is a wall-clock budget. Once it is spent the hook
 # gives up on the WHOLE call and degrades LOUDLY to allow (exit 0), matching
-# the never-fail-closed contract: an attacker can stall a Stop for at most
-# MAX_SECONDS, never block it. The allow is a rescan-on-next-Stop, not a
+# the never-fail-closed contract. This is cooperative, not a hard elapsed-time
+# cap on external commands or I/O. The allow is a rescan-on-next-Stop, not a
 # clearance: the checkpoint (step 16) only advances on a normal pass.
 #
 # The clock is bash's `$EPOCHREALTIME` (bash >=5) — a builtin, so a check
@@ -97,8 +101,11 @@ _budget_ok() {
     [ "$(date +%s)" -lt "$BUDGET_DEADLINE" ]
   fi
 }
+_budget_notice() {
+  echo "grudge-resolution-guard: per-Stop wall-clock budget (${MAX_SECONDS}s) reached before the candidate set was fully checked; grudge compliance was NOT enforced for every candidate (issue #603). Unprocessed candidates remain for a later Stop; already decided blocks and give-ups are reported below." >&2
+}
 _budget_out() {
-  echo "grudge-resolution-guard: per-Stop wall-clock budget (${MAX_SECONDS}s) reached before the candidate set was fully checked — allowing this Stop to bound per-invocation cost; grudge compliance was NOT enforced for every candidate (issue #603). Any unresolved fix(*) commit will be scanned again on a later Stop." >&2
+  _budget_notice
   exit 0
 }
 
@@ -313,14 +320,12 @@ done < <(jq -r '(.sha_group // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STAT
 
 _load_maps() {
   while IFS=$'\t' read -r k v; do
-    [ -n "$k" ] && SHA_GROUP["$k"]="$v"
+    _sha_key_ok "$k" && _sha_key_ok "$v" && SHA_GROUP["$k"]="$v"
   done < <(jq -r '(.sha_group // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
   while IFS=$'\t' read -r k v; do
     [ -n "$k" ] && BLOCK_COUNTS["$k"]="$v"
   done < <(jq -r '(.block_counts // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
-  # The per-sha touched-file list lives ONLY in the NUL-delimited
-  # `$STATE_DIR/<sha>.files` artifacts (§5/S-2/INV-C12) — never in the JSON.
-  _load_files
+  # Touched files are loaded only when a candidate or overlap needs them.
 }
 
 # C-o (SIEGE-R2-H6): a candidate sha used to build a bash identifier.
@@ -347,8 +352,7 @@ _sha_array_set() {
 }
 
 _sha_array_has() {
-  # 0 iff the per-sha array F_$1 is already loaded (a persisted candidate's
-  # paths were restored at hook start from its `<sha>.files` artifact).
+  # 0 iff the per-sha array F_$1 was loaded on demand from git this Stop.
   declare -n _ah="F_$1"
   local n=0
   [ "${#_ah[@]}" -gt 0 ] && n=1
@@ -357,18 +361,27 @@ _sha_array_has() {
 }
 
 _load_files() {
-  local f sha p _files=()
-  for f in "$STATE_DIR"/*.files; do
-    [ -e "$f" ] || continue
-    sha="${f##*/}"; sha="${sha%.files}"
-    _files=()
-    while IFS= read -r -d '' p; do _files+=("$p"); done < "$f"
-    # C-o: the sha from the FILENAME is validated inside the funnel before
-    # it can name an array; a crafted name (`deadbeef[$(...)].files`) is
-    # skipped, never concatenated into `declare -a "F_$sha"`.
-    _sha_array_set "$sha" "${_files[@]}"
-  done
-  return 0
+  # Re-derive ONLY the SHA needed for this candidate/overlap from git. An
+  # oversized persisted <sha>.files must not restart an eager read on every
+  # Stop before candidate scanning (#603/S4); git supplies the same raw paths.
+  local sha="$1" p tmp _files=()
+  _sha_key_ok "$sha" || return 1
+  # A finite per-commit cap avoids the same prefix exhausting the clock on
+  # every Stop. This is a loud, durable give-up, never a silent clearance.
+  tmp="$(mktemp)" || return 1
+  if ! _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$sha" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  while IFS= read -r -d '' p; do
+    _files+=("$p")
+    if [ "${#_files[@]}" -gt 4096 ]; then
+      rm -f "$tmp"
+      return 3
+    fi
+  done < "$tmp"
+  rm -f "$tmp"
+  _sha_array_set "$sha" "${_files[@]}"
 }
 
 # SIEGE-R2-H3 / S-17 shape: EVERY hook-side write to an attacker-derivable or
@@ -379,8 +392,26 @@ _load_files() {
 # write), and `timeout`'s 124 is absorbed outside — the write must never
 # affect a block/allow verdict. C-k decides the remedy from what landed.
 _write_state_files() {
-  local target="$1"; shift
-  timeout 1 bash -c 't="$1"; shift; printf "%s\0" "$@" >> "$t" || :' \
+  local target="$1" p i=0 same=1; shift
+  # Only a regular file is refreshed. A directory would swallow the temp via mv;
+  # a FIFO/symlink/other planted target stays as-is so C-k degrades the remedy.
+  if [ -L "$target" ] || { [ -e "$target" ] && [ ! -f "$target" ]; }; then
+    return 0
+  fi
+  if [ -f "$target" ]; then
+    # Builtin read only, at most $#+1 records: an unchanged artifact costs no
+    # subprocess per Stop, and a planted huge file is not read to EOF.
+    local -a want=("$@")
+    while IFS= read -r -d '' p; do
+      [ "$i" -lt "$#" ] && [ "$p" = "${want[$i]}" ] || { same=0; break; }
+      i=$((i + 1))
+    done < "$target"
+    # read fails on an unterminated tail but still fills $p: junk is not equal.
+    [ "$same" -eq 1 ] && [ "$i" -eq "$#" ] && [ -z "$p" ] && return 0
+  fi
+  # Temp + rename: stale regular-file bytes are replaced atomically.
+  timeout 1 bash -c 't="$1"; shift; tmp=$(mktemp "$t.XXXXXX") || exit 0
+    if printf "%s\0" "$@" > "$tmp"; then mv -f "$tmp" "$t"; else rm -f "$tmp"; fi' \
     _ "$target" "$@" || :
 }
 
@@ -467,16 +498,22 @@ _record_line() {
 # escape, not silently removed).
 _journal_append_group() {
   local typ="$1" nonce="$2"; shift 2
-  local m ok=1
+  local m
   APPEND_OK=1
   [ "$#" -gt 0 ] || { APPEND_OK=0; return 1; }
   for m in "$@"; do
+    if ! _budget_ok; then APPEND_OK=0; return 1; fi
     case "$typ" in
       BLOCK)  [ -n "$nonce" ] || { APPEND_OK=0; } ;;
     esac
-    _record_line "$typ" "$nonce" "$m" || ok=0
+    # Once one append fails, the batch cannot authorize a block. Do not pay
+    # another timeout for every remaining member of a FIFO/unwritable journal.
+    if ! _record_line "$typ" "$nonce" "$m"; then
+      APPEND_OK=0
+      return 1
+    fi
   done
-  APPEND_OK=$ok
+  APPEND_OK=1
 }
 
 # ── The single-pass journal read (§8: _journal_read, _journal_read_group) ─
@@ -489,10 +526,11 @@ _journal_append_group() {
 #
 # Globals after the pass (for the given names):
 #   JR_ABSENT / JR_UNMEASURABLE / JR_COUNT  — exactly one is 1
-#   JB[<sha>]  — blocks(m): BLOCK lines since the last CLEAR/GIVEUP for m
+#   JB[<sha>]  — blocks(m): BLOCK lines since the last CLEAR for m
+#   GIVEUP retires a member without erasing its block history (#582).
 #   JBLAST[<sha>] — CLEAR | GIVEUP | BLOCK | "" ("" = no record for m yet)
 _journal_pass() {
-  JR_ABSENT=0; JR_UNMEASURABLE=0; JR_COUNT=0
+  JR_ABSENT=0; JR_UNMEASURABLE=0; JR_COUNT=0; JR_BUDGET=0
   declare -g -A JB=() JBLAST=()
   # T-cc instrumentation (inert in production): one trace line per journal-file
   # pass, tagged by J_TRACE_HELD so the GROUP read can be distinguished from the
@@ -509,32 +547,43 @@ _journal_pass() {
     JR_UNMEASURABLE=1
     return 0
   fi
-  local n=0 line f1 f2 f3 f4
+  local n=0 line f1 f2 f3 f4 read_bytes=0
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
-    if [ "$n" -gt "$JOURNAL_QUARANTINE_LINES" ]; then
-      JR_UNMEASURABLE=1
+    # Check inside the scan, not just between groups. Never publish a partial
+    # retirement map on a budget stop or malformed record.
+    if ! _budget_ok; then
+      JR_BUDGET=1; JB=(); JBLAST=()
       return 0
+    fi
+    if [ "$n" -gt "$JOURNAL_QUARANTINE_LINES" ]; then
+      JR_UNMEASURABLE=1; JB=(); JBLAST=()
+      return 0
+    fi
+    read_bytes=$((read_bytes + ${#line} + 1))
+    if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+      printf "pass-work %s\\n" "$read_bytes" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
     fi
     IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
     case "$f2" in
       BLOCK)
-        case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        case "$f4" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        [ "${JBLAST[$f3]:-}" = "CLEAR" ] && JB[$f3]=0
-        [ "${JBLAST[$f3]:-}" = "GIVEUP" ] && JB[$f3]=0
+        case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; JB=(); JBLAST=(); return 0 ;; esac
+        case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; JB=(); JBLAST=(); return 0 ;; esac
+        case "$f4" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; JB=(); JBLAST=(); return 0 ;; esac
+        # #582: only CLEAR resets. GIVEUP RETIRES (JBLAST) but keeps the count,
+        # so a racing Stop's BLOCK landing after a GIVEUP reads MAX+1 and loses
+        # the ordinal race instead of re-arming the member to a fresh 1/3.
         JB[$f3]=$(( ${JB[$f3]:-0} + 1 ))
         JBLAST[$f3]=BLOCK
         ;;
       CLEAR|GIVEUP)
-        case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        JB[$f3]=0
+        case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; JB=(); JBLAST=(); return 0 ;; esac
+        case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; JB=(); JBLAST=(); return 0 ;; esac
+        [ "$f2" = "CLEAR" ] && JB[$f3]=0
         JBLAST[$f3]=$f2
         ;;
       *)
-        JR_UNMEASURABLE=1
+        JR_UNMEASURABLE=1; JB=(); JBLAST=()
         return 0
         ;;
     esac
@@ -548,6 +597,7 @@ _journal_pass() {
 _journal_read() {
   local sha="$1"
   _journal_pass "$sha"
+  if [ "$JR_BUDGET" -eq 1 ]; then echo BUDGET; return 0; fi
   if [ "$JR_UNMEASURABLE" -eq 1 ]; then echo UNMEASURABLE; return 0; fi
   if [ "$JR_ABSENT" -eq 1 ]; then echo ABSENT; return 0; fi
   echo "COUNT:${JB[$sha]:-0}"
@@ -561,6 +611,7 @@ _journal_read_group() {
   J_TRACE_HELD=group
   _journal_pass "$@"
   J_TRACE_HELD=""
+  if [ "$JR_BUDGET" -eq 1 ]; then echo BUDGET; return 0; fi
   if [ "$JR_UNMEASURABLE" -eq 1 ]; then echo UNMEASURABLE; return 0; fi
   if [ "$JR_ABSENT" -eq 1 ]; then echo ABSENT; return 0; fi
   local m mx=0
@@ -578,46 +629,51 @@ _journal_read_group() {
 # locate it), that member is UNMEASURABLE (§3.2) — echo UNMEASURABLE.
 _journal_ordinal() {
   local nonce="$1"; shift
-  local m n mx=0 found=1
-  for m in "$@"; do
-    n=$(_ordinal_of "$m" "$nonce")
-    [ -z "$n" ] && { echo UNMEASURABLE; return 0; }
-    [ "$n" -gt "$mx" ] && mx="$n"
-  done
-  echo "$mx"
-}
-
-# _ordinal_of <sha> <nonce> — per-member helper: this Stop's own position, or ""
-# when the nonce line cannot be found in the member's BLOCK history.
-_ordinal_of() {
-  local sha="$1" nonce="$2"
-  _journal_pass "$sha"
+  [ "$#" -gt 0 ] || { echo UNMEASURABLE; return 0; }
+  # #603: ONE validity pass + ONE scan for the whole group, never two full-log
+  # passes per member — member count is attacker-multiplied.
+  _journal_pass "$@"
+  if [ "$JR_BUDGET" -eq 1 ]; then echo BUDGET; return 0; fi
   if [ "$JR_UNMEASURABLE" -eq 1 ] || [ "$JR_ABSENT" -eq 1 ]; then
-    echo ""
-    return 0
+    echo UNMEASURABLE; return 0
   fi
-  # Re-scan for the exact nonce line for this member and count BLOCK lines since
-  # the last CLEAR up to and including it.
-  local line f1 f2 f3 f4 cnt=0 own=0 last=""
+  # Per member: BLOCK lines since its last CLEAR, up to and including
+  # the line carrying this Stop's own nonce (ORD, "" = nonce line not found).
+  local -A want=() cnt=() ord=()
+  local m line f1 f2 f3 f4 mx=0 rows=0 read_calls=0
+  for m in "$@"; do want["k$m"]=1; done
   while IFS= read -r line || [ -n "$line" ]; do
     IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
-    case "$f2" in
-      BLOCK)
-        [ "$f3" = "$sha" ] || continue
-        [ "$last" = "CLEAR" ] && cnt=0
-        [ "$last" = "GIVEUP" ] && cnt=0
-        cnt=$((cnt + 1))
-        last=BLOCK
-        if [ "$f4" = "$nonce" ]; then echo "$cnt"; return 0; fi
-        ;;
-      CLEAR|GIVEUP)
-        [ "$f3" = "$sha" ] || continue
-        cnt=0
-        last="$f2"
-        ;;
-    esac
-  done < "$JOURNAL_FILE"
-  echo ""
+    rows=$((rows + 1))
+    read_calls=$((read_calls + 1))
+    _budget_ok || { echo BUDGET; return 0; }
+    [ "$rows" -le "$JOURNAL_QUARANTINE_LINES" ] || { echo UNMEASURABLE; return 0; }
+    if [ -n "${want["k$f3"]:-}" ] && [ -z "${ord["k$f3"]:-}" ]; then
+      case "$f2" in
+        BLOCK)
+          cnt["k$f3"]=$(( ${cnt["k$f3"]:-0} + 1 ))
+          [ "$f4" = "$nonce" ] && ord["k$f3"]="${cnt["k$f3"]}"
+          ;;
+        CLEAR) cnt["k$f3"]=0 ;;   # GIVEUP retires, never resets (#582)
+      esac
+    fi
+  done < <(
+    # T-cc: open the journal in this scan's input producer and emit its marker
+    # only after that open succeeds. Per-member copies run producer per read.
+    exec 3< "$JOURNAL_FILE" || exit
+    if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+      printf "ordinal\n" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
+    fi
+    cat <&3
+  )
+  for m in "$@"; do
+    [ -n "${ord["k$m"]:-}" ] || { echo UNMEASURABLE; return 0; }
+    [ "${ord["k$m"]}" -gt "$mx" ] && mx="${ord["k$m"]}"
+  done
+  if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+    printf "ordinal-read-rows %s\n" "$read_calls" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
+  fi
+  echo "$mx"
 }
 
 # C-q (§3.2): the SINGLE named exception to C-a. Rename (never rewrite or
@@ -640,6 +696,7 @@ _journal_quarantine() {
 # ABSENT/UNMEASURABLE to 0).
 _display_count() {
   _journal_pass "$@"
+  if [ "$JR_BUDGET" -eq 1 ]; then echo "${BLOCK_COUNTS[$g]:-0}"; return 0; fi
   local m mx=0
   for m in "$@"; do
     [ "${JB[$m]:-0}" -gt "$mx" ] && mx="${JB[$m]:-0}"
@@ -732,7 +789,11 @@ _has_non_md() {
   return 1
 }
 
-IS_SHA=(); IS_AT=()
+IS_SHA=(); IS_AT=(); LOAD_FAILED=0
+# A capped SHA can recur while an older unresolved commit keeps the scan floor
+# behind it. Consult its durable GIVEUP once rather than re-reading all paths.
+_journal_pass
+[ "$JR_BUDGET" -eq 0 ] || _budget_out
 while IFS= read -r line; do
   # One `git diff-tree` subprocess may follow per candidate — the first of the
   # two attacker-multiplied fan-outs this budget bounds.
@@ -746,6 +807,9 @@ while IFS= read -r line; do
   case "$c_at" in ''|*[!0-9]*) continue ;; esac
   printf '%s' "$c_subj" | grep -qE '^fix[(:]' || continue
   [ "$c_at" -ge "$SEEDED_AT" ] || continue
+  if [ "${JBLAST[$c_sha]:-}" = GIVEUP ]; then
+    continue   # previously capped, durably retired with a loud note
+  fi
   if ! _sha_array_has "$c_sha"; then
     # `-z` (NUL-delimited RAW paths) is load-bearing, not a style choice.
     # Without it `diff-tree --name-only` prints git's DISPLAY form, which
@@ -760,26 +824,37 @@ while IFS= read -r line; do
     # The NUL delimiter is kept end to end, into an ARRAY. Translating it to a
     # newline first (`tr '\0' '\n'`) only swaps one impossible delimiter for
     # another: NUL is the single byte a path cannot contain, a newline is not.
-    c_paths=()
-    while IFS= read -r -d '' c_p; do
-      c_paths+=("$c_p")
-    done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha")
+    _load_files "$c_sha"
+    load_rc=$?
+    if [ "$load_rc" -eq 3 ]; then
+      # A real commit exceeding the path cap cannot be checked within a Stop.
+      # Retire it ONCE, durably and loudly; do not repeatedly budget-out before
+      # reaching later candidates. No success claim about grudge compliance.
+      if ! _record_line GIVEUP "" "$c_sha"; then
+        echo "grudge-resolution-guard: cannot record oversized candidate $c_sha; allowing Stop without checkpoint, grudge compliance NOT enforced" >&2
+        exit 0
+      fi
+      SHA_GROUP["$c_sha"]="$c_sha"
+      _witness_outcome GIVEUP "-"
+      echo "grudge-resolution-guard: candidate $c_sha has too many paths (>4096); retiring without grudge enforcement, NOT enforced. Subsequent Stops continue past it." >&2
+      continue
+    fi
+    if [ "$load_rc" -ne 0 ]; then
+      LOAD_FAILED=1
+      continue
+    fi
+    declare -n _cp="F_$c_sha"
+    c_paths=("${_cp[@]}")
+    unset -n _cp
     [ "${#c_paths[@]}" -eq 0 ] && continue
     _has_non_md "${c_paths[@]}" || continue
-    # C-o funnel: only a hex-validated sha may name an in-hook array.
-    _sha_array_set "$c_sha" "${c_paths[@]}" || continue
     # Persist the path list ONCE, byte-exact, as the NUL-delimited
     # `$STATE_DIR/<sha>.files` artifact (§5/S-2/S6) — never a delimited JSON
     # field. Bounded write (SIEGE-R2-H3): a mkfifo'd target holds the open for
     # the 1s timeout, never for the hook's own timeout ceiling. The artifact is
-    # content-addressed (sha -> path list is deterministic), so a fresh session
-    # whose `_load_files` never restored this candidate (its JSON state file is
-    # per-session) must NOT re-append a second copy — guard on existence.
-    if [ -e "$STATE_DIR/$c_sha.files" ]; then
-      :  # artifact already persisted (previous session), content is correct
-    else
-      _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
-    fi
+    # content-addressed, but the hook reads paths from git, so refresh it from
+    # the same paths: a stale artifact must not diverge from prefill (#603).
+    _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
   else
     declare -n _cf="F_$c_sha"
     _has_non_md "${_cf[@]}" || continue
@@ -787,31 +862,61 @@ while IFS= read -r line; do
   fi
   IS_SHA+=("$c_sha"); IS_AT+=("$c_at")
 done < <(printf '%s\n' "$LOG")
+if [ "$LOAD_FAILED" -eq 1 ]; then
+  echo "grudge-resolution-guard: git diff-tree failed while reading candidate paths; allowing Stop without advancing checkpoint, grudge compliance NOT enforced" >&2
+  exit 0
+fi
 
 # ── 12. Grouping / join / merge / re-arm ────────────────────────────────
 _overlap() {
   # _overlap <sha-a> <sha-b> -> 0 iff their touched-file sets share a path.
-  # Both sides are the per-sha F_<sha> argument vectors (loaded fresh or from
-  # the `.files` artifacts) — never a comma- or newline-joined string (DEC-5).
-  # A real array carries every byte a path can hold; a delimited string cannot.
-  # The step-12 grouping hotspot: called once per candidate pair (~n^2), each
-  # compare squaring the files-per-commit — the pure-CPU half of issue #603.
+  # The current SHA's F_<sha> array carries raw paths; a mapped historical
+  # SHA is checked against literal git pathspecs, not persisted .files.
+  # Called once per candidate pair (~n^2); avoid quadratic path comparison.
   # The clock is a bash builtin, so this check is arithmetic, not a subprocess.
   _budget_ok || _budget_out
-  # ponytail: the check gates the CALL, not each path pair — one candidate
-  # pair whose file lists are both enormous can run past the budget in a
-  # single call. Moving the check into the inner loop would bound even that,
-  # at the cost of an arithmetic op per string compare on the hot path; the
-  # measured 362 s case (500 candidates x 30 files) trips between calls.
+  # Linear, not Fa*Fb: the budget gates the CALL, so one call must be cheap
+  # even when both file lists are huge (a nested compare loop ran 17 s past a
+  # 1 s budget on a single 2x3000-file pair, #603). The `k` key prefix keeps
+  # every path — any byte but NUL — a valid, non-empty subscript.
   local a b
-  declare -n _aa="F_$1" _bb="F_$2"
+  local -A _seen=()
+  declare -n _aa="F_$1"
   for a in "${_aa[@]}"; do
-    [ -z "$a" ] && continue
-    for b in "${_bb[@]}"; do
-      [ "$a" = "$b" ] && { unset -n _aa _bb; return 0; }
-    done
+    [ -n "$a" ] && _seen["k$a"]=1
   done
-  unset -n _aa _bb
+  if _sha_array_has "$2"; then
+    declare -n _bb="F_$2"
+    for b in "${_bb[@]}"; do
+      [ -n "${_seen["k$b"]:-}" ] && { unset -n _aa _bb; return 0; }
+    done
+    unset -n _bb
+  else
+    # An old mapped SHA can have an enormous .files artifact. Ask git ONLY for
+    # changed paths matching this candidate's literal paths, not the whole
+    # historical list. Verify exact equality: git's literal directory pathspec
+    # also selects descendants. No persisted artifact scan before every Stop.
+    local specs=()
+    for a in "${_aa[@]}"; do
+      [ -n "$a" ] || continue
+      specs+=(":(literal)$a")
+      if [ "${#specs[@]}" -eq 128 ]; then
+        _budget_ok || _budget_out
+        while IFS= read -r -d '' b; do
+          if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
+        done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+        specs=()
+      fi
+    done
+    if [ "${#specs[@]}" -gt 0 ]; then
+      _budget_ok || _budget_out
+      while IFS= read -r -d '' b; do
+        if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
+      done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+    fi
+    _budget_ok || _budget_out
+  fi
+  unset -n _aa
   return 1
 }
 
@@ -819,9 +924,8 @@ _overlap() {
 for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
   _budget_ok || _budget_out
   n_sha="${IS_SHA[$gi]}"
-  # The per-sha array was set in filter (c) (fresh scan) or restored from its
-  # `<sha>.files` artifact at hook start; never recomputed, never cleared —
-  # the join test needs it after the SHA leaves scope.
+  # The in-scope SHA's paths were loaded from git by filter (c). Historical
+  # SHAs are queried lazily in _overlap, never read from persisted .files.
   [ -n "${SHA_GROUP[$n_sha]}" ] && continue
 
   bridged=""
@@ -1115,6 +1219,7 @@ fi
 # blocking candidate (cheap single journal pass over the candidate set, minting
 # nothing).
 _journal_pass "${IS_SHA[@]}"
+[ "$JR_BUDGET" -eq 0 ] || _budget_out
 
 declare -A GROUP_MEMBERS
 GROUP_ORDER=()
@@ -1144,7 +1249,7 @@ BLOCKING=()
 declare -A GIVEUP_SHAS
 _nonce_batch() {
   local g="$1"; shift
-  local nonce APPEND_OK ordinal
+  local nonce APPEND_OK _ordinal_result
   nonce="$(_journal_nonce)"
   if [ -z "$nonce" ]; then
     echo "grudge-resolution-guard: nonce generation failed (M-6) — journal append treated as failed; loud allow" >&2
@@ -1155,19 +1260,26 @@ _nonce_batch() {
     echo "grudge-resolution-guard: journal append failed for at least one member of group $g — an unwritable \$STATE_DIR is a bound the hook cannot honour; loud allow ($STATE_DIR)" >&2
     return 1
   fi
-  ordinal="$(_journal_ordinal "$nonce" "$@")"
-  if [ -z "$ordinal" ] || [ "$ordinal" = "UNMEASURABLE" ]; then
+  _ordinal_result="$(_journal_ordinal "$nonce" "$@")"
+  if [ "$_ordinal_result" = "BUDGET" ]; then
+    echo "grudge-resolution-guard: budget reached during ordinal arbitration — allowing; retained journal lines may over-count attempts, never authorize an unverified block" >&2
+    return 1
+  fi
+  if [ -z "$_ordinal_result" ] || [ "$_ordinal_result" = "UNMEASURABLE" ]; then
     echo "grudge-resolution-guard: could not locate this Stop's own nonce in group $g's BLOCK history — UNMEASURABLE; loud allow" >&2
     return 1
   fi
-  if [ "$ordinal" -gt "$MAX_BLOCKS" ]; then
+  if [ "$_ordinal_result" -gt "$MAX_BLOCKS" ]; then
     # §3.4: this Stop's batch lost the ordinal race (a concurrent Stop already
     # used this ordinal); its BLOCK lines are retained (C-a) and it allows.
-    echo "grudge-resolution-guard: lost the ordinal race for group $g (max $ordinal > $MAX_BLOCKS) — loud allow; retained BLOCK lines are an over-count, not a reset" >&2
+    echo "grudge-resolution-guard: lost the ordinal race for group $g (max $_ordinal_result > $MAX_BLOCKS) — loud allow; retained BLOCK lines are an over-count, not a reset" >&2
     return 1
   fi
   BLOCKING+=("$g")
-  BLOCK_COUNTS["$g"]="$(_display_count "$@")"
+  BLOCK_COUNTS["$g"]="$_ordinal_result"
+  if _budget_ok; then
+    BLOCK_COUNTS["$g"]="$(_display_count "$@")"
+  fi
   LAST_BLOCK_NONCE["$g"]="$nonce"
   _witness_outcome BLOCK "$nonce"
   return 0
@@ -1177,32 +1289,48 @@ _giveup_loud() {
   # blocks(m) >= MAX_BLOCKS this Stop; only those retire. Under-MAX co-members
   # stay in scope (FATAL-2 / §3.6 with per-member done(m)).
   local g="$1"; shift
-  local m own
+  local m reason=""
+  local -A retiring=()
+  _journal_pass "$@"
+  [ "$JR_BUDGET" -eq 1 ] && reason="budget"
+  [ "$JR_UNMEASURABLE" -eq 1 ] && reason="unmeasurable"
+  [ "$JR_ABSENT" -eq 1 ] && reason="absent"
+  if [ -n "$reason" ]; then
+    echo "grudge-resolution-guard: give-up arbitration could not read a trustworthy journal for group $g ($reason); allowing without retirement" >&2
+    return 0
+  fi
   for m in "$@"; do
-    own="$(_journal_read "$m")"
-    case "$own" in
-      COUNT:*)
-        [ "${own#COUNT:}" -ge "$MAX_BLOCKS" ] || continue
-        GIVEUP_SHAS[$m]="${own#COUNT:}" ;;
-    esac
+    [ "${JB[$m]:-0}" -ge "$MAX_BLOCKS" ] || continue
+    retiring[$m]="${JB[$m]}"
   done
-  [ "${#GIVEUP_SHAS[@]}" -gt 0 ] || return 0
-  _journal_append_group GIVEUP "" "${!GIVEUP_SHAS[@]}"
-  # Witness GIVEUP (healthy terminal event, §5b.2): the nonce of the last BLOCK
-  # line this group's give-up resolves, when one was recorded this session.
+  [ "${#retiring[@]}" -gt 0 ] || return 0
+  _journal_append_group GIVEUP "" "${!retiring[@]}"
+  if [ "$APPEND_OK" -ne 1 ]; then
+    # A partially landed batch stays on disk. No terminal witness or success
+    # message: neither implies that every selected member actually retired.
+    echo "grudge-resolution-guard: retirement incomplete (budget or write failure) for ${!retiring[*]}; zero or more GIVEUP rows may have landed, but the batch was not confirmed. Allowing Stop; unjournaled members remain in scope." >&2
+    return 0
+  fi
+  for m in "${!retiring[@]}"; do GIVEUP_SHAS[$m]="${retiring[$m]}"; done
+  # Only a fully journaled batch earns a terminal witness and retirement text.
   _witness_outcome GIVEUP "${LAST_BLOCK_NONCE[$g]:--}"
   return 0
 }
 
 QUARANTINED=0
+BUDGET_LIMITED=0
 for g in "${GROUP_ORDER[@]}"; do
-  _budget_ok || _budget_out
+  if ! _budget_ok; then
+    BUDGET_LIMITED=1
+    break   # journaled decisions must still reach their messages and exit 2
+  fi
   members="${GROUP_MEMBERS[$g]}"
   set -- $members
 
   # Timing 1: read(g) BEFORE this Stop's own append.
   grp_read="$(_journal_read_group "$@")"
   case "$grp_read" in
+    BUDGET) BUDGET_LIMITED=1; break ;;
     UNMEASURABLE)
       # §3.2 UNMEASURABLE row → loud allow. C-q: if the journal is malformed or
       # past the line ceiling, quarantine ONCE and re-arm (COUNT(0) re-nag).
@@ -1248,23 +1376,31 @@ done
 # failure is a loud allow, never a silent block; the landed lines stay (C-a).
 
 
+# Skip optional refresh/checkpoint work after a budget-limited partial pass.
+# Existing BLOCKING/GIVEUP_SHAS still reach messages below; no checkpoint moves.
+if [ "$BUDGET_LIMITED" -eq 0 ] && _budget_ok; then
 # ── 14b. Display refresh — `.block_counts` is a DISPLAY-only value (§3.1/§8):
 # the (n/3) message and the state-JSON `block_counts` are computed from the
 # journal AFTER this Stop's own appends, per group (max over members of
-# blocks(m)); it is never read back as the bound (OBS-1). Every group that
+# blocks(m), excluding retired members); never read back as the bound (OBS-1).
+# Every group that
 # still has members mapped (in-scope, blocked, cleared, or merged) is
 # refreshed, so a durable CLEAR this Stop re-reads its members as COUNT(0).
-for _g in "${!SHA_GROUP[@]}"; do
-  BLACK=(); _g_black=" "
-  for _m in "${!SHA_GROUP[@]}"; do
-    [ "${SHA_GROUP[$_m]}" = "${SHA_GROUP[$_g]}" ] || continue
-    case " $_g_black " in *" $_m "*) continue ;; esac
-    _g_black="$_g_black $_m "
-    BLACK+=("$_m")
-  done
-  [ "${#BLACK[@]}" -gt 0 ] || continue
-  BLOCK_COUNTS["${SHA_GROUP[$_g]}"]="$(_display_count "${BLACK[@]}")"
+# #603: ONE journal pass for every group (not one pass per sha, plus an
+# O(n^2) member re-collection) — this step runs after the last budget check.
+_journal_pass "${!SHA_GROUP[@]}"
+if [ "$JR_BUDGET" -eq 0 ] && [ "$JR_UNMEASURABLE" -eq 0 ]; then
+declare -A _DISP=()
+for _m in "${!SHA_GROUP[@]}"; do
+  _g="${SHA_GROUP[$_m]}"
+  _count="${JB[$_m]:-0}"
+  # A retired member retains its arbitration count, not a display contribution.
+  # Otherwise an exhausted sibling hides a fresh bridge member's (1/3).
+  case "${JBLAST[$_m]:-}" in CLEAR|GIVEUP) _count=0 ;; esac
+  [ "$_count" -gt "${_DISP[$_g]:--1}" ] && _DISP["$_g"]="$_count"
 done
+for _g in "${!_DISP[@]}"; do BLOCK_COUNTS["$_g"]="${_DISP[$_g]}"; done
+fi
 
 # ── 16. Checkpoint advance (§3.2 C-p) ────────────────────────────────────
 # last_checked_sha = parent of `git merge-base --octopus` of the in-scope set;
@@ -1275,8 +1411,8 @@ done
 # ("ROOT") when the merge-base is a parentless root. Transient (by-files)
 # clears never advance — a by-files member is ¬done and stays in scope.
 IN_SCOPE=()
+_journal_pass "${IS_SHA[@]}"   # one pass, not one per candidate (#603)
 for s in "${IS_SHA[@]}"; do
-  _journal_pass "$s"
   last_record="${JBLAST[$s]:-}"
   if [ "$last_record" != "CLEAR" ] && [ "$last_record" != "GIVEUP" ]; then
     IN_SCOPE+=("$s")
@@ -1298,6 +1434,8 @@ if [ "${#IN_SCOPE[@]}" -gt 0 ]; then
   else
     LAST_NEW="$SCAN_HEAD"
   fi
+fi
+
 fi
 
 # ── Persist state atomically (INV-C12: version + four display/checkpoint
@@ -1335,7 +1473,11 @@ _write_state() {
   } 9<"$STATE_DIR"
   return 0
 }
-_write_state
+if [ "$BUDGET_LIMITED" -eq 0 ] && _budget_ok; then
+  _write_state
+else
+  _budget_notice
+fi
 
 # ── 15. Messages ────────────────────────────────────────────────────────
 # C-k + S-17 (SIEGE-R2-H3): the printed `>> skips.log` remedy promises the
@@ -1391,6 +1533,8 @@ if [ "${#BLOCKING[@]}" -gt 0 ]; then
     REBLOCK_NOTE=" (this is a re-block after your last turn)"
   fi
   echo "grudge-resolution-guard: blocked — ${#BLOCKING[@]} unresolved fix(*) group(s):$REBLOCK_NOTE" >&2
+  SKIPS_WRITABLE=0
+  _skips_probe_ok && SKIPS_WRITABLE=1
   for g in "${BLOCKING[@]}"; do
     members="${GROUP_MEMBERS[$g]}"
     listed="$(printf '%s' "$members" | tr ' ' ',' | sed 's/,/, /g')"
@@ -1399,7 +1543,7 @@ if [ "${#BLOCKING[@]}" -gt 0 ]; then
       _prefill "$m"
     done
     set -- $members
-    if _skips_probe_ok; then
+    if [ "$SKIPS_WRITABLE" -eq 1 ]; then
       echo "    echo \"$1 <reason>\" >> \"$SKIPS_FILE\"" >&2
     fi
   done

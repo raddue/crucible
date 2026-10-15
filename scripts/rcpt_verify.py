@@ -14,6 +14,10 @@ Usage:
   rcpt_verify.py --selftest
   rcpt_verify.py --eval FILE.jsonl
 
+The installed wrapper supports receipt linting only. --selftest and --eval use
+repo-local eval/ledger-return-protocol relative to this source file; run those
+modes from the checkout, not the installed copy.
+
 --ledger PATH (Tier-2 part-3): bind each DISPATCHED TRACE line to a receipt-ledger.jsonl
 entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a receipt that
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
@@ -1278,25 +1282,52 @@ def parse_v11_sections(text):
     swallows them — the tail scan recovers them as their own post-NEXT lines).
     Returns None for an RCPT v1 header (version-dispatch: v1 skips the extension).
     Enforces presence of TRIPWIRE + SUPERSEDES and the TRIPWIRE-CHILD-required-when-
-    DISPATCHED rule; value checks live in lint_v11_local."""
+    DISPATCHED rule; value checks live in lint_v11_local.
+
+    warden-gate finding 1 (GH #567 round 2) residual — hardening the tail
+    loop below to be confusables-aware (so a hidden homoglyph'd SECOND
+    occurrence of one of these keywords WITHIN the tail trips the
+    duplicate-section `LintError`) closes a hidden claim placed anywhere
+    AFTER `NEXT`, but a keyword-shaped line hidden BEFORE `NEXT` (the
+    header, or any SECTIONS body — TRACE, WITNESS, CLAIMS, …) sits outside
+    this function's tail scan by construction and would otherwise still
+    read as `absent`, silently missing it — this is the exact shape a
+    round-1 fix's now-deleted cross-check partially covered (only when the
+    tail's own field read `"none"`) and a live regression to reopen
+    unconditionally, confirmed by this fix's own re-verification before
+    shipping. Closed below by scanning the pre-`NEXT` head for the SAME
+    three keywords with the SAME narrow, line-start-anchored confusables
+    skeleton the tail loop uses — not `_legacy_supersedes_claim`'s
+    whole-body, substring-anywhere oracle, whose over-approximation on
+    ordinary prose is what caused warden-gate finding N1 (GH #567 round 2)
+    when an earlier fix wired that oracle into this path instead."""
     if not re.match(r"^RCPT v1\.1 ", text.splitlines()[0] if text.splitlines() else ""):
         return None
     sections = parse_receipt(text)
-    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
-    tripwire = supersedes = trip_child = None
-    for line in (l for l in tail.splitlines()[1:] if l.strip()):
-        if line.startswith("TRIPWIRE-CHILD:"):
-            if trip_child is not None:
-                raise LintError("v1.1 section TRIPWIRE-CHILD duplicated")
-            trip_child = line[len("TRIPWIRE-CHILD:"):].strip()
-        elif line.startswith("TRIPWIRE:"):
-            if tripwire is not None:
-                raise LintError("v1.1 section TRIPWIRE duplicated")
-            tripwire = line[len("TRIPWIRE:"):].strip()
-        elif line.startswith("SUPERSEDES:"):
-            if supersedes is not None:
-                raise LintError("v1.1 section SUPERSEDES duplicated")
-            supersedes = line[len("SUPERSEDES:"):].strip()
+    # PR #714 review (Low 2): locate NEXT with the SAME splitlines() +
+    # startswith rule parse_receipt uses, so a NEXT after U+2028/NEL/FF cuts
+    # head/tail exactly where parse_receipt's SECTIONS end.
+    lines = text.splitlines()
+    nxt = next((i for i, l in enumerate(lines[1:], 1) if l.startswith("NEXT")), len(lines))
+    head, tail = lines[:nxt], lines[nxt + 1:]
+    for pre_line in head:
+        if any(_v11_keyword_end(pre_line, kw) is not None for kw in _V11_KEYWORDS):
+            raise LintError(
+                "v1.1 TRIPWIRE:/SUPERSEDES:/TRIPWIRE-CHILD: keyword found "
+                "before NEXT — these are Layer-2 declarations and may only "
+                "appear as their own line after NEXT")
+    found = {}
+    for line in tail:
+        for kw in _V11_KEYWORDS:
+            end = _v11_keyword_end(line, kw)
+            if end is not None:
+                if kw in found:
+                    raise LintError(f"v1.1 section {kw[:-1]} duplicated")
+                found[kw] = line[end:].strip()
+                break
+    tripwire = found.get("TRIPWIRE:")
+    supersedes = found.get("SUPERSEDES:")
+    trip_child = found.get("TRIPWIRE-CHILD:")
     if tripwire is None:
         raise LintError("v1.1 receipt missing TRIPWIRE: line (own line after NEXT)")
     if supersedes is None:
@@ -1324,34 +1355,1461 @@ def parse_v11_sections(text):
             "supersedes": supersedes, "trip_child": trip_child}
 
 
+# --- BEGIN GENERATED CONFUSABLE_MAP (scripts/gen_chain1_confusables.py) ---
+# Vendored Unicode confusables (UTS #39), restricted to the alphabet a
+# `_legacy_supersedes_claim`-shaped claim can legally contain.
+# This is a derivative extract of Unicode's confusables.txt, which
+# carries its own copyright/terms-of-use -- see the header of the
+# committed scripts/chain1_confusables_source.txt for the notice.
+# Fetched-from: https://www.unicode.org/Public/security/latest/confusables.txt
+# Version: 17.0.0
+# Date: 2025-07-22, 05:49:37 GMT
+# Source-sha256: 091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a
+# Entries: 1039
+# Archival-copy (may not exist until Unicode publishes this
+# version's own directory): https://www.unicode.org/Public/security/17.0.0/confusables.txt
+# Regenerate: python3 scripts/gen_chain1_confusables.py (reads the
+# committed scripts/chain1_confusables_source.txt -- run
+# '... --vendor' first only to pick up a newer Unicode release).
+# DO NOT HAND-EDIT this block.
+CONFUSABLE_MAP = {
+    '\xfe': 'p',  # U+00FE -> 'p'
+    '\u0131': 'i',  # U+0131 -> 'i'
+    '\u017f': 'f',  # U+017F -> 'f'
+    '\u0184': 'b',  # U+0184 -> 'b'
+    '\u0192': 'f',  # U+0192 -> 'f'
+    '\u0196': 'l',  # U+0196 -> 'l'
+    '\u01a6': 'R',  # U+01A6 -> 'R'
+    '\u01a7': '2',  # U+01A7 -> '2'
+    '\u01b7': '3',  # U+01B7 -> '3'
+    '\u01bc': '5',  # U+01BC -> '5'
+    '\u01bd': 's',  # U+01BD -> 's'
+    '\u01bf': 'p',  # U+01BF -> 'p'
+    '\u01c0': 'l',  # U+01C0 -> 'l'
+    '\u021c': '3',  # U+021C -> '3'
+    '\u0222': '8',  # U+0222 -> '8'
+    '\u0223': '8',  # U+0223 -> '8'
+    '\u0251': 'a',  # U+0251 -> 'a'
+    '\u0269': 'i',  # U+0269 -> 'i'
+    '\u026a': 'i',  # U+026A -> 'i'
+    '\u026f': 'w',  # U+026F -> 'w'
+    '\u028b': 'u',  # U+028B -> 'u'
+    '\u02d0': ':',  # U+02D0 -> ':'
+    '\u02db': 'i',  # U+02DB -> 'i'
+    '\u02f8': ':',  # U+02F8 -> ':'
+    '\u037a': 'i',  # U+037A -> 'i'
+    '\u0391': 'A',  # U+0391 -> 'A'
+    '\u0392': 'B',  # U+0392 -> 'B'
+    '\u0395': 'E',  # U+0395 -> 'E'
+    '\u0397': 'H',  # U+0397 -> 'H'
+    '\u0399': 'l',  # U+0399 -> 'l'
+    '\u039d': 'N',  # U+039D -> 'N'
+    '\u039f': 'O',  # U+039F -> 'O'
+    '\u03a1': 'P',  # U+03A1 -> 'P'
+    '\u03a4': 'T',  # U+03A4 -> 'T'
+    '\u03b1': 'a',  # U+03B1 -> 'a'
+    '\u03b9': 'i',  # U+03B9 -> 'i'
+    '\u03bf': 'o',  # U+03BF -> 'o'
+    '\u03c1': 'p',  # U+03C1 -> 'p'
+    '\u03c3': 'o',  # U+03C3 -> 'o'
+    '\u03c5': 'u',  # U+03C5 -> 'u'
+    '\u03dc': 'F',  # U+03DC -> 'F'
+    '\u03e8': '2',  # U+03E8 -> '2'
+    '\u03ec': '6',  # U+03EC -> '6'
+    '\u03ed': 'o',  # U+03ED -> 'o'
+    '\u03f1': 'p',  # U+03F1 -> 'p'
+    '\u03f2': 'c',  # U+03F2 -> 'c'
+    '\u03f8': 'p',  # U+03F8 -> 'p'
+    '\u03f9': 'C',  # U+03F9 -> 'C'
+    '\u0405': 'S',  # U+0405 -> 'S'
+    '\u0406': 'l',  # U+0406 -> 'l'
+    '\u0410': 'A',  # U+0410 -> 'A'
+    '\u0412': 'B',  # U+0412 -> 'B'
+    '\u0415': 'E',  # U+0415 -> 'E'
+    '\u0417': '3',  # U+0417 -> '3'
+    '\u041d': 'H',  # U+041D -> 'H'
+    '\u041e': 'O',  # U+041E -> 'O'
+    '\u0420': 'P',  # U+0420 -> 'P'
+    '\u0421': 'C',  # U+0421 -> 'C'
+    '\u0422': 'T',  # U+0422 -> 'T'
+    '\u042c': 'b',  # U+042C -> 'b'
+    '\u0430': 'a',  # U+0430 -> 'a'
+    '\u0431': '6',  # U+0431 -> '6'
+    '\u0433': 'r',  # U+0433 -> 'r'
+    '\u0435': 'e',  # U+0435 -> 'e'
+    '\u043e': 'o',  # U+043E -> 'o'
+    '\u0440': 'p',  # U+0440 -> 'p'
+    '\u0441': 'c',  # U+0441 -> 'c'
+    '\u0448': 'w',  # U+0448 -> 'w'
+    '\u0455': 's',  # U+0455 -> 's'
+    '\u0456': 'i',  # U+0456 -> 'i'
+    '\u0461': 'w',  # U+0461 -> 'w'
+    '\u04bb': 'h',  # U+04BB -> 'h'
+    '\u04bd': 'e',  # U+04BD -> 'e'
+    '\u04c0': 'l',  # U+04C0 -> 'l'
+    '\u04cf': 'l',  # U+04CF -> 'l'
+    '\u04e0': '3',  # U+04E0 -> '3'
+    '\u0501': 'd',  # U+0501 -> 'd'
+    '\u051c': 'W',  # U+051C -> 'W'
+    '\u051d': 'w',  # U+051D -> 'w'
+    '\u054d': 'U',  # U+054D -> 'U'
+    '\u054f': 'S',  # U+054F -> 'S'
+    '\u0555': 'O',  # U+0555 -> 'O'
+    '\u0561': 'w',  # U+0561 -> 'w'
+    '\u0570': 'h',  # U+0570 -> 'h'
+    '\u0578': 'n',  # U+0578 -> 'n'
+    '\u057c': 'n',  # U+057C -> 'n'
+    '\u057d': 'u',  # U+057D -> 'u'
+    '\u0582': 'i',  # U+0582 -> 'i'
+    '\u0584': 'f',  # U+0584 -> 'f'
+    '\u0585': 'o',  # U+0585 -> 'o'
+    '\u0589': ':',  # U+0589 -> ':'
+    '\u05c0': 'l',  # U+05C0 -> 'l'
+    '\u05c3': ':',  # U+05C3 -> ':'
+    '\u05d5': 'l',  # U+05D5 -> 'l'
+    '\u05df': 'l',  # U+05DF -> 'l'
+    '\u05e1': 'o',  # U+05E1 -> 'o'
+    '\u0627': 'l',  # U+0627 -> 'l'
+    '\u0647': 'o',  # U+0647 -> 'o'
+    '\u0661': 'l',  # U+0661 -> 'l'
+    '\u0665': 'o',  # U+0665 -> 'o'
+    '\u06be': 'o',  # U+06BE -> 'o'
+    '\u06c1': 'o',  # U+06C1 -> 'o'
+    '\u06d5': 'o',  # U+06D5 -> 'o'
+    '\u06f1': 'l',  # U+06F1 -> 'l'
+    '\u06f5': 'o',  # U+06F5 -> 'o'
+    '\u0703': ':',  # U+0703 -> ':'
+    '\u0704': ':',  # U+0704 -> ':'
+    '\u07c0': 'O',  # U+07C0 -> 'O'
+    '\u07ca': 'l',  # U+07CA -> 'l'
+    '\u0903': ':',  # U+0903 -> ':'
+    '\u0966': 'o',  # U+0966 -> 'o'
+    '\u0969': '3',  # U+0969 -> '3'
+    '\u09e6': 'o',  # U+09E6 -> 'o'
+    '\u09ea': '8',  # U+09EA -> '8'
+    '\u09ed': '9',  # U+09ED -> '9'
+    '\u0a66': 'o',  # U+0A66 -> 'o'
+    '\u0a67': '9',  # U+0A67 -> '9'
+    '\u0a6a': '8',  # U+0A6A -> '8'
+    '\u0a83': ':',  # U+0A83 -> ':'
+    '\u0ae6': 'o',  # U+0AE6 -> 'o'
+    '\u0ae9': '3',  # U+0AE9 -> '3'
+    '\u0b03': '8',  # U+0B03 -> '8'
+    '\u0b20': 'O',  # U+0B20 -> 'O'
+    '\u0b66': 'o',  # U+0B66 -> 'o'
+    '\u0b68': '9',  # U+0B68 -> '9'
+    '\u0be6': 'o',  # U+0BE6 -> 'o'
+    '\u0c02': 'o',  # U+0C02 -> 'o'
+    '\u0c66': 'o',  # U+0C66 -> 'o'
+    '\u0c82': 'o',  # U+0C82 -> 'o'
+    '\u0ce6': 'O',  # U+0CE6 -> 'O'
+    '\u0d02': 'o',  # U+0D02 -> 'o'
+    '\u0d1f': 's',  # U+0D1F -> 's'
+    '\u0d20': 'o',  # U+0D20 -> 'o'
+    '\u0d66': 'o',  # U+0D66 -> 'o'
+    '\u0d6d': '9',  # U+0D6D -> '9'
+    '\u0d82': 'o',  # U+0D82 -> 'o'
+    '\u0e50': 'o',  # U+0E50 -> 'o'
+    '\u0ed0': 'o',  # U+0ED0 -> 'o'
+    '\u1004': 'c',  # U+1004 -> 'c'
+    '\u101d': 'o',  # U+101D -> 'o'
+    '\u1040': 'o',  # U+1040 -> 'o'
+    '\u105a': 'c',  # U+105A -> 'c'
+    '\u10ff': 'o',  # U+10FF -> 'o'
+    '\u1200': 'U',  # U+1200 -> 'U'
+    '\u12d0': 'O',  # U+12D0 -> 'O'
+    '\u13a0': 'D',  # U+13A0 -> 'D'
+    '\u13a1': 'R',  # U+13A1 -> 'R'
+    '\u13a2': 'T',  # U+13A2 -> 'T'
+    '\u13a5': 'i',  # U+13A5 -> 'i'
+    '\u13aa': 'A',  # U+13AA -> 'A'
+    '\u13ac': 'E',  # U+13AC -> 'E'
+    '\u13b3': 'W',  # U+13B3 -> 'W'
+    '\u13bb': 'H',  # U+13BB -> 'H'
+    '\u13c2': 'h',  # U+13C2 -> 'h'
+    '\u13ce': '4',  # U+13CE -> '4'
+    '\u13cf': 'b',  # U+13CF -> 'b'
+    '\u13d2': 'R',  # U+13D2 -> 'R'
+    '\u13d4': 'W',  # U+13D4 -> 'W'
+    '\u13d5': 'S',  # U+13D5 -> 'S'
+    '\u13da': 'S',  # U+13DA -> 'S'
+    '\u13de': 'L',  # U+13DE -> 'L'
+    '\u13df': 'C',  # U+13DF -> 'C'
+    '\u13e2': 'P',  # U+13E2 -> 'P'
+    '\u13e7': 'd',  # U+13E7 -> 'd'
+    '\u13ee': '6',  # U+13EE -> '6'
+    '\u13f4': 'B',  # U+13F4 -> 'B'
+    '\u144c': 'U',  # U+144C -> 'U'
+    '\u146d': 'P',  # U+146D -> 'P'
+    '\u146f': 'd',  # U+146F -> 'd'
+    '\u1472': 'b',  # U+1472 -> 'b'
+    '\u14aa': 'L',  # U+14AA -> 'L'
+    '\u14bf': '2',  # U+14BF -> '2'
+    '\u157c': 'H',  # U+157C -> 'H'
+    '\u1587': 'R',  # U+1587 -> 'R'
+    '\u15af': 'b',  # U+15AF -> 'b'
+    '\u15b4': 'F',  # U+15B4 -> 'F'
+    '\u15c5': 'A',  # U+15C5 -> 'A'
+    '\u15de': 'D',  # U+15DE -> 'D'
+    '\u15ea': 'D',  # U+15EA -> 'D'
+    '\u15f7': 'B',  # U+15F7 -> 'B'
+    '\u16c1': 'l',  # U+16C1 -> 'l'
+    '\u16ec': ':',  # U+16EC -> ':'
+    '\u17e0': 'o',  # U+17E0 -> 'o'
+    '\u1803': ':',  # U+1803 -> ':'
+    '\u1809': ':',  # U+1809 -> ':'
+    '\u1d04': 'c',  # U+1D04 -> 'c'
+    '\u1d0f': 'o',  # U+1D0F -> 'o'
+    '\u1d11': 'o',  # U+1D11 -> 'o'
+    '\u1d1c': 'u',  # U+1D1C -> 'u'
+    '\u1d21': 'w',  # U+1D21 -> 'w'
+    '\u1d26': 'r',  # U+1D26 -> 'r'
+    '\u1e9d': 'f',  # U+1E9D -> 'f'
+    '\u1fbe': 'i',  # U+1FBE -> 'i'
+    '\u205a': ':',  # U+205A -> ':'
+    '\u2102': 'C',  # U+2102 -> 'C'
+    '\u210b': 'H',  # U+210B -> 'H'
+    '\u210c': 'H',  # U+210C -> 'H'
+    '\u210d': 'H',  # U+210D -> 'H'
+    '\u210e': 'h',  # U+210E -> 'h'
+    '\u2110': 'l',  # U+2110 -> 'l'
+    '\u2111': 'l',  # U+2111 -> 'l'
+    '\u2112': 'L',  # U+2112 -> 'L'
+    '\u2113': 'l',  # U+2113 -> 'l'
+    '\u2115': 'N',  # U+2115 -> 'N'
+    '\u2119': 'P',  # U+2119 -> 'P'
+    '\u211b': 'R',  # U+211B -> 'R'
+    '\u211c': 'R',  # U+211C -> 'R'
+    '\u211d': 'R',  # U+211D -> 'R'
+    '\u212c': 'B',  # U+212C -> 'B'
+    '\u212d': 'C',  # U+212D -> 'C'
+    '\u212e': 'e',  # U+212E -> 'e'
+    '\u212f': 'e',  # U+212F -> 'e'
+    '\u2130': 'E',  # U+2130 -> 'E'
+    '\u2131': 'F',  # U+2131 -> 'F'
+    '\u2134': 'o',  # U+2134 -> 'o'
+    '\u2139': 'i',  # U+2139 -> 'i'
+    '\u2145': 'D',  # U+2145 -> 'D'
+    '\u2146': 'd',  # U+2146 -> 'd'
+    '\u2147': 'e',  # U+2147 -> 'e'
+    '\u2148': 'i',  # U+2148 -> 'i'
+    '\u2160': 'l',  # U+2160 -> 'l'
+    '\u216c': 'L',  # U+216C -> 'L'
+    '\u216d': 'C',  # U+216D -> 'C'
+    '\u216e': 'D',  # U+216E -> 'D'
+    '\u2170': 'i',  # U+2170 -> 'i'
+    '\u217c': 'l',  # U+217C -> 'l'
+    '\u217d': 'c',  # U+217D -> 'c'
+    '\u217e': 'd',  # U+217E -> 'd'
+    '\u2223': 'l',  # U+2223 -> 'l'
+    '\u222a': 'U',  # U+222A -> 'U'
+    '\u2236': ':',  # U+2236 -> ':'
+    '\u22a4': 'T',  # U+22A4 -> 'T'
+    '\u22c3': 'U',  # U+22C3 -> 'U'
+    '\u22ff': 'E',  # U+22FF -> 'E'
+    '\u2373': 'i',  # U+2373 -> 'i'
+    '\u2374': 'p',  # U+2374 -> 'p'
+    '\u237a': 'a',  # U+237A -> 'a'
+    '\u23fd': 'l',  # U+23FD -> 'l'
+    '\u27d9': 'T',  # U+27D9 -> 'T'
+    '\u2c82': 'B',  # U+2C82 -> 'B'
+    '\u2c85': 'r',  # U+2C85 -> 'r'
+    '\u2c8e': 'H',  # U+2C8E -> 'H'
+    '\u2c92': 'l',  # U+2C92 -> 'l'
+    '\u2c93': 'i',  # U+2C93 -> 'i'
+    '\u2c9a': 'N',  # U+2C9A -> 'N'
+    '\u2c9c': '3',  # U+2C9C -> '3'
+    '\u2c9e': 'O',  # U+2C9E -> 'O'
+    '\u2c9f': 'o',  # U+2C9F -> 'o'
+    '\u2ca2': 'P',  # U+2CA2 -> 'P'
+    '\u2ca3': 'p',  # U+2CA3 -> 'p'
+    '\u2ca4': 'C',  # U+2CA4 -> 'C'
+    '\u2ca5': 'c',  # U+2CA5 -> 'c'
+    '\u2ca6': 'T',  # U+2CA6 -> 'T'
+    '\u2cbd': 'w',  # U+2CBD -> 'w'
+    '\u2cc4': '3',  # U+2CC4 -> '3'
+    '\u2cca': '9',  # U+2CCA -> '9'
+    '\u2ccb': '9',  # U+2CCB -> '9'
+    '\u2ccc': '3',  # U+2CCC -> '3'
+    '\u2cce': 'P',  # U+2CCE -> 'P'
+    '\u2ccf': 'p',  # U+2CCF -> 'p'
+    '\u2cd0': 'L',  # U+2CD0 -> 'L'
+    '\u2cd2': '6',  # U+2CD2 -> '6'
+    '\u2cd3': '6',  # U+2CD3 -> '6'
+    '\u2cdc': '6',  # U+2CDC -> '6'
+    '\u2d39': 'E',  # U+2D39 -> 'E'
+    '\u2d4f': 'l',  # U+2D4F -> 'l'
+    '\u2d54': 'O',  # U+2D54 -> 'O'
+    '\u3007': 'O',  # U+3007 -> 'O'
+    '\ua4d0': 'B',  # U+A4D0 -> 'B'
+    '\ua4d1': 'P',  # U+A4D1 -> 'P'
+    '\ua4d2': 'd',  # U+A4D2 -> 'd'
+    '\ua4d3': 'D',  # U+A4D3 -> 'D'
+    '\ua4d4': 'T',  # U+A4D4 -> 'T'
+    '\ua4da': 'C',  # U+A4DA -> 'C'
+    '\ua4dd': 'F',  # U+A4DD -> 'F'
+    '\ua4e0': 'N',  # U+A4E0 -> 'N'
+    '\ua4e1': 'L',  # U+A4E1 -> 'L'
+    '\ua4e2': 'S',  # U+A4E2 -> 'S'
+    '\ua4e3': 'R',  # U+A4E3 -> 'R'
+    '\ua4e7': 'H',  # U+A4E7 -> 'H'
+    '\ua4ea': 'W',  # U+A4EA -> 'W'
+    '\ua4ee': 'A',  # U+A4EE -> 'A'
+    '\ua4f0': 'E',  # U+A4F0 -> 'E'
+    '\ua4f2': 'l',  # U+A4F2 -> 'l'
+    '\ua4f3': 'O',  # U+A4F3 -> 'O'
+    '\ua4f4': 'U',  # U+A4F4 -> 'U'
+    '\ua4fd': ':',  # U+A4FD -> ':'
+    '\ua644': '2',  # U+A644 -> '2'
+    '\ua647': 'i',  # U+A647 -> 'i'
+    '\ua6ef': '2',  # U+A6EF -> '2'
+    '\ua731': 's',  # U+A731 -> 's'
+    '\ua75a': '2',  # U+A75A -> '2'
+    '\ua76a': '3',  # U+A76A -> '3'
+    '\ua76e': '9',  # U+A76E -> '9'
+    '\ua789': ':',  # U+A789 -> ':'
+    '\ua798': 'F',  # U+A798 -> 'F'
+    '\ua799': 'f',  # U+A799 -> 'f'
+    '\ua79f': 'u',  # U+A79F -> 'u'
+    '\ua7ab': '3',  # U+A7AB -> '3'
+    '\ua7b4': 'B',  # U+A7B4 -> 'B'
+    '\uab32': 'e',  # U+AB32 -> 'e'
+    '\uab35': 'f',  # U+AB35 -> 'f'
+    '\uab3d': 'o',  # U+AB3D -> 'o'
+    '\uab47': 'r',  # U+AB47 -> 'r'
+    '\uab48': 'r',  # U+AB48 -> 'r'
+    '\uab4e': 'u',  # U+AB4E -> 'u'
+    '\uab52': 'u',  # U+AB52 -> 'u'
+    '\uab75': 'i',  # U+AB75 -> 'i'
+    '\uab81': 'r',  # U+AB81 -> 'r'
+    '\uab83': 'w',  # U+AB83 -> 'w'
+    '\uabaa': 's',  # U+ABAA -> 's'
+    '\uabaf': 'c',  # U+ABAF -> 'c'
+    '\ufba6': 'o',  # U+FBA6 -> 'o'
+    '\ufba7': 'o',  # U+FBA7 -> 'o'
+    '\ufba8': 'o',  # U+FBA8 -> 'o'
+    '\ufba9': 'o',  # U+FBA9 -> 'o'
+    '\ufbaa': 'o',  # U+FBAA -> 'o'
+    '\ufbab': 'o',  # U+FBAB -> 'o'
+    '\ufbac': 'o',  # U+FBAC -> 'o'
+    '\ufbad': 'o',  # U+FBAD -> 'o'
+    '\ufe30': ':',  # U+FE30 -> ':'
+    '\ufe8d': 'l',  # U+FE8D -> 'l'
+    '\ufe8e': 'l',  # U+FE8E -> 'l'
+    '\ufee9': 'o',  # U+FEE9 -> 'o'
+    '\ufeea': 'o',  # U+FEEA -> 'o'
+    '\ufeeb': 'o',  # U+FEEB -> 'o'
+    '\ufeec': 'o',  # U+FEEC -> 'o'
+    '\uff1a': ':',  # U+FF1A -> ':'
+    '\uff21': 'A',  # U+FF21 -> 'A'
+    '\uff22': 'B',  # U+FF22 -> 'B'
+    '\uff23': 'C',  # U+FF23 -> 'C'
+    '\uff25': 'E',  # U+FF25 -> 'E'
+    '\uff28': 'H',  # U+FF28 -> 'H'
+    '\uff29': 'l',  # U+FF29 -> 'l'
+    '\uff2e': 'N',  # U+FF2E -> 'N'
+    '\uff2f': 'O',  # U+FF2F -> 'O'
+    '\uff30': 'P',  # U+FF30 -> 'P'
+    '\uff33': 'S',  # U+FF33 -> 'S'
+    '\uff34': 'T',  # U+FF34 -> 'T'
+    '\uff41': 'a',  # U+FF41 -> 'a'
+    '\uff43': 'c',  # U+FF43 -> 'c'
+    '\uff45': 'e',  # U+FF45 -> 'e'
+    '\uff48': 'h',  # U+FF48 -> 'h'
+    '\uff49': 'i',  # U+FF49 -> 'i'
+    '\uff4c': 'l',  # U+FF4C -> 'l'
+    '\uff4f': 'o',  # U+FF4F -> 'o'
+    '\uff50': 'p',  # U+FF50 -> 'p'
+    '\uff53': 's',  # U+FF53 -> 's'
+    '\uffe8': 'l',  # U+FFE8 -> 'l'
+    '\U00010282': 'B',  # U+10282 -> 'B'
+    '\U00010286': 'E',  # U+10286 -> 'E'
+    '\U00010287': 'F',  # U+10287 -> 'F'
+    '\U0001028a': 'l',  # U+1028A -> 'l'
+    '\U00010292': 'O',  # U+10292 -> 'O'
+    '\U00010295': 'P',  # U+10295 -> 'P'
+    '\U00010296': 'S',  # U+10296 -> 'S'
+    '\U00010297': 'T',  # U+10297 -> 'T'
+    '\U000102a0': 'A',  # U+102A0 -> 'A'
+    '\U000102a1': 'B',  # U+102A1 -> 'B'
+    '\U000102a2': 'C',  # U+102A2 -> 'C'
+    '\U000102a5': 'F',  # U+102A5 -> 'F'
+    '\U000102ab': 'O',  # U+102AB -> 'O'
+    '\U000102b1': 'T',  # U+102B1 -> 'T'
+    '\U000102cf': 'H',  # U+102CF -> 'H'
+    '\U00010301': 'B',  # U+10301 -> 'B'
+    '\U00010302': 'C',  # U+10302 -> 'C'
+    '\U00010309': 'l',  # U+10309 -> 'l'
+    '\U00010315': 'T',  # U+10315 -> 'T'
+    '\U0001031a': '8',  # U+1031A -> '8'
+    '\U00010320': 'l',  # U+10320 -> 'l'
+    '\U00010404': 'O',  # U+10404 -> 'O'
+    '\U00010415': 'C',  # U+10415 -> 'C'
+    '\U0001041b': 'L',  # U+1041B -> 'L'
+    '\U00010420': 'S',  # U+10420 -> 'S'
+    '\U0001042c': 'o',  # U+1042C -> 'o'
+    '\U0001043d': 'c',  # U+1043D -> 'c'
+    '\U00010448': 's',  # U+10448 -> 's'
+    '\U000104b4': 'R',  # U+104B4 -> 'R'
+    '\U000104c2': 'O',  # U+104C2 -> 'O'
+    '\U000104ce': 'U',  # U+104CE -> 'U'
+    '\U000104d2': '7',  # U+104D2 -> '7'
+    '\U000104ea': 'o',  # U+104EA -> 'o'
+    '\U000104f6': 'u',  # U+104F6 -> 'u'
+    '\U00010513': 'N',  # U+10513 -> 'N'
+    '\U00010516': 'O',  # U+10516 -> 'O'
+    '\U0001051c': 'C',  # U+1051C -> 'C'
+    '\U00010525': 'F',  # U+10525 -> 'F'
+    '\U00010526': 'L',  # U+10526 -> 'L'
+    '\U000114d0': 'o',  # U+114D0 -> 'o'
+    '\U0001170a': 'w',  # U+1170A -> 'w'
+    '\U0001170e': 'w',  # U+1170E -> 'w'
+    '\U0001170f': 'w',  # U+1170F -> 'w'
+    '\U000118a2': 'F',  # U+118A2 -> 'F'
+    '\U000118a3': 'L',  # U+118A3 -> 'L'
+    '\U000118a6': 'E',  # U+118A6 -> 'E'
+    '\U000118ac': '9',  # U+118AC -> '9'
+    '\U000118ae': 'E',  # U+118AE -> 'E'
+    '\U000118af': '4',  # U+118AF -> '4'
+    '\U000118b2': 'L',  # U+118B2 -> 'L'
+    '\U000118b5': 'O',  # U+118B5 -> 'O'
+    '\U000118b8': 'U',  # U+118B8 -> 'U'
+    '\U000118bb': '5',  # U+118BB -> '5'
+    '\U000118bc': 'T',  # U+118BC -> 'T'
+    '\U000118c1': 's',  # U+118C1 -> 's'
+    '\U000118c2': 'F',  # U+118C2 -> 'F'
+    '\U000118c3': 'i',  # U+118C3 -> 'i'
+    '\U000118c6': '7',  # U+118C6 -> '7'
+    '\U000118c8': 'o',  # U+118C8 -> 'o'
+    '\U000118ca': '3',  # U+118CA -> '3'
+    '\U000118cc': '9',  # U+118CC -> '9'
+    '\U000118d5': '6',  # U+118D5 -> '6'
+    '\U000118d6': '9',  # U+118D6 -> '9'
+    '\U000118d7': 'o',  # U+118D7 -> 'o'
+    '\U000118d8': 'u',  # U+118D8 -> 'u'
+    '\U000118e0': 'O',  # U+118E0 -> 'O'
+    '\U000118e6': 'W',  # U+118E6 -> 'W'
+    '\U000118e9': 'C',  # U+118E9 -> 'C'
+    '\U000118ef': 'W',  # U+118EF -> 'W'
+    '\U000118f2': 'C',  # U+118F2 -> 'C'
+    '\U00011dd9': ':',  # U+11DD9 -> ':'
+    '\U00011dda': 'l',  # U+11DDA -> 'l'
+    '\U00011de0': 'O',  # U+11DE0 -> 'O'
+    '\U00011de1': 'l',  # U+11DE1 -> 'l'
+    '\U00016eaa': 'l',  # U+16EAA -> 'l'
+    '\U00016eb6': 'b',  # U+16EB6 -> 'b'
+    '\U00016f0a': 'T',  # U+16F0A -> 'T'
+    '\U00016f16': 'L',  # U+16F16 -> 'L'
+    '\U00016f28': 'l',  # U+16F28 -> 'l'
+    '\U00016f35': 'R',  # U+16F35 -> 'R'
+    '\U00016f3a': 'S',  # U+16F3A -> 'S'
+    '\U00016f3b': '3',  # U+16F3B -> '3'
+    '\U00016f40': 'A',  # U+16F40 -> 'A'
+    '\U00016f42': 'U',  # U+16F42 -> 'U'
+    '\U0001ccd6': 'A',  # U+1CCD6 -> 'A'
+    '\U0001ccd7': 'B',  # U+1CCD7 -> 'B'
+    '\U0001ccd8': 'C',  # U+1CCD8 -> 'C'
+    '\U0001ccd9': 'D',  # U+1CCD9 -> 'D'
+    '\U0001ccda': 'E',  # U+1CCDA -> 'E'
+    '\U0001ccdb': 'F',  # U+1CCDB -> 'F'
+    '\U0001ccdd': 'H',  # U+1CCDD -> 'H'
+    '\U0001ccde': 'l',  # U+1CCDE -> 'l'
+    '\U0001cce1': 'L',  # U+1CCE1 -> 'L'
+    '\U0001cce3': 'N',  # U+1CCE3 -> 'N'
+    '\U0001cce4': 'O',  # U+1CCE4 -> 'O'
+    '\U0001cce5': 'P',  # U+1CCE5 -> 'P'
+    '\U0001cce7': 'R',  # U+1CCE7 -> 'R'
+    '\U0001cce8': 'S',  # U+1CCE8 -> 'S'
+    '\U0001cce9': 'T',  # U+1CCE9 -> 'T'
+    '\U0001ccea': 'U',  # U+1CCEA -> 'U'
+    '\U0001ccec': 'W',  # U+1CCEC -> 'W'
+    '\U0001ccf0': 'O',  # U+1CCF0 -> 'O'
+    '\U0001ccf1': 'l',  # U+1CCF1 -> 'l'
+    '\U0001ccf2': '2',  # U+1CCF2 -> '2'
+    '\U0001ccf3': '3',  # U+1CCF3 -> '3'
+    '\U0001ccf4': '4',  # U+1CCF4 -> '4'
+    '\U0001ccf5': '5',  # U+1CCF5 -> '5'
+    '\U0001ccf6': '6',  # U+1CCF6 -> '6'
+    '\U0001ccf7': '7',  # U+1CCF7 -> '7'
+    '\U0001ccf8': '8',  # U+1CCF8 -> '8'
+    '\U0001ccf9': '9',  # U+1CCF9 -> '9'
+    '\U0001d206': '3',  # U+1D206 -> '3'
+    '\U0001d212': '7',  # U+1D212 -> '7'
+    '\U0001d213': 'F',  # U+1D213 -> 'F'
+    '\U0001d216': 'R',  # U+1D216 -> 'R'
+    '\U0001d22a': 'L',  # U+1D22A -> 'L'
+    '\U0001d400': 'A',  # U+1D400 -> 'A'
+    '\U0001d401': 'B',  # U+1D401 -> 'B'
+    '\U0001d402': 'C',  # U+1D402 -> 'C'
+    '\U0001d403': 'D',  # U+1D403 -> 'D'
+    '\U0001d404': 'E',  # U+1D404 -> 'E'
+    '\U0001d405': 'F',  # U+1D405 -> 'F'
+    '\U0001d407': 'H',  # U+1D407 -> 'H'
+    '\U0001d408': 'l',  # U+1D408 -> 'l'
+    '\U0001d40b': 'L',  # U+1D40B -> 'L'
+    '\U0001d40d': 'N',  # U+1D40D -> 'N'
+    '\U0001d40e': 'O',  # U+1D40E -> 'O'
+    '\U0001d40f': 'P',  # U+1D40F -> 'P'
+    '\U0001d411': 'R',  # U+1D411 -> 'R'
+    '\U0001d412': 'S',  # U+1D412 -> 'S'
+    '\U0001d413': 'T',  # U+1D413 -> 'T'
+    '\U0001d414': 'U',  # U+1D414 -> 'U'
+    '\U0001d416': 'W',  # U+1D416 -> 'W'
+    '\U0001d41a': 'a',  # U+1D41A -> 'a'
+    '\U0001d41b': 'b',  # U+1D41B -> 'b'
+    '\U0001d41c': 'c',  # U+1D41C -> 'c'
+    '\U0001d41d': 'd',  # U+1D41D -> 'd'
+    '\U0001d41e': 'e',  # U+1D41E -> 'e'
+    '\U0001d41f': 'f',  # U+1D41F -> 'f'
+    '\U0001d421': 'h',  # U+1D421 -> 'h'
+    '\U0001d422': 'i',  # U+1D422 -> 'i'
+    '\U0001d425': 'l',  # U+1D425 -> 'l'
+    '\U0001d427': 'n',  # U+1D427 -> 'n'
+    '\U0001d428': 'o',  # U+1D428 -> 'o'
+    '\U0001d429': 'p',  # U+1D429 -> 'p'
+    '\U0001d42b': 'r',  # U+1D42B -> 'r'
+    '\U0001d42c': 's',  # U+1D42C -> 's'
+    '\U0001d42d': 't',  # U+1D42D -> 't'
+    '\U0001d42e': 'u',  # U+1D42E -> 'u'
+    '\U0001d430': 'w',  # U+1D430 -> 'w'
+    '\U0001d434': 'A',  # U+1D434 -> 'A'
+    '\U0001d435': 'B',  # U+1D435 -> 'B'
+    '\U0001d436': 'C',  # U+1D436 -> 'C'
+    '\U0001d437': 'D',  # U+1D437 -> 'D'
+    '\U0001d438': 'E',  # U+1D438 -> 'E'
+    '\U0001d439': 'F',  # U+1D439 -> 'F'
+    '\U0001d43b': 'H',  # U+1D43B -> 'H'
+    '\U0001d43c': 'l',  # U+1D43C -> 'l'
+    '\U0001d43f': 'L',  # U+1D43F -> 'L'
+    '\U0001d441': 'N',  # U+1D441 -> 'N'
+    '\U0001d442': 'O',  # U+1D442 -> 'O'
+    '\U0001d443': 'P',  # U+1D443 -> 'P'
+    '\U0001d445': 'R',  # U+1D445 -> 'R'
+    '\U0001d446': 'S',  # U+1D446 -> 'S'
+    '\U0001d447': 'T',  # U+1D447 -> 'T'
+    '\U0001d448': 'U',  # U+1D448 -> 'U'
+    '\U0001d44a': 'W',  # U+1D44A -> 'W'
+    '\U0001d44e': 'a',  # U+1D44E -> 'a'
+    '\U0001d44f': 'b',  # U+1D44F -> 'b'
+    '\U0001d450': 'c',  # U+1D450 -> 'c'
+    '\U0001d451': 'd',  # U+1D451 -> 'd'
+    '\U0001d452': 'e',  # U+1D452 -> 'e'
+    '\U0001d453': 'f',  # U+1D453 -> 'f'
+    '\U0001d456': 'i',  # U+1D456 -> 'i'
+    '\U0001d459': 'l',  # U+1D459 -> 'l'
+    '\U0001d45b': 'n',  # U+1D45B -> 'n'
+    '\U0001d45c': 'o',  # U+1D45C -> 'o'
+    '\U0001d45d': 'p',  # U+1D45D -> 'p'
+    '\U0001d45f': 'r',  # U+1D45F -> 'r'
+    '\U0001d460': 's',  # U+1D460 -> 's'
+    '\U0001d461': 't',  # U+1D461 -> 't'
+    '\U0001d462': 'u',  # U+1D462 -> 'u'
+    '\U0001d464': 'w',  # U+1D464 -> 'w'
+    '\U0001d468': 'A',  # U+1D468 -> 'A'
+    '\U0001d469': 'B',  # U+1D469 -> 'B'
+    '\U0001d46a': 'C',  # U+1D46A -> 'C'
+    '\U0001d46b': 'D',  # U+1D46B -> 'D'
+    '\U0001d46c': 'E',  # U+1D46C -> 'E'
+    '\U0001d46d': 'F',  # U+1D46D -> 'F'
+    '\U0001d46f': 'H',  # U+1D46F -> 'H'
+    '\U0001d470': 'l',  # U+1D470 -> 'l'
+    '\U0001d473': 'L',  # U+1D473 -> 'L'
+    '\U0001d475': 'N',  # U+1D475 -> 'N'
+    '\U0001d476': 'O',  # U+1D476 -> 'O'
+    '\U0001d477': 'P',  # U+1D477 -> 'P'
+    '\U0001d479': 'R',  # U+1D479 -> 'R'
+    '\U0001d47a': 'S',  # U+1D47A -> 'S'
+    '\U0001d47b': 'T',  # U+1D47B -> 'T'
+    '\U0001d47c': 'U',  # U+1D47C -> 'U'
+    '\U0001d47e': 'W',  # U+1D47E -> 'W'
+    '\U0001d482': 'a',  # U+1D482 -> 'a'
+    '\U0001d483': 'b',  # U+1D483 -> 'b'
+    '\U0001d484': 'c',  # U+1D484 -> 'c'
+    '\U0001d485': 'd',  # U+1D485 -> 'd'
+    '\U0001d486': 'e',  # U+1D486 -> 'e'
+    '\U0001d487': 'f',  # U+1D487 -> 'f'
+    '\U0001d489': 'h',  # U+1D489 -> 'h'
+    '\U0001d48a': 'i',  # U+1D48A -> 'i'
+    '\U0001d48d': 'l',  # U+1D48D -> 'l'
+    '\U0001d48f': 'n',  # U+1D48F -> 'n'
+    '\U0001d490': 'o',  # U+1D490 -> 'o'
+    '\U0001d491': 'p',  # U+1D491 -> 'p'
+    '\U0001d493': 'r',  # U+1D493 -> 'r'
+    '\U0001d494': 's',  # U+1D494 -> 's'
+    '\U0001d495': 't',  # U+1D495 -> 't'
+    '\U0001d496': 'u',  # U+1D496 -> 'u'
+    '\U0001d498': 'w',  # U+1D498 -> 'w'
+    '\U0001d49c': 'A',  # U+1D49C -> 'A'
+    '\U0001d49e': 'C',  # U+1D49E -> 'C'
+    '\U0001d49f': 'D',  # U+1D49F -> 'D'
+    '\U0001d4a9': 'N',  # U+1D4A9 -> 'N'
+    '\U0001d4aa': 'O',  # U+1D4AA -> 'O'
+    '\U0001d4ab': 'P',  # U+1D4AB -> 'P'
+    '\U0001d4ae': 'S',  # U+1D4AE -> 'S'
+    '\U0001d4af': 'T',  # U+1D4AF -> 'T'
+    '\U0001d4b0': 'U',  # U+1D4B0 -> 'U'
+    '\U0001d4b2': 'W',  # U+1D4B2 -> 'W'
+    '\U0001d4b6': 'a',  # U+1D4B6 -> 'a'
+    '\U0001d4b7': 'b',  # U+1D4B7 -> 'b'
+    '\U0001d4b8': 'c',  # U+1D4B8 -> 'c'
+    '\U0001d4b9': 'd',  # U+1D4B9 -> 'd'
+    '\U0001d4bb': 'f',  # U+1D4BB -> 'f'
+    '\U0001d4bd': 'h',  # U+1D4BD -> 'h'
+    '\U0001d4be': 'i',  # U+1D4BE -> 'i'
+    '\U0001d4c1': 'l',  # U+1D4C1 -> 'l'
+    '\U0001d4c3': 'n',  # U+1D4C3 -> 'n'
+    '\U0001d4c5': 'p',  # U+1D4C5 -> 'p'
+    '\U0001d4c7': 'r',  # U+1D4C7 -> 'r'
+    '\U0001d4c8': 's',  # U+1D4C8 -> 's'
+    '\U0001d4c9': 't',  # U+1D4C9 -> 't'
+    '\U0001d4ca': 'u',  # U+1D4CA -> 'u'
+    '\U0001d4cc': 'w',  # U+1D4CC -> 'w'
+    '\U0001d4d0': 'A',  # U+1D4D0 -> 'A'
+    '\U0001d4d1': 'B',  # U+1D4D1 -> 'B'
+    '\U0001d4d2': 'C',  # U+1D4D2 -> 'C'
+    '\U0001d4d3': 'D',  # U+1D4D3 -> 'D'
+    '\U0001d4d4': 'E',  # U+1D4D4 -> 'E'
+    '\U0001d4d5': 'F',  # U+1D4D5 -> 'F'
+    '\U0001d4d7': 'H',  # U+1D4D7 -> 'H'
+    '\U0001d4d8': 'l',  # U+1D4D8 -> 'l'
+    '\U0001d4db': 'L',  # U+1D4DB -> 'L'
+    '\U0001d4dd': 'N',  # U+1D4DD -> 'N'
+    '\U0001d4de': 'O',  # U+1D4DE -> 'O'
+    '\U0001d4df': 'P',  # U+1D4DF -> 'P'
+    '\U0001d4e1': 'R',  # U+1D4E1 -> 'R'
+    '\U0001d4e2': 'S',  # U+1D4E2 -> 'S'
+    '\U0001d4e3': 'T',  # U+1D4E3 -> 'T'
+    '\U0001d4e4': 'U',  # U+1D4E4 -> 'U'
+    '\U0001d4e6': 'W',  # U+1D4E6 -> 'W'
+    '\U0001d4ea': 'a',  # U+1D4EA -> 'a'
+    '\U0001d4eb': 'b',  # U+1D4EB -> 'b'
+    '\U0001d4ec': 'c',  # U+1D4EC -> 'c'
+    '\U0001d4ed': 'd',  # U+1D4ED -> 'd'
+    '\U0001d4ee': 'e',  # U+1D4EE -> 'e'
+    '\U0001d4ef': 'f',  # U+1D4EF -> 'f'
+    '\U0001d4f1': 'h',  # U+1D4F1 -> 'h'
+    '\U0001d4f2': 'i',  # U+1D4F2 -> 'i'
+    '\U0001d4f5': 'l',  # U+1D4F5 -> 'l'
+    '\U0001d4f7': 'n',  # U+1D4F7 -> 'n'
+    '\U0001d4f8': 'o',  # U+1D4F8 -> 'o'
+    '\U0001d4f9': 'p',  # U+1D4F9 -> 'p'
+    '\U0001d4fb': 'r',  # U+1D4FB -> 'r'
+    '\U0001d4fc': 's',  # U+1D4FC -> 's'
+    '\U0001d4fd': 't',  # U+1D4FD -> 't'
+    '\U0001d4fe': 'u',  # U+1D4FE -> 'u'
+    '\U0001d500': 'w',  # U+1D500 -> 'w'
+    '\U0001d504': 'A',  # U+1D504 -> 'A'
+    '\U0001d505': 'B',  # U+1D505 -> 'B'
+    '\U0001d507': 'D',  # U+1D507 -> 'D'
+    '\U0001d508': 'E',  # U+1D508 -> 'E'
+    '\U0001d509': 'F',  # U+1D509 -> 'F'
+    '\U0001d50f': 'L',  # U+1D50F -> 'L'
+    '\U0001d511': 'N',  # U+1D511 -> 'N'
+    '\U0001d512': 'O',  # U+1D512 -> 'O'
+    '\U0001d513': 'P',  # U+1D513 -> 'P'
+    '\U0001d516': 'S',  # U+1D516 -> 'S'
+    '\U0001d517': 'T',  # U+1D517 -> 'T'
+    '\U0001d518': 'U',  # U+1D518 -> 'U'
+    '\U0001d51a': 'W',  # U+1D51A -> 'W'
+    '\U0001d51e': 'a',  # U+1D51E -> 'a'
+    '\U0001d51f': 'b',  # U+1D51F -> 'b'
+    '\U0001d520': 'c',  # U+1D520 -> 'c'
+    '\U0001d521': 'd',  # U+1D521 -> 'd'
+    '\U0001d522': 'e',  # U+1D522 -> 'e'
+    '\U0001d523': 'f',  # U+1D523 -> 'f'
+    '\U0001d525': 'h',  # U+1D525 -> 'h'
+    '\U0001d526': 'i',  # U+1D526 -> 'i'
+    '\U0001d529': 'l',  # U+1D529 -> 'l'
+    '\U0001d52b': 'n',  # U+1D52B -> 'n'
+    '\U0001d52c': 'o',  # U+1D52C -> 'o'
+    '\U0001d52d': 'p',  # U+1D52D -> 'p'
+    '\U0001d52f': 'r',  # U+1D52F -> 'r'
+    '\U0001d530': 's',  # U+1D530 -> 's'
+    '\U0001d531': 't',  # U+1D531 -> 't'
+    '\U0001d532': 'u',  # U+1D532 -> 'u'
+    '\U0001d534': 'w',  # U+1D534 -> 'w'
+    '\U0001d538': 'A',  # U+1D538 -> 'A'
+    '\U0001d539': 'B',  # U+1D539 -> 'B'
+    '\U0001d53b': 'D',  # U+1D53B -> 'D'
+    '\U0001d53c': 'E',  # U+1D53C -> 'E'
+    '\U0001d53d': 'F',  # U+1D53D -> 'F'
+    '\U0001d540': 'l',  # U+1D540 -> 'l'
+    '\U0001d543': 'L',  # U+1D543 -> 'L'
+    '\U0001d546': 'O',  # U+1D546 -> 'O'
+    '\U0001d54a': 'S',  # U+1D54A -> 'S'
+    '\U0001d54b': 'T',  # U+1D54B -> 'T'
+    '\U0001d54c': 'U',  # U+1D54C -> 'U'
+    '\U0001d54e': 'W',  # U+1D54E -> 'W'
+    '\U0001d552': 'a',  # U+1D552 -> 'a'
+    '\U0001d553': 'b',  # U+1D553 -> 'b'
+    '\U0001d554': 'c',  # U+1D554 -> 'c'
+    '\U0001d555': 'd',  # U+1D555 -> 'd'
+    '\U0001d556': 'e',  # U+1D556 -> 'e'
+    '\U0001d557': 'f',  # U+1D557 -> 'f'
+    '\U0001d559': 'h',  # U+1D559 -> 'h'
+    '\U0001d55a': 'i',  # U+1D55A -> 'i'
+    '\U0001d55d': 'l',  # U+1D55D -> 'l'
+    '\U0001d55f': 'n',  # U+1D55F -> 'n'
+    '\U0001d560': 'o',  # U+1D560 -> 'o'
+    '\U0001d561': 'p',  # U+1D561 -> 'p'
+    '\U0001d563': 'r',  # U+1D563 -> 'r'
+    '\U0001d564': 's',  # U+1D564 -> 's'
+    '\U0001d565': 't',  # U+1D565 -> 't'
+    '\U0001d566': 'u',  # U+1D566 -> 'u'
+    '\U0001d568': 'w',  # U+1D568 -> 'w'
+    '\U0001d56c': 'A',  # U+1D56C -> 'A'
+    '\U0001d56d': 'B',  # U+1D56D -> 'B'
+    '\U0001d56e': 'C',  # U+1D56E -> 'C'
+    '\U0001d56f': 'D',  # U+1D56F -> 'D'
+    '\U0001d570': 'E',  # U+1D570 -> 'E'
+    '\U0001d571': 'F',  # U+1D571 -> 'F'
+    '\U0001d573': 'H',  # U+1D573 -> 'H'
+    '\U0001d574': 'l',  # U+1D574 -> 'l'
+    '\U0001d577': 'L',  # U+1D577 -> 'L'
+    '\U0001d579': 'N',  # U+1D579 -> 'N'
+    '\U0001d57a': 'O',  # U+1D57A -> 'O'
+    '\U0001d57b': 'P',  # U+1D57B -> 'P'
+    '\U0001d57d': 'R',  # U+1D57D -> 'R'
+    '\U0001d57e': 'S',  # U+1D57E -> 'S'
+    '\U0001d57f': 'T',  # U+1D57F -> 'T'
+    '\U0001d580': 'U',  # U+1D580 -> 'U'
+    '\U0001d582': 'W',  # U+1D582 -> 'W'
+    '\U0001d586': 'a',  # U+1D586 -> 'a'
+    '\U0001d587': 'b',  # U+1D587 -> 'b'
+    '\U0001d588': 'c',  # U+1D588 -> 'c'
+    '\U0001d589': 'd',  # U+1D589 -> 'd'
+    '\U0001d58a': 'e',  # U+1D58A -> 'e'
+    '\U0001d58b': 'f',  # U+1D58B -> 'f'
+    '\U0001d58d': 'h',  # U+1D58D -> 'h'
+    '\U0001d58e': 'i',  # U+1D58E -> 'i'
+    '\U0001d591': 'l',  # U+1D591 -> 'l'
+    '\U0001d593': 'n',  # U+1D593 -> 'n'
+    '\U0001d594': 'o',  # U+1D594 -> 'o'
+    '\U0001d595': 'p',  # U+1D595 -> 'p'
+    '\U0001d597': 'r',  # U+1D597 -> 'r'
+    '\U0001d598': 's',  # U+1D598 -> 's'
+    '\U0001d599': 't',  # U+1D599 -> 't'
+    '\U0001d59a': 'u',  # U+1D59A -> 'u'
+    '\U0001d59c': 'w',  # U+1D59C -> 'w'
+    '\U0001d5a0': 'A',  # U+1D5A0 -> 'A'
+    '\U0001d5a1': 'B',  # U+1D5A1 -> 'B'
+    '\U0001d5a2': 'C',  # U+1D5A2 -> 'C'
+    '\U0001d5a3': 'D',  # U+1D5A3 -> 'D'
+    '\U0001d5a4': 'E',  # U+1D5A4 -> 'E'
+    '\U0001d5a5': 'F',  # U+1D5A5 -> 'F'
+    '\U0001d5a7': 'H',  # U+1D5A7 -> 'H'
+    '\U0001d5a8': 'l',  # U+1D5A8 -> 'l'
+    '\U0001d5ab': 'L',  # U+1D5AB -> 'L'
+    '\U0001d5ad': 'N',  # U+1D5AD -> 'N'
+    '\U0001d5ae': 'O',  # U+1D5AE -> 'O'
+    '\U0001d5af': 'P',  # U+1D5AF -> 'P'
+    '\U0001d5b1': 'R',  # U+1D5B1 -> 'R'
+    '\U0001d5b2': 'S',  # U+1D5B2 -> 'S'
+    '\U0001d5b3': 'T',  # U+1D5B3 -> 'T'
+    '\U0001d5b4': 'U',  # U+1D5B4 -> 'U'
+    '\U0001d5b6': 'W',  # U+1D5B6 -> 'W'
+    '\U0001d5ba': 'a',  # U+1D5BA -> 'a'
+    '\U0001d5bb': 'b',  # U+1D5BB -> 'b'
+    '\U0001d5bc': 'c',  # U+1D5BC -> 'c'
+    '\U0001d5bd': 'd',  # U+1D5BD -> 'd'
+    '\U0001d5be': 'e',  # U+1D5BE -> 'e'
+    '\U0001d5bf': 'f',  # U+1D5BF -> 'f'
+    '\U0001d5c1': 'h',  # U+1D5C1 -> 'h'
+    '\U0001d5c2': 'i',  # U+1D5C2 -> 'i'
+    '\U0001d5c5': 'l',  # U+1D5C5 -> 'l'
+    '\U0001d5c7': 'n',  # U+1D5C7 -> 'n'
+    '\U0001d5c8': 'o',  # U+1D5C8 -> 'o'
+    '\U0001d5c9': 'p',  # U+1D5C9 -> 'p'
+    '\U0001d5cb': 'r',  # U+1D5CB -> 'r'
+    '\U0001d5cc': 's',  # U+1D5CC -> 's'
+    '\U0001d5cd': 't',  # U+1D5CD -> 't'
+    '\U0001d5ce': 'u',  # U+1D5CE -> 'u'
+    '\U0001d5d0': 'w',  # U+1D5D0 -> 'w'
+    '\U0001d5d4': 'A',  # U+1D5D4 -> 'A'
+    '\U0001d5d5': 'B',  # U+1D5D5 -> 'B'
+    '\U0001d5d6': 'C',  # U+1D5D6 -> 'C'
+    '\U0001d5d7': 'D',  # U+1D5D7 -> 'D'
+    '\U0001d5d8': 'E',  # U+1D5D8 -> 'E'
+    '\U0001d5d9': 'F',  # U+1D5D9 -> 'F'
+    '\U0001d5db': 'H',  # U+1D5DB -> 'H'
+    '\U0001d5dc': 'l',  # U+1D5DC -> 'l'
+    '\U0001d5df': 'L',  # U+1D5DF -> 'L'
+    '\U0001d5e1': 'N',  # U+1D5E1 -> 'N'
+    '\U0001d5e2': 'O',  # U+1D5E2 -> 'O'
+    '\U0001d5e3': 'P',  # U+1D5E3 -> 'P'
+    '\U0001d5e5': 'R',  # U+1D5E5 -> 'R'
+    '\U0001d5e6': 'S',  # U+1D5E6 -> 'S'
+    '\U0001d5e7': 'T',  # U+1D5E7 -> 'T'
+    '\U0001d5e8': 'U',  # U+1D5E8 -> 'U'
+    '\U0001d5ea': 'W',  # U+1D5EA -> 'W'
+    '\U0001d5ee': 'a',  # U+1D5EE -> 'a'
+    '\U0001d5ef': 'b',  # U+1D5EF -> 'b'
+    '\U0001d5f0': 'c',  # U+1D5F0 -> 'c'
+    '\U0001d5f1': 'd',  # U+1D5F1 -> 'd'
+    '\U0001d5f2': 'e',  # U+1D5F2 -> 'e'
+    '\U0001d5f3': 'f',  # U+1D5F3 -> 'f'
+    '\U0001d5f5': 'h',  # U+1D5F5 -> 'h'
+    '\U0001d5f6': 'i',  # U+1D5F6 -> 'i'
+    '\U0001d5f9': 'l',  # U+1D5F9 -> 'l'
+    '\U0001d5fb': 'n',  # U+1D5FB -> 'n'
+    '\U0001d5fc': 'o',  # U+1D5FC -> 'o'
+    '\U0001d5fd': 'p',  # U+1D5FD -> 'p'
+    '\U0001d5ff': 'r',  # U+1D5FF -> 'r'
+    '\U0001d600': 's',  # U+1D600 -> 's'
+    '\U0001d601': 't',  # U+1D601 -> 't'
+    '\U0001d602': 'u',  # U+1D602 -> 'u'
+    '\U0001d604': 'w',  # U+1D604 -> 'w'
+    '\U0001d608': 'A',  # U+1D608 -> 'A'
+    '\U0001d609': 'B',  # U+1D609 -> 'B'
+    '\U0001d60a': 'C',  # U+1D60A -> 'C'
+    '\U0001d60b': 'D',  # U+1D60B -> 'D'
+    '\U0001d60c': 'E',  # U+1D60C -> 'E'
+    '\U0001d60d': 'F',  # U+1D60D -> 'F'
+    '\U0001d60f': 'H',  # U+1D60F -> 'H'
+    '\U0001d610': 'l',  # U+1D610 -> 'l'
+    '\U0001d613': 'L',  # U+1D613 -> 'L'
+    '\U0001d615': 'N',  # U+1D615 -> 'N'
+    '\U0001d616': 'O',  # U+1D616 -> 'O'
+    '\U0001d617': 'P',  # U+1D617 -> 'P'
+    '\U0001d619': 'R',  # U+1D619 -> 'R'
+    '\U0001d61a': 'S',  # U+1D61A -> 'S'
+    '\U0001d61b': 'T',  # U+1D61B -> 'T'
+    '\U0001d61c': 'U',  # U+1D61C -> 'U'
+    '\U0001d61e': 'W',  # U+1D61E -> 'W'
+    '\U0001d622': 'a',  # U+1D622 -> 'a'
+    '\U0001d623': 'b',  # U+1D623 -> 'b'
+    '\U0001d624': 'c',  # U+1D624 -> 'c'
+    '\U0001d625': 'd',  # U+1D625 -> 'd'
+    '\U0001d626': 'e',  # U+1D626 -> 'e'
+    '\U0001d627': 'f',  # U+1D627 -> 'f'
+    '\U0001d629': 'h',  # U+1D629 -> 'h'
+    '\U0001d62a': 'i',  # U+1D62A -> 'i'
+    '\U0001d62d': 'l',  # U+1D62D -> 'l'
+    '\U0001d62f': 'n',  # U+1D62F -> 'n'
+    '\U0001d630': 'o',  # U+1D630 -> 'o'
+    '\U0001d631': 'p',  # U+1D631 -> 'p'
+    '\U0001d633': 'r',  # U+1D633 -> 'r'
+    '\U0001d634': 's',  # U+1D634 -> 's'
+    '\U0001d635': 't',  # U+1D635 -> 't'
+    '\U0001d636': 'u',  # U+1D636 -> 'u'
+    '\U0001d638': 'w',  # U+1D638 -> 'w'
+    '\U0001d63c': 'A',  # U+1D63C -> 'A'
+    '\U0001d63d': 'B',  # U+1D63D -> 'B'
+    '\U0001d63e': 'C',  # U+1D63E -> 'C'
+    '\U0001d63f': 'D',  # U+1D63F -> 'D'
+    '\U0001d640': 'E',  # U+1D640 -> 'E'
+    '\U0001d641': 'F',  # U+1D641 -> 'F'
+    '\U0001d643': 'H',  # U+1D643 -> 'H'
+    '\U0001d644': 'l',  # U+1D644 -> 'l'
+    '\U0001d647': 'L',  # U+1D647 -> 'L'
+    '\U0001d649': 'N',  # U+1D649 -> 'N'
+    '\U0001d64a': 'O',  # U+1D64A -> 'O'
+    '\U0001d64b': 'P',  # U+1D64B -> 'P'
+    '\U0001d64d': 'R',  # U+1D64D -> 'R'
+    '\U0001d64e': 'S',  # U+1D64E -> 'S'
+    '\U0001d64f': 'T',  # U+1D64F -> 'T'
+    '\U0001d650': 'U',  # U+1D650 -> 'U'
+    '\U0001d652': 'W',  # U+1D652 -> 'W'
+    '\U0001d656': 'a',  # U+1D656 -> 'a'
+    '\U0001d657': 'b',  # U+1D657 -> 'b'
+    '\U0001d658': 'c',  # U+1D658 -> 'c'
+    '\U0001d659': 'd',  # U+1D659 -> 'd'
+    '\U0001d65a': 'e',  # U+1D65A -> 'e'
+    '\U0001d65b': 'f',  # U+1D65B -> 'f'
+    '\U0001d65d': 'h',  # U+1D65D -> 'h'
+    '\U0001d65e': 'i',  # U+1D65E -> 'i'
+    '\U0001d661': 'l',  # U+1D661 -> 'l'
+    '\U0001d663': 'n',  # U+1D663 -> 'n'
+    '\U0001d664': 'o',  # U+1D664 -> 'o'
+    '\U0001d665': 'p',  # U+1D665 -> 'p'
+    '\U0001d667': 'r',  # U+1D667 -> 'r'
+    '\U0001d668': 's',  # U+1D668 -> 's'
+    '\U0001d669': 't',  # U+1D669 -> 't'
+    '\U0001d66a': 'u',  # U+1D66A -> 'u'
+    '\U0001d66c': 'w',  # U+1D66C -> 'w'
+    '\U0001d670': 'A',  # U+1D670 -> 'A'
+    '\U0001d671': 'B',  # U+1D671 -> 'B'
+    '\U0001d672': 'C',  # U+1D672 -> 'C'
+    '\U0001d673': 'D',  # U+1D673 -> 'D'
+    '\U0001d674': 'E',  # U+1D674 -> 'E'
+    '\U0001d675': 'F',  # U+1D675 -> 'F'
+    '\U0001d677': 'H',  # U+1D677 -> 'H'
+    '\U0001d678': 'l',  # U+1D678 -> 'l'
+    '\U0001d67b': 'L',  # U+1D67B -> 'L'
+    '\U0001d67d': 'N',  # U+1D67D -> 'N'
+    '\U0001d67e': 'O',  # U+1D67E -> 'O'
+    '\U0001d67f': 'P',  # U+1D67F -> 'P'
+    '\U0001d681': 'R',  # U+1D681 -> 'R'
+    '\U0001d682': 'S',  # U+1D682 -> 'S'
+    '\U0001d683': 'T',  # U+1D683 -> 'T'
+    '\U0001d684': 'U',  # U+1D684 -> 'U'
+    '\U0001d686': 'W',  # U+1D686 -> 'W'
+    '\U0001d68a': 'a',  # U+1D68A -> 'a'
+    '\U0001d68b': 'b',  # U+1D68B -> 'b'
+    '\U0001d68c': 'c',  # U+1D68C -> 'c'
+    '\U0001d68d': 'd',  # U+1D68D -> 'd'
+    '\U0001d68e': 'e',  # U+1D68E -> 'e'
+    '\U0001d68f': 'f',  # U+1D68F -> 'f'
+    '\U0001d691': 'h',  # U+1D691 -> 'h'
+    '\U0001d692': 'i',  # U+1D692 -> 'i'
+    '\U0001d695': 'l',  # U+1D695 -> 'l'
+    '\U0001d697': 'n',  # U+1D697 -> 'n'
+    '\U0001d698': 'o',  # U+1D698 -> 'o'
+    '\U0001d699': 'p',  # U+1D699 -> 'p'
+    '\U0001d69b': 'r',  # U+1D69B -> 'r'
+    '\U0001d69c': 's',  # U+1D69C -> 's'
+    '\U0001d69d': 't',  # U+1D69D -> 't'
+    '\U0001d69e': 'u',  # U+1D69E -> 'u'
+    '\U0001d6a0': 'w',  # U+1D6A0 -> 'w'
+    '\U0001d6a4': 'i',  # U+1D6A4 -> 'i'
+    '\U0001d6a8': 'A',  # U+1D6A8 -> 'A'
+    '\U0001d6a9': 'B',  # U+1D6A9 -> 'B'
+    '\U0001d6ac': 'E',  # U+1D6AC -> 'E'
+    '\U0001d6ae': 'H',  # U+1D6AE -> 'H'
+    '\U0001d6b0': 'l',  # U+1D6B0 -> 'l'
+    '\U0001d6b4': 'N',  # U+1D6B4 -> 'N'
+    '\U0001d6b6': 'O',  # U+1D6B6 -> 'O'
+    '\U0001d6b8': 'P',  # U+1D6B8 -> 'P'
+    '\U0001d6bb': 'T',  # U+1D6BB -> 'T'
+    '\U0001d6c2': 'a',  # U+1D6C2 -> 'a'
+    '\U0001d6ca': 'i',  # U+1D6CA -> 'i'
+    '\U0001d6d0': 'o',  # U+1D6D0 -> 'o'
+    '\U0001d6d2': 'p',  # U+1D6D2 -> 'p'
+    '\U0001d6d4': 'o',  # U+1D6D4 -> 'o'
+    '\U0001d6d6': 'u',  # U+1D6D6 -> 'u'
+    '\U0001d6e0': 'p',  # U+1D6E0 -> 'p'
+    '\U0001d6e2': 'A',  # U+1D6E2 -> 'A'
+    '\U0001d6e3': 'B',  # U+1D6E3 -> 'B'
+    '\U0001d6e6': 'E',  # U+1D6E6 -> 'E'
+    '\U0001d6e8': 'H',  # U+1D6E8 -> 'H'
+    '\U0001d6ea': 'l',  # U+1D6EA -> 'l'
+    '\U0001d6ee': 'N',  # U+1D6EE -> 'N'
+    '\U0001d6f0': 'O',  # U+1D6F0 -> 'O'
+    '\U0001d6f2': 'P',  # U+1D6F2 -> 'P'
+    '\U0001d6f5': 'T',  # U+1D6F5 -> 'T'
+    '\U0001d6fc': 'a',  # U+1D6FC -> 'a'
+    '\U0001d704': 'i',  # U+1D704 -> 'i'
+    '\U0001d70a': 'o',  # U+1D70A -> 'o'
+    '\U0001d70c': 'p',  # U+1D70C -> 'p'
+    '\U0001d70e': 'o',  # U+1D70E -> 'o'
+    '\U0001d710': 'u',  # U+1D710 -> 'u'
+    '\U0001d71a': 'p',  # U+1D71A -> 'p'
+    '\U0001d71c': 'A',  # U+1D71C -> 'A'
+    '\U0001d71d': 'B',  # U+1D71D -> 'B'
+    '\U0001d720': 'E',  # U+1D720 -> 'E'
+    '\U0001d722': 'H',  # U+1D722 -> 'H'
+    '\U0001d724': 'l',  # U+1D724 -> 'l'
+    '\U0001d728': 'N',  # U+1D728 -> 'N'
+    '\U0001d72a': 'O',  # U+1D72A -> 'O'
+    '\U0001d72c': 'P',  # U+1D72C -> 'P'
+    '\U0001d72f': 'T',  # U+1D72F -> 'T'
+    '\U0001d736': 'a',  # U+1D736 -> 'a'
+    '\U0001d73e': 'i',  # U+1D73E -> 'i'
+    '\U0001d744': 'o',  # U+1D744 -> 'o'
+    '\U0001d746': 'p',  # U+1D746 -> 'p'
+    '\U0001d748': 'o',  # U+1D748 -> 'o'
+    '\U0001d74a': 'u',  # U+1D74A -> 'u'
+    '\U0001d754': 'p',  # U+1D754 -> 'p'
+    '\U0001d756': 'A',  # U+1D756 -> 'A'
+    '\U0001d757': 'B',  # U+1D757 -> 'B'
+    '\U0001d75a': 'E',  # U+1D75A -> 'E'
+    '\U0001d75c': 'H',  # U+1D75C -> 'H'
+    '\U0001d75e': 'l',  # U+1D75E -> 'l'
+    '\U0001d762': 'N',  # U+1D762 -> 'N'
+    '\U0001d764': 'O',  # U+1D764 -> 'O'
+    '\U0001d766': 'P',  # U+1D766 -> 'P'
+    '\U0001d769': 'T',  # U+1D769 -> 'T'
+    '\U0001d770': 'a',  # U+1D770 -> 'a'
+    '\U0001d778': 'i',  # U+1D778 -> 'i'
+    '\U0001d77e': 'o',  # U+1D77E -> 'o'
+    '\U0001d780': 'p',  # U+1D780 -> 'p'
+    '\U0001d782': 'o',  # U+1D782 -> 'o'
+    '\U0001d784': 'u',  # U+1D784 -> 'u'
+    '\U0001d78e': 'p',  # U+1D78E -> 'p'
+    '\U0001d790': 'A',  # U+1D790 -> 'A'
+    '\U0001d791': 'B',  # U+1D791 -> 'B'
+    '\U0001d794': 'E',  # U+1D794 -> 'E'
+    '\U0001d796': 'H',  # U+1D796 -> 'H'
+    '\U0001d798': 'l',  # U+1D798 -> 'l'
+    '\U0001d79c': 'N',  # U+1D79C -> 'N'
+    '\U0001d79e': 'O',  # U+1D79E -> 'O'
+    '\U0001d7a0': 'P',  # U+1D7A0 -> 'P'
+    '\U0001d7a3': 'T',  # U+1D7A3 -> 'T'
+    '\U0001d7aa': 'a',  # U+1D7AA -> 'a'
+    '\U0001d7b2': 'i',  # U+1D7B2 -> 'i'
+    '\U0001d7b8': 'o',  # U+1D7B8 -> 'o'
+    '\U0001d7ba': 'p',  # U+1D7BA -> 'p'
+    '\U0001d7bc': 'o',  # U+1D7BC -> 'o'
+    '\U0001d7be': 'u',  # U+1D7BE -> 'u'
+    '\U0001d7c8': 'p',  # U+1D7C8 -> 'p'
+    '\U0001d7ca': 'F',  # U+1D7CA -> 'F'
+    '\U0001d7ce': 'O',  # U+1D7CE -> 'O'
+    '\U0001d7cf': 'l',  # U+1D7CF -> 'l'
+    '\U0001d7d0': '2',  # U+1D7D0 -> '2'
+    '\U0001d7d1': '3',  # U+1D7D1 -> '3'
+    '\U0001d7d2': '4',  # U+1D7D2 -> '4'
+    '\U0001d7d3': '5',  # U+1D7D3 -> '5'
+    '\U0001d7d4': '6',  # U+1D7D4 -> '6'
+    '\U0001d7d5': '7',  # U+1D7D5 -> '7'
+    '\U0001d7d6': '8',  # U+1D7D6 -> '8'
+    '\U0001d7d7': '9',  # U+1D7D7 -> '9'
+    '\U0001d7d8': 'O',  # U+1D7D8 -> 'O'
+    '\U0001d7d9': 'l',  # U+1D7D9 -> 'l'
+    '\U0001d7da': '2',  # U+1D7DA -> '2'
+    '\U0001d7db': '3',  # U+1D7DB -> '3'
+    '\U0001d7dc': '4',  # U+1D7DC -> '4'
+    '\U0001d7dd': '5',  # U+1D7DD -> '5'
+    '\U0001d7de': '6',  # U+1D7DE -> '6'
+    '\U0001d7df': '7',  # U+1D7DF -> '7'
+    '\U0001d7e0': '8',  # U+1D7E0 -> '8'
+    '\U0001d7e1': '9',  # U+1D7E1 -> '9'
+    '\U0001d7e2': 'O',  # U+1D7E2 -> 'O'
+    '\U0001d7e3': 'l',  # U+1D7E3 -> 'l'
+    '\U0001d7e4': '2',  # U+1D7E4 -> '2'
+    '\U0001d7e5': '3',  # U+1D7E5 -> '3'
+    '\U0001d7e6': '4',  # U+1D7E6 -> '4'
+    '\U0001d7e7': '5',  # U+1D7E7 -> '5'
+    '\U0001d7e8': '6',  # U+1D7E8 -> '6'
+    '\U0001d7e9': '7',  # U+1D7E9 -> '7'
+    '\U0001d7ea': '8',  # U+1D7EA -> '8'
+    '\U0001d7eb': '9',  # U+1D7EB -> '9'
+    '\U0001d7ec': 'O',  # U+1D7EC -> 'O'
+    '\U0001d7ed': 'l',  # U+1D7ED -> 'l'
+    '\U0001d7ee': '2',  # U+1D7EE -> '2'
+    '\U0001d7ef': '3',  # U+1D7EF -> '3'
+    '\U0001d7f0': '4',  # U+1D7F0 -> '4'
+    '\U0001d7f1': '5',  # U+1D7F1 -> '5'
+    '\U0001d7f2': '6',  # U+1D7F2 -> '6'
+    '\U0001d7f3': '7',  # U+1D7F3 -> '7'
+    '\U0001d7f4': '8',  # U+1D7F4 -> '8'
+    '\U0001d7f5': '9',  # U+1D7F5 -> '9'
+    '\U0001d7f6': 'O',  # U+1D7F6 -> 'O'
+    '\U0001d7f7': 'l',  # U+1D7F7 -> 'l'
+    '\U0001d7f8': '2',  # U+1D7F8 -> '2'
+    '\U0001d7f9': '3',  # U+1D7F9 -> '3'
+    '\U0001d7fa': '4',  # U+1D7FA -> '4'
+    '\U0001d7fb': '5',  # U+1D7FB -> '5'
+    '\U0001d7fc': '6',  # U+1D7FC -> '6'
+    '\U0001d7fd': '7',  # U+1D7FD -> '7'
+    '\U0001d7fe': '8',  # U+1D7FE -> '8'
+    '\U0001d7ff': '9',  # U+1D7FF -> '9'
+    '\U0001e8c7': 'l',  # U+1E8C7 -> 'l'
+    '\U0001e8cb': '8',  # U+1E8CB -> '8'
+    '\U0001ee00': 'l',  # U+1EE00 -> 'l'
+    '\U0001ee24': 'o',  # U+1EE24 -> 'o'
+    '\U0001ee64': 'o',  # U+1EE64 -> 'o'
+    '\U0001ee80': 'l',  # U+1EE80 -> 'l'
+    '\U0001ee84': 'o',  # U+1EE84 -> 'o'
+    '\U0001f74c': 'C',  # U+1F74C -> 'C'
+    '\U0001f768': 'T',  # U+1F768 -> 'T'
+    '\U0001fbf0': 'O',  # U+1FBF0 -> 'O'
+    '\U0001fbf1': 'l',  # U+1FBF1 -> 'l'
+    '\U0001fbf2': '2',  # U+1FBF2 -> '2'
+    '\U0001fbf3': '3',  # U+1FBF3 -> '3'
+    '\U0001fbf4': '4',  # U+1FBF4 -> '4'
+    '\U0001fbf5': '5',  # U+1FBF5 -> '5'
+    '\U0001fbf6': '6',  # U+1FBF6 -> '6'
+    '\U0001fbf7': '7',  # U+1FBF7 -> '7'
+    '\U0001fbf8': '8',  # U+1FBF8 -> '8'
+    '\U0001fbf9': '9',  # U+1FBF9 -> '9'
+}
+# --- END GENERATED CONFUSABLE_MAP ---
+
+
+def _confusables_skeleton(raw_line):
+    """Per-character confusables/NFKD skeleton of ONE line -- the single
+    shared building block behind both `parse_v11_sections`'s structural
+    TRIPWIRE/TRIPWIRE-CHILD/SUPERSEDES line recognition and
+    `_legacy_supersedes_claim`'s whole-body scan (extracted GH #567
+    warden-gate round 2; previously duplicated inline in the latter only,
+    now the ONE place that does this per-character resolution).
+
+    Returns `(skeleton, positions, tokens, tok_idx_for_skel)`:
+      - `skeleton`: the map-or-keep-or-drop ASCII skeleton of `raw_line` --
+        each source character is NFKD-decomposed, then each decomposed
+        piece is kept if it is already `[A-Za-z0-9:]`, else replaced by its
+        `CONFUSABLE_MAP` target if that piece (or, failing that, the whole
+        source character) is a table key, else dropped. Note this means a
+        character outside `[A-Za-z0-9:]` with no table entry -- e.g. an
+        ASCII hyphen -- contributes NOTHING to `skeleton`, not even a
+        placeholder: a caller matching a keyword containing such a
+        character (e.g. `TRIPWIRE-CHILD:`) must match against the SAME
+        skeletonization of that literal keyword, not the keyword string
+        itself.
+      - `positions[s]`: the `raw_line` index `skeleton[s]` came from (a
+        multi-piece NFKD expansion, e.g. `№` -> `No`, records the SAME
+        source index against every piece it produces).
+      - `tokens`: a SUPERSET of skeleton characters that also carries a
+        WILDCARD entry `(None, False)` for a dropped, non-ASCII,
+        non-mapped source character, so a keyword-letter-position
+        substitution using an untabled codepoint is still visible as a
+        candidate substitute to a caller that composes over `tokens`
+        (`_keyword_reachable_by_dropping_optionals`). Each entry is
+        `(char_or_None, mandatory)`, where `mandatory` is True only for a
+        character that was already plain ASCII `[A-Za-z0-9:]` in
+        `raw_line`.
+      - `tok_idx_for_skel[s]`: the `tokens[]` index of `skeleton[s]`, i.e.
+        the map from skeleton coordinates to `tokens[]` coordinates.
+
+    See `_legacy_supersedes_claim`'s own docstring (CHAIN-1 fix (HOMOGLYPH)
+    paragraph onward) for the full design rationale behind this
+    construction -- this function is exactly that per-character step,
+    unchanged, just named and shared."""
+    skeleton_chars = []
+    positions = []
+    tokens = []
+    tok_idx_for_skel = []
+    for i, ch in enumerate(raw_line):
+        mandatory = ord(ch) < 128 and bool(re.match(r"[A-Za-z0-9:]", ch))
+        produced_any = False
+        for dch in unicodedata.normalize("NFKD", ch):
+            if re.match(r"[A-Za-z0-9:]", dch):
+                skeleton_chars.append(dch)
+                positions.append(i)
+                tok_idx_for_skel.append(len(tokens))
+                tokens.append((dch, mandatory))
+                produced_any = True
+            elif dch in CONFUSABLE_MAP:
+                mapped = CONFUSABLE_MAP[dch]
+                skeleton_chars.append(mapped)
+                positions.append(i)
+                tok_idx_for_skel.append(len(tokens))
+                tokens.append((mapped, False))
+                produced_any = True
+            # else: this NFKD piece is dropped (ASCII-but-not-
+            # alphanumeric, or non-ASCII-but-not-a-table-key) -- handled
+            # below, once per SOURCE character, not per piece.
+        if not produced_any and ch in CONFUSABLE_MAP:
+            # The source's own NFKD pieces produced NOTHING above (`ch`'s
+            # NFKD expansion is entirely ASCII characters outside
+            # [A-Za-z0-9:], or entirely non-ASCII characters that are not
+            # themselves table keys) -- consult CONFUSABLE_MAP on the
+            # SOURCE codepoint itself before treating it as a
+            # dropped/wildcard character. A per-NFKD-piece-only lookup
+            # never reaches a source-level table entry whose own NFKD
+            # decomposition doesn't happen to reproduce its mapped target
+            # -- U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER is
+            # the measured case (NFKD is two ASCII periods, neither kept
+            # nor table-mapped as a piece, but the SOURCE is itself a
+            # documented confusable for ':'). Only reached when the
+            # per-piece loop above produced nothing, so a codepoint whose
+            # NFKD piece IS independently keepable (e.g. the seven
+            # digit-0/1 confusables that also NFKD-fold to their own
+            # digit) is unaffected -- that piece-level result still wins.
+            mapped = CONFUSABLE_MAP[ch]
+            skeleton_chars.append(mapped)
+            positions.append(i)
+            tok_idx_for_skel.append(len(tokens))
+            tokens.append((mapped, False))
+            produced_any = True
+        if not produced_any and ord(ch) > 127:
+            # A WILDCARD token for any non-ASCII codepoint that produced
+            # no real character above. Gating this on the SOURCE
+            # character and on "produced nothing above" -- rather than on
+            # `ord(dch) > 127` for each individual NFKD PIECE -- matters
+            # because 104 codepoints have an NFKD expansion that is
+            # entirely ASCII-outside-[A-Za-z0-9:] (including the
+            # CONFUSABLE_MAP entry above); gating per-piece would miss
+            # those. Gating on the source character means every
+            # non-ASCII codepoint yields either a kept/mapped character
+            # or exactly one WILDCARD, never nothing.
+            tokens.append((None, False))
+        # else: either produced a real token above, or `ch` is plain
+        # ASCII outside [A-Za-z0-9:] (e.g. punctuation) -- dropped.
+    return "".join(skeleton_chars), positions, tokens, tok_idx_for_skel
+
+
+# A single module-level constant for the literal keyword, so it does not
+# appear separately as this helper's own default argument AND as a literal
+# in _legacy_supersedes_claim's own skeleton_upper.find(...)/len(...) calls
+# below -- two independent spellings of the same 11-character string that
+# could silently drift apart.
+_SUPERSEDES_KEYWORD = "SUPERSEDES:"
+_SUPERSEDES_VALUE_RE = re.compile(r"none|[0-9a-f]{12}")
+
+# CHILD first: a non-ASCII dash in "TRIPWIRE-CHILD:" may wildcard-substitute
+# the colon of "TRIPWIRE:", so the longer keyword must win.
+_V11_KEYWORDS = ("TRIPWIRE-CHILD:", "TRIPWIRE:", _SUPERSEDES_KEYWORD)
+
+def _v11_keyword_end(line, keyword):
+    """Raw-line index just past `keyword` if `line` declares it, else None.
+    PR #714 review (Highs 1-2, Medium 2, Low 1). Anchored at line start
+    (after ASCII spaces/tabs). ASCII characters must match the keyword
+    EXACTLY (case and punctuation), so ordinary prose (`  Supersedes: x`,
+    `# tripwire: y`, `TRIPWIRE CHILD:`) is never a keyword line. A non-ASCII
+    character is never mandatory: it may be skipped (invisible insertion),
+    match by its confusables/NFKD resolution (case-insensitive; `l`
+    stands for `I` since UTS #39 maps capital I to `l`), or stand in as a
+    WILDCARD for one keyword character -- the same guard
+    `_keyword_reachable_by_dropping_optionals` gives the v1 path, so a
+    table-missing colon/letter (U+2982, U+1804) still completes the keyword.
+    ponytail: wildcards capped at len(keyword)//2 so non-ASCII prose cannot
+    spell a keyword from nothing; raise the cap if an all-untabled-lookalike
+    spelling ever matters."""
+    i = 0
+    while i < len(line) and line[i] in " \t":
+        i += 1
+    m, maxw = len(keyword), len(keyword) // 2
+    states = {(0, 0)}
+    for k in range(i, len(line)):
+        ch = line[k]
+        new = set()
+        if ord(ch) < 128:
+            for j, w in states:
+                if j < m and ch == keyword[j]:
+                    new.add((j + 1, w))
+        else:
+            res = _confusables_skeleton(ch)[0].upper()
+            for j, w in states:
+                new.add((j, w))
+                want = keyword[j:j + len(res)].upper()
+                if res and (res == want or res == want.replace("I", "L")):
+                    new.add((j + len(res), w))
+                elif j < m and w < maxw:
+                    new.add((j + 1, w + 1))
+        if any(j == m for j, _ in new):
+            return k + 1
+        states = {(j, w) for j, w in new if j < m}
+        if not states:
+            return None
+    return None
+
+def _classify_supersedes_value(remainder_is_empty, value_match, empty_is_claim):
+    """The single, shared answer to "does this SUPERSEDES: occurrence's
+    remainder constitute a claim" -- consulted identically by
+    `_legacy_supersedes_claim`'s literal rescan loop and by
+    `_keyword_reachable_by_dropping_optionals` below, for a NON-EMPTY
+    remainder. Both callers independently determine `remainder_is_empty`
+    (nothing at all follows the matched/reachable keyword on this line)
+    and `value_match` (the result of matching `_SUPERSEDES_VALUE_RE` as a
+    PREFIX of that remainder) -- each caller computes these two facts the
+    cheapest way available to it (see each call site), since the literal
+    path's remainder is a contiguous slice of `skeleton` and the guard's is
+    a small, bounded join of specific `tokens[]` indices with WILDCARD
+    tokens interleaved. For a NON-EMPTY remainder, this function is the
+    one place that turns "matches / does not match" into "a value /
+    malformed", so the two paths can no longer disagree about what a given
+    non-empty remainder MEANS -- only about how cheaply they can produce
+    it. This shared predicate is why the two paths cannot diverge on a
+    non-empty remainder the way a fixed-width window on only one of them
+    once could: whichever path an attacker's input reaches, the non-empty
+    answer is computed by the same function.
+
+    An EMPTY remainder is NOT a case the two callers agree on. The literal
+    path's own long-standing behavior for an empty remainder is
+    `"malformed"` (an unmatched `re.match` on the empty string falls
+    through to the literal path's own `else` branch) -- an accident of
+    that match rather than a designed choice, but load-bearing regardless,
+    while the guard's need for "no claim" on an all-wildcard tail with
+    nothing plausible after it (avoiding a false positive on ordinary
+    non-ASCII-heavy prose that never resolves to a claim) is a GUARD-side
+    decision, unrelated to the literal path's own default. `empty_is_claim`
+    makes that a decision each CALLER states explicitly instead of one
+    this function imposes on both: the literal path passes `True` (empty
+    is `"malformed"`), the guard passes `False` (empty is no claim). Only
+    the empty-remainder half is ever legitimately caller-specific; the
+    non-empty half above remains the ONE place both paths decide
+    value-vs-malformed.
+
+    Returns `None` (no claim -- the remainder is empty and `empty_is_claim`
+    is False), the string `"malformed"` (the remainder is empty and
+    `empty_is_claim` is True, OR the remainder is non-empty and does not
+    start with a well-formed value), or the `Match` object itself (a
+    well-formed `none`/12-hex value). For the non-empty case, a
+    non-matching remainder is `"malformed"` on EITHER path, not silently
+    no claim, so an attacker cannot choose a cheaper answer by picking
+    which path evaluates a given spelling of a value (`0x`-prefixed,
+    `sha256:`-prefixed, uppercase, one hex digit short, a git-short hash,
+    an extra leading word, ...). See GH #567 for the full history of this
+    mechanism."""
+    if remainder_is_empty:
+        return "malformed" if empty_is_claim else None
+    return value_match if value_match else "malformed"
+
+
+def _keyword_reachable_by_dropping_optionals(tokens, keyword=_SUPERSEDES_KEYWORD):
+    """Answers "could `keyword` be spelled out, contiguously, by some
+    combination of tokens matching their corresponding letter exactly and
+    WILDCARD tokens standing in for the rest" -- and, if so, whether what
+    follows makes this a claim (via `_classify_supersedes_value` above).
+
+    `tokens`: the same `(char, mandatory)` list `_legacy_supersedes_claim`
+    builds below. `char` is `None` for a WILDCARD token (a dropped,
+    non-ASCII codepoint that neither NFKD nor `CONFUSABLE_MAP` could
+    resolve to anything). `mandatory` is True only for a character that was
+    already plain ASCII in `raw_line`; every character that arrived via
+    NFKD decomposition or a `CONFUSABLE_MAP` lookup is "optional" and may be
+    skipped without killing an in-progress match (this is what lets a
+    homoglyph'd or NFKD-inserted character land INSIDE the keyword without
+    silently un-detecting it).
+
+    Implemented as a linear forward scan over a SET of reachable
+    `(matched_length, wildcards_used)` states: state `(0, 0)` is always
+    alive (a fresh match attempt may start at any token), a token matching
+    the next keyword letter advances a state without spending a wildcard,
+    and any OPTIONAL (non-mandatory) token that does NOT match the next
+    keyword letter -- a WILDCARD, or a real character `CONFUSABLE_MAP`
+    mapped to a DIFFERENT letter (warden-gate finding 2, GH #567 round 1:
+    a table-correct mapping to the wrong letter, e.g. U+A75A -> '2'
+    standing in for 'R', used to be able only to keep a state alive, never
+    advance one, so a line with no OTHER candidate for that letter could
+    never complete) -- BOTH advances a state and spends one wildcard
+    (`MAXW = len(keyword)` -- a candidate match can need at most one
+    wildcard per position, so this is not a bound an attacker can pad
+    around, it is the count of positions) AND keeps the state alive
+    unspent, at the trailing colon included; both possibilities are
+    tracked in parallel in the state set. A completion
+    (`matched_length == len(keyword)`) is checked at the start of each
+    iteration, using the token stream from that point on.
+
+    A completion that used NO wildcards fires immediately -- it has a real
+    ASCII anchor (the fragmentation-insertion case) and is exactly what the
+    literal rescan loop below already finds and masks out via
+    `consumed_tokens`, so this branch only ever fires for a DIFFERENT
+    occurrence the literal loop did not already consume. A completion that
+    used one or more wildcards additionally classifies its remainder via
+    `_classify_supersedes_value` (passing `empty_is_claim=False`: an
+    all-wildcard tail with nothing plausible after it is this guard's own
+    long-standing "no claim" answer, and is NOT the literal path's answer
+    for the same empty-remainder case -- see that function's own docstring
+    for why the two legitimately differ here): the up-to-12 REAL
+    (non-WILDCARD) characters at or after the completion point
+    (`nonwild_idx` + `cursor`, built once per call and only ever advanced
+    forward, so this costs O(1) amortized per completion, not a fresh scan
+    each time -- twelve characters is enough to decide `none|[0-9a-f]{12}`
+    either way, since the regex fails as soon as a non-matching character
+    appears within that count). If the classification is anything but "no
+    claim", this function returns True -- including when the remainder is
+    non-empty but does not match the value grammar, so on a NON-EMPTY
+    remainder a wildcard-completed keyword and the literal-match path
+    below can no longer disagree about whether it is a claim (see
+    `_classify_supersedes_value` above); an EMPTY remainder is the one
+    case they legitimately still disagree on, by design.
+
+    (The emptiness *determination* is still computed independently by each
+    caller, even though its *interpretation* is centralised above: `value_
+    start >= len(skeleton)` in `skeleton` coordinates for the literal path,
+    `not window` in token/masked-`guard_tokens` coordinates here. They
+    agree on every input either path can construct.)
+
+    An accepted, deliberate cost of the non-empty case: a wildcard-
+    reachable keyword followed by ordinary non-ASCII-heavy prose with no
+    plausible value also resolves `"malformed"` rather than no claim.
+    Measured: every repo-tracked `*.md` non-blank line (35,634 lines)
+    placed post-`NEXT` in an `RCPT v1` receipt -- exactly 1 newly
+    hard-FAILs under this widening (`skills/shared/return-convention.md:492`,
+    the em-dash heading pinned by
+    `test_supersedes_heading_with_an_em_dash_now_resolves_malformed`
+    below). The trigger rule, as measured: `MAXW` (`= len(keyword)`, eleven)
+    non-ASCII codepoints that resolve to no real token, reachable in order
+    with only token-less material between them, followed by one real
+    character -- ASCII spaces and punctuation do not break the run, so the
+    eleven codepoints need not be adjacent. Warden-gate finding 2 (GH #567
+    round 1) widened WHICH tokens can spend a wildcard to also include a
+    real, `CONFUSABLE_MAP`-mapped character that isn't the letter needed at
+    its position, so the trigger set is now a superset of the one measured
+    above (this cost was already accepted for the WILDCARD-only case; the
+    widened set can only ever add MORE lines to the "1 newly hard-FAILs"
+    figure above, never fewer, since every previously-reachable run is
+    still reachable exactly as before). Accepted as strictly cheaper than the
+    bypass it closes. (`value_match` above is otherwise inert on this
+    path -- because ANY non-empty remainder now returns non-`None`
+    regardless of whether `value_match` matched, this guard's own `if ...
+    is not None: return True` fires identically either way; the "single
+    shared predicate" therefore couples the two paths on one bit,
+    empty-vs-non-empty, not the three-way value/malformed/no-claim
+    classification this docstring otherwise describes.) See Task 2 for the
+    regression pins this rests on (both directions) and GH #567 for the
+    full history of this mechanism."""
+    m = len(keyword)
+    MAXW = len(keyword)
+    states = {(0, 0)}
+    nonwild_idx = [k for k, (c, _) in enumerate(tokens) if c is not None]
+    cursor = 0
+    for i, (ch, mandatory) in enumerate(tokens):
+        completing = {w for j, w in states if j == m}
+        if completing:
+            if 0 in completing:
+                return True
+            while cursor < len(nonwild_idx) and nonwild_idx[cursor] < i:
+                cursor += 1
+            window = nonwild_idx[cursor:cursor + 12]
+            remainder_str = "".join(tokens[k][0] for k in window)
+            value_match = _SUPERSEDES_VALUE_RE.match(remainder_str)
+            # empty_is_claim=False here -- an all-wildcard tail with no
+            # plausible value is this guard's own "no claim" answer, NOT
+            # the literal path's (see _classify_supersedes_value's own
+            # docstring for why the two legitimately differ).
+            if _classify_supersedes_value(
+                    not window, value_match, False) is not None:
+                return True
+        new_states = set()
+        u = None if ch is None else ch.upper()
+        for j, w in states:
+            if j == m:
+                continue
+            if j == 0:
+                new_states.add((0, 0))
+            if j < m and u is not None and u == keyword[j]:
+                new_states.add((j + 1, w))
+            # warden-gate finding 2 (GH #567 round 1) -- was `u is None`: a
+            # non-mandatory token that resolved to a REAL character via
+            # CONFUSABLE_MAP but one that isn't the letter needed here (e.g.
+            # U+A75A -> '2' standing in for 'R') could previously only take
+            # the "stay put" transition below, never spend a wildcard to
+            # advance -- so a line with no OTHER candidate for that letter
+            # could never complete. `not mandatory and u != keyword[j]`
+            # covers that case too (a WILDCARD's `u is None` is always
+            # `!= keyword[j]`, so this is a strict widening, not a
+            # replacement).
+            if j < m and not mandatory and u != keyword[j] and w < MAXW:
+                new_states.add((j + 1, w + 1))
+            if j > 0 and not mandatory:
+                new_states.add((j, w))
+        states = new_states
+    return 0 in {w for j, w in states if j == m}
+
+
 def _legacy_supersedes_claim(text):
     """SIEGE-R4BA-5 — the `SUPERSEDES:` body of a receipt `parse_v11_sections` REFUSED.
 
-    KNOWN GAP (tracked on GH #567, deferred pending a design decision — NOT closed by
-    the fix below). This detector remains bypassable by two mechanisms distinct from
-    the invisible-character / mid-token-insertion class this fix round closes: (1)
-    homoglyph substitution — replacing an ASCII letter of the `SUPERSEDES:` keyword
-    itself with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL
-    LETTER DZE for Latin "S") causes the ASCII-only stripping step below to DELETE that
-    letter rather than preserve it, so the keyword search misses a line that renders
-    identically to a human or an LLM orchestrator; (2) the scan is scoped to the tail
-    AFTER `NEXT` only, so a plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` is
-    invisible to this function even though `parse_receipt` accepts it and the
-    orchestrator's Sweep step (`return-convention.md` § The Sweep) reads a
-    `SUPERSEDES:` line wherever it appears, with no positional constraint. Two design
-    options are open (TR39-style confusables/skeleton normalization vs. restricting
-    receipts to ASCII-printable outright) — see GH #567 for the full writeup (six
-    distinct bypass mechanisms found this round, the two real design options, and the
-    separate scan-scope bug).
+    KNOWN GAP (tracked on GH #567) — CLOSED; retained here for the record. This
+    detector WAS bypassable by two mechanisms distinct from the invisible-character /
+    mid-token-insertion class closed above: (1) homoglyph substitution — replacing an
+    ASCII letter of the `SUPERSEDES:` keyword itself, including its trailing colon,
+    with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL LETTER
+    DZE for Latin "S") caused the ASCII-only stripping step below to DELETE that letter
+    rather than preserve it, so the keyword search missed a line that renders
+    identically to a human or an LLM orchestrator; (2) the scan was scoped to the tail
+    AFTER `NEXT` only, and to only the FIRST `SUPERSEDES:` occurrence per line, so a
+    plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` — or a second claim on the
+    same line as an earlier one — was invisible to this function even though
+    `parse_receipt` accepts it and the orchestrator's Sweep step
+    (`return-convention.md` § The Sweep) reads a `SUPERSEDES:` line wherever it
+    appears, with no positional constraint. Two design options were weighed
+    (TR39-style confusables/skeleton normalization vs. restricting receipts to
+    ASCII-printable outright) — the maintainer chose confusables normalization; see
+    GH #567 for the full writeup and the design doc's Decision A/B for the rationale.
+    See the CHAIN-1 fix (HOMOGLYPH) and (SCAN-SCOPE) paragraphs below for how each was
+    closed — including the keyword's trailing colon and the same-line rescan — and
+    the composition guard's own docstring below for the colon mechanism.
 
-    Same post-NEXT tail scan `parse_v11_sections` runs, with the version dispatch and
-    every v1.1 STRUCTURE rule (TRIPWIRE presence, TRIPWIRE-CHILD-when-DISPATCHED,
-    duplicate detection) left out: this is not a second parser for the v1.1 grammar and
-    must not become one. It answers exactly one question — does this receipt CLAIM a
-    supersession — for the one caller that needs the answer on a header the v1.1 parser
-    version-dispatched away.
+    This function scans the WHOLE receipt body (not scoped to a
+    `parse_v11_sections`-style post-`NEXT` tail — see round 6 below), with no version
+    dispatch and none of `parse_v11_sections`'s v1.1 STRUCTURE rules (TRIPWIRE
+    presence, TRIPWIRE-CHILD-when-DISPATCHED, duplicate detection) applied: this is
+    not a second parser for the v1.1 grammar and must not become one. It answers
+    exactly one question — does this receipt CLAIM a supersession — for TWO callers
+    (warden-gate finding 1, GH #567 round 1): one that needs the answer on a header
+    the v1.1 parser version-dispatched away (`RCPT v1`), and one that cross-checks
+    this hardened raw-text answer against `parse_v11_sections`'s own structural
+    `supersedes` field on an `RCPT v1.1` header, which had no homoglyph/confusables
+    defense of its own — see that cross-check's own call site for why both need
+    the SAME oracle rather than a second, independently-maintained one.
 
-    Returns None when no `SUPERSEDES:` line is present at all. Otherwise the STRONGEST
+    Returns None when nothing on this receipt reads as a `SUPERSEDES:` claim -- neither
+    a literal (confusables-resolved, case-insensitive) `SUPERSEDES:` keyword nor a
+    fragmented one the composition guard below can reach. Otherwise the STRONGEST
     claim on the receipt: `parse_v11_sections` rejects a duplicated section outright and
     this scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed by
     `SUPERSEDES: <prefix>` answer "none" — an appender's shape, and the exact
@@ -1420,7 +2878,7 @@ def _legacy_supersedes_claim(text):
     legitimate `SUPERSEDES:` line can be made of"), not a broader or better
     denylist:
 
-      1. Split the tail on the LITERAL `\\n` byte only (`str.split("\\n")`, never
+      1. Split the whole receipt body on the LITERAL `\\n` byte only (`str.split("\\n")`, never
          `str.splitlines()`), so no Unicode line-break codepoint the receipt body
          might contain is ever treated as a line boundary before this function
          gets to look at it — the round-3-first-attempt (b) residual.
@@ -1482,12 +2940,300 @@ def _legacy_supersedes_claim(text):
     rejected them — the positional gap is zero at their boundary — so nothing
     that used to be treated as a claim now silently isn't.
 
-    Neither this fix nor round 3's closes every class: SUBSTITUTION (replacing
-    one of the keyword's own ASCII letters with a visually-identical non-ASCII
-    homoglyph, which this allowlist's strip step deletes rather than preserves)
-    and the separate tail-only SCAN-SCOPE gap (a claim placed before `NEXT` is
-    never scanned at all) are open — see the KNOWN GAP paragraph above and GH
-    #567.
+    Round 3's allowlist mechanism (steps 1-4 above) stands as the closing move for the
+    invisible-character / mid-token-insertion class it was built for. The composition
+    guard below closes the two classes this paragraph used to name as open —
+    SUBSTITUTION and the separate SCAN-SCOPE gap (see GH #567 for the original
+    six-mechanism writeup). SUBSTITUTION is closed fail-closed REGARDLESS of whether a
+    given codepoint is a CONFUSABLE_MAP entry: the composition guard's wildcard
+    extension treats any dropped non-ASCII codepoint occupying a keyword-letter
+    position — including the trailing colon — as a candidate substitution, closing
+    even a codepoint Unicode's confusables.txt does not (and, for a Private Use Area
+    codepoint, structurally cannot) classify as confusable with this alphabet, with no
+    cap (`MAXW = len(keyword)`) on how many letters may be substituted in one match. A
+    completion that used at least one wildcard fires whenever ANY real (non-WILDCARD)
+    character exists anywhere at or after the completion point on that line (round-9
+    quality-gate FATAL 1: ANY non-empty remainder now resolves `"malformed"`
+    regardless of whether it is itself a well-formed `none`/12-hex value, replacing
+    round-6 quality-gate F1/S2's earlier VALUE-grammar gate — see the composition
+    guard's own docstring for the mechanism and its accepted false-positive tradeoff:
+    a wildcard-reachable keyword followed by ordinary non-ASCII prose, with no
+    plausible value, also resolves `"malformed"` rather than no claim). Only a
+    completion with no real character anywhere after it on the line resolves to no
+    claim, not `"malformed"`. A completion that used NO wildcards (the
+    fragmentation-insertion case, where the keyword's own ASCII letters are genuinely
+    present, just non-contiguous) fires unconditionally regardless of the remainder.
+    Positional coverage: the keyword's ten LETTER positions and its trailing COLON are
+    all covered by the same mechanism (wildcard reachability under round-9
+    quality-gate FATAL 1's non-empty-remainder rule); the VALUE grammar's own alphabet
+    (`none`/hex, five residue characters — see Known residue below) remains the one
+    place table staleness can still matter.
+
+    CHAIN-1 fix (HOMOGLYPH — #567) — the allowlist mechanism above keeps
+    `[A-Za-z0-9:]` and DELETES everything else, including a homoglyph
+    substitute for one of the keyword's own letters: `ЅUPERSEDES:` (Cyrillic
+    Ѕ U+0405) skeletonizes to `UPERSEDES:` (the Ѕ is gone, not converted),
+    which doesn't contain `SUPERSEDES:`, so the claim is missed entirely --
+    a false NEGATIVE in a fail-closed backstop, worse than degrading toward
+    "un-scannable." Two design options were weighed (see GH #567 for the
+    full writeup): a TR39-style confusables/skeleton normalization, or
+    rejecting non-ASCII outright. The maintainer chose confusables
+    normalization. (This docstring cites GH #567 alone, not a
+    `docs/plans/...` path -- this repo's own `.gitignore` excludes
+    `docs/plans/*`, so a path citation here would resolve to nothing for
+    anyone reading this function outside the authoring session; GH #567 is
+    the durable record.) Fixed by
+    replacing the delete-only skeleton with a map-or-delete one: each raw
+    codepoint is first NFKD-decomposed (per-codepoint, not per-line -- see
+    below), then kept if `[A-Za-z0-9:]`, else replaced with its mapped ASCII
+    prototype if it's a key in `CONFUSABLE_MAP` (a small table vendored from
+    Unicode's own confusables.txt, restricted to the ~30 characters a
+    well-formed claim can contain, spliced directly into this file by
+    scripts/gen_chain1_confusables.py -- see that script's own docstring),
+    else dropped exactly as round 3/4 already dropped it. `positions[]`
+    still records the ORIGINAL raw_line index for every surviving skeleton
+    character (mapped or kept), so round 4's glued-value check is unaffected.
+
+    Per-codepoint (not per-line) NFKD: decomposing each ORIGINAL character
+    individually, rather than normalizing the whole raw_line first, is what
+    keeps `positions[]` meaningful -- normalizing the whole line first would
+    let one source character explode into multiple codepoints at a NEW
+    string offset with no simple way back to the original raw_line index the
+    glued-check needs. Decomposing one character at a time and recording
+    that same original index for every piece it produces (kept, mapped, or
+    dropped) sidesteps that entirely. This also means an ordinary accented
+    Latin letter elsewhere in the receipt (e.g. `café`) decomposes to its
+    base letter (kept, already `[A-Za-z0-9:]`) plus a combining accent
+    (dropped, same as any other non-alphabet codepoint) -- it does not
+    manufacture a spurious claim.
+
+    Decomposition uses `NFKD`, not `NFD`: canonical decomposition (`NFD`)
+    does nothing for a COMPATIBILITY equivalence, and 23 codepoints
+    Unicode's own NFKC declares identical to one of `SUPERD:` -- FULLWIDTH
+    D/U/R (U+FF24/FF35/FF32), circled and squared Latin capitals (U+24B9
+    etc., U+1F133 etc.), modifier-letter capitals (U+1D30 etc.), and the
+    small/vertical colons (U+FE13/FE55) -- survive `NFD` untouched. `NFKD`
+    closes all 23 (swept exhaustively: for every codepoint in Unicode,
+    `len(NFKC(c)) == 1 and NFKC(c) in "SUPERD:"` implies detection; zero
+    counterexamples). `NFKD` can decompose ONE source character into
+    MULTIPLE surviving skeleton characters where `NFD` provably never does
+    on this alphabet (e.g. `№` U+2116 -> `No`, the ligature `ﬀ` U+FB00 ->
+    `ff`) -- every piece a single source character produces is recorded
+    against that SAME original `raw_line` index (see above).
+
+    This is precisely why the glued-value check's adjacency test below uses
+    `<=`, not `==`: when the character gluing onto the value is the SECOND
+    piece of a multi-character expansion, its recorded position EQUALS (not
+    exceeds by one) the position of the piece immediately before it, so an
+    `==` predicate would report `glued = False` and let the value resolve
+    to a truncated, seemingly-clean string instead of `"malformed"` (e.g.
+    a value glued to `ﬀ`, U+FB00 -> `ff`, would resolve
+    `"21a1b2c3d4ef"` under `==` -- wrong, not `"malformed"`). A value glued
+    to `№` (U+2116 -> `No`, where the glued piece is the expansion's FIRST
+    character) resolves `"malformed"` under either predicate, since there
+    the glued piece's position DOES exceed the preceding character's by
+    exactly one. `positions[value_end] <= positions[value_end - 1] + 1`
+    (equal OR adjacent both mean no separator survived in `raw_line`)
+    covers both arrangements -- see Task 2's multi-character-expansion
+    test, which exercises both U+FB00 and U+2116.
+
+    Case-insensitive table + search: a naive case-SENSITIVE membership test
+    against the alphabet above (which is itself case-mixed -- uppercase
+    from `SUPERSEDES:`, lowercase from `none`/hex) would silently drop any
+    confusables.txt entry whose Unicode-documented prototype is the OTHER
+    case of one of these letters -- e.g. U+A731 LATIN LETTER SMALL CAPITAL S
+    is documented as confusable with lowercase `s`, not `S`, yet
+    `ꜱUPERSEDES:` is a near-perfect visual match for the keyword.
+    `scripts/gen_chain1_confusables.py`'s `parse()` keeps an entry when the
+    TARGET's lowered form is in the alphabet (mapping to Unicode's own
+    prototype, not forcing a case), and the keyword search below matches on
+    `skeleton.upper()` (length-preserving on this pure-ASCII skeleton, so
+    the VALUE is still read from the original-case `skeleton`, keeping
+    `none`/hex case-exact). Accepted cost: an ordinary line of prose reading
+    `supersedes:` (all-lowercase, no confusable involved at all) also
+    hard-FAILs, the same fail-closed direction already accepted for the
+    literal-substring false positive below.
+
+    Fail-closed on a keyword mapped/decomposed INTO fragments: a mapped
+    confusable or an NFKD-decomposed insertion landing INSIDE the keyword
+    could otherwise silently UN-detect a claim a uniform delete-only
+    skeleton would still have found -- e.g. a confusable mapping to an
+    ASCII character injects an extra character into the middle of
+    `SUPERSEDES:` where deleting the same source codepoint outright would
+    not have.
+
+    This is closed by a single token-level reachability check
+    (`_keyword_reachable_by_dropping_optionals`, see its own docstring
+    below), run against the SAME per-character stream already being built
+    -- no second regex pass over `raw_line`, and no separately-computed
+    delete-only skeleton compared against the mapped one. A separate ground
+    truth is exactly what an earlier version of this guard used, and it is
+    unsound: comparing the mapped skeleton against an independently-
+    recomputed delete-only skeleton fails whenever an attack composes an
+    insertion WITH a homoglyph'd keyword letter (deleting a homoglyph'd `S`
+    deletes it from both skeletons alike, so neither shows `SUPERSEDES:`
+    and the guard never fires), and separately fails on any
+    mixed-/lower-case keyword with an insertion if the two skeletons are
+    compared with different case sensitivity. The reachability check
+    instead marks each surviving skeleton character `mandatory` (came from
+    a character already plain ASCII in `raw_line` -- must match the next
+    keyword letter exactly, in order, or the line cannot be a fragmented
+    keyword) or optional (came from a non-ASCII source, NFKD-decomposed or
+    `CONFUSABLE_MAP`-mapped -- may EITHER match the next keyword letter or
+    be treated as absent). `keyword_reachable_by_dropping_optionals()` then
+    asks: is there SOME choice, for every optional token, of "use it" vs.
+    "drop it" that makes `SUPERSEDES:` appear as a contiguous run? This is
+    answered with a small forward state-set scan (state = how much of the
+    keyword has been matched so far; a mandatory mismatch kills that state,
+    an optional non-match keeps it, either kind matching advances it) --
+    linear in `raw_line` length, no per-line second skeleton, and no
+    exponential subset search over optional tokens.
+
+    Known residue (documented, not hidden -- matching this file's
+    `_substantive_len` precedent): the vendored table only contains what
+    Unicode's confusables.txt itself documents, but an unmapped codepoint
+    substituted for one of the keyword's own letters is still DETECTED,
+    fail-closed, by the composition guard's wildcard extension
+    (`_keyword_reachable_by_dropping_optionals` treats any dropped
+    non-ASCII codepoint occupying a keyword-letter position as a candidate
+    substitution, whether or not that exact codepoint is a CONFUSABLE_MAP
+    entry) -- so table coverage no longer determines whether a
+    keyword-letter substitution is caught, only whether it resolves through
+    the table or through a WILDCARD token. What remains genuinely open is
+    the VALUE grammar's own alphabet: table staleness can still matter
+    there. This SUBSTITUTION closure is itself scoped to non-ASCII (round-11
+    quality-gate MINOR 6): the wildcard extension only ever fires for a
+    dropped codepoint with `ord(ch) > 127`, so a DROPPED ASCII codepoint
+    occupying a keyword-letter position (e.g. `"$UPERSEDES:
+    21a1b2c3d4e5"`, replacing a keyword letter with an unrelated ASCII
+    character) produces no wildcard and no detection at all -- pre-existing
+    on `1888642` (not fix-generated by this ticket) and symmetric across
+    `RCPT v1`/`RCPT v1.1` (neither header version's SUPERSEDES scan reaches
+    this line at all, so there is no asymmetry between them to close). This
+    is a stated scope boundary, not a silent gap. (This paragraph and the
+    ones below it are organized by
+    CHARACTER -- which letters lack table coverage -- not by keyword
+    POSITION; see the composition guard's own docstring's "Positional
+    coverage" paragraph for the position-organized statement that
+    complements this one.)
+
+    (1) A Private Use Area codepoint (U+E000-U+F8FF) carries no
+    Unicode-assigned meaning at all, so it can never appear as a SOURCE
+    entry in confusables.txt and is therefore never in this table, however
+    a font renders it -- but substituted for a keyword letter it resolves
+    `"malformed"` via the wildcard extension, not `None`. This is NOT the
+    same thing as "Latin R has no confusable in this table": it does
+    (U+01A6 LATIN LETTER YR maps to R; see Task 2's positive R-coverage
+    test).
+
+    (2) `str.lower()` is a no-op on seven Unicode-documented PROTOTYPE
+    codepoints relevant to this alphabet: the "LATIN LETTER SMALL CAPITAL
+    <X>" characters for X in {A, B, D, E, N, P, R} (U+1D00, U+0299, U+1D05,
+    U+1D07, U+0274, U+1D18, U+0280) -- these are not compatibility variants
+    (NFKD does not touch them either), they are Unicode's own distinct
+    confusability class for "this glyph is a small-caps rendering of an
+    uppercase Latin letter," and the case-insensitive filter above does not
+    reach them. FOUR of the seven -- D, E, P, R -- are letters IN
+    "SUPERSEDES:" itself, so a substitution there is a keyword-letter
+    position and the wildcard extension closes it exactly as the PUA case
+    above (measured: `SUᴘERSEDES:`, U+1D18 LATIN LETTER SMALL CAPITAL P,
+    and the small-cap E/R/D equivalents each resolve to `"malformed"`, not
+    `None`). The remaining THREE -- A, B, N -- are not letters in the
+    keyword; they only occur in the `none`/hex VALUE grammar, which the
+    wildcard extension does not reach (it only substitutes for a keyword
+    letter, never for the trailing colon or anything after it), so a
+    substitution there still finds the keyword but silently fails the
+    value grammar as `"malformed"` for an unrelated reason -- real residue,
+    not a security gap (the receipt still hard-FAILs, it just isn't
+    detected AS a resolved claim of a specific value). See
+    `KNOWN_RESIDUE` in scripts/check_chain1_confusables_drift.py for the
+    pinned list, and Task 2's residue test for the executable version of
+    this paragraph.
+
+    Two DIGITS, `0` and `1`, also have zero table coverage as mapping
+    VALUES -- measured on the real generated table (766 entries), the
+    distinct mapping VALUES are `23456789:ABCDEFNOPRSUabcdefnoprsu`;
+    Unicode routes `0`/`1` lookalikes to the LETTERS `O`/`l` instead, never
+    to the digits themselves, so a `0`/`1` confusable that NFKD cannot fold
+    to its own digit fails the grammar and resolves to `"malformed"`,
+    fail-closed (e.g. Cyrillic О U+041E, which NFKD leaves untouched and
+    which no `CONFUSABLE_MAP` entry targets `0` or `1` for). This does not
+    hold for every `0`/`1` confusable: seven sources whose NFKD
+    decomposition is the literal ASCII `0` (U+1D7CE, U+1D7D8, U+1D7E2,
+    U+1D7EC, U+1D7F6, U+1FBF0, U+1CCF0 -- mathematical/segmented
+    digit-zero variants; round-11 quality-gate MINOR 2: their Unicode
+    CONFUSABLE_MAP prototype/target is the LETTER `O`, exactly as the
+    first sentence above says -- it is NFKD, not the table target, that
+    yields the digit `0` for these seven) are NFKD-decomposed to the
+    literal ASCII `0` BEFORE the table lookup ever runs (the
+    token-building loop's FIRST branch, `[A-Za-z0-9:]`, catches them), so
+    they resolve CORRECTLY --
+    `test_every_nfkc_equivalent_of_a_value_alphabet_letter_is_detected`
+    passes on exactly these. (An eighth, related case: U+017F LATIN SMALL
+    LETTER LONG S has a `CONFUSABLE_MAP` target of `f`, but its NFKD
+    decomposition is `s` -- the SAME loop-ordering shadows the table
+    target with the NFKD result, so `ſ` reaches the skeleton as `s`, not
+    `f`. This is load-bearing, not incidental: `s` is a keyword letter,
+    and `test_every_nfkc_equivalent_of_a_keyword_letter_is_detected`'s
+    lowercase leg depends on `ſ` resolving to `s`.) There is no SOURCE
+    codepoint to hang a
+    `KNOWN_RESIDUE` entry off for `0`/`1` (nothing in confusables.txt maps
+    TO them) -- `sanity_check_alphabet_coverage()` in Task 1 Step 3 below
+    is a separate, positive-coverage check for exactly this reason: it
+    confirms a target value remains absent rather than watching a source
+    codepoint. The true VALUE-grammar residue is five characters -- A, B,
+    N, 0, 1.
+
+    Both residues are refreshable/re-auditable by re-running
+    scripts/gen_chain1_confusables.py against a newer confusables.txt as
+    Unicode publishes one; `KNOWN_RESIDUE` will fail loudly (not silently
+    pass) if a future Unicode release starts covering one of the remaining
+    codepoints as a source-side entry. Table staleness is not a live
+    concern for the keyword-letter substitution class at all (the wildcard
+    extension does not depend on table coverage there); it remains a live
+    concern only for the VALUE grammar above.
+
+    CHAIN-1 fix (SCAN-SCOPE — #567) — fixed by scanning every element of
+    `text.split("\\n")` -- the whole receipt body, header included, with no
+    slicing of any kind -- rather than only the tail after `NEXT`, because
+    `parse_receipt` and the orchestrator's Sweep step
+    (`return-convention.md` § The Sweep) both read a `SUPERSEDES:` line
+    wherever it appears, with no positional constraint. Not skipping the
+    header (index 0) is itself part of the fix: peeling the header off
+    first would reopen the header-fusion bypass the allowlist mechanism
+    above closes, one line lower in the file, and would ALSO miss a claim
+    an attacker places directly in the header's own free-text tail
+    (`parse_receipt`'s header regex captures everything after "RCPT v1 " as
+    unvalidated prose -- see Task 2's header-embedded-claim test). The
+    header line cannot itself satisfy the grammar on its OWN structural
+    text, so scanning it costs nothing in the ordinary case.
+
+    Each line is also rescanned for a SECOND, later `SUPERSEDES:`
+    occurrence (`start = idx + 1` after each match), applying the same
+    strongest-claim-wins rule WITHIN a line as already applies across
+    lines -- a single `find()` per line would miss an attacker-controlled
+    claim placed after an earlier, benign one on the same line, including
+    when the two are fused across a single U+2028 LINE SEPARATOR (which
+    this function's literal-`\\n`-only split treats as one `raw_line`, same
+    as any other non-`\\n` codepoint). A single `SUPERSEDES: none` followed
+    by unrelated trailing prose on the same line still has exactly one
+    match, so this behaves identically to a plain `find()` in that case.
+
+    Accepted false positive: an ordinary WITNESS/TRACE line that happens to
+    contain the literal substring `SUPERSEDES:` (e.g. quoting a grep
+    command against this very function) still skeleton-matches and, since
+    its remainder won't satisfy the value grammar, is classified
+    `"malformed"` -- a hard-FAIL on a v1 receipt where identical content
+    under `RCPT v1.1` would pass. This is a false positive, not a false
+    negative (annoying, not a bypass), and is not fixed by anchoring the
+    match: an anchor is either trivially attacker-defeated by one prepended
+    character or bounded-window-defeated by attacker padding. Accepted as
+    the documented cost of an unanchored, unwindowed, execution-proven
+    mechanism. A related false positive at the VALUE boundary: a mapped
+    confusable or NFKD-decomposed insertion immediately adjacent to the
+    VALUE (not the keyword) can glue a mapped character directly onto the
+    value with no separator, flipping the result from `"none"` to
+    `"malformed"` -- fail-closed, in the same accepted direction as above.
 
     ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
     before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
@@ -1511,33 +3257,116 @@ def _legacy_supersedes_claim(text):
     other non-matching line can, so scanning every element (including whatever a
     crafted separator fuses into the first one) costs nothing and leaves no
     element unscanned for any adversarial choice of separator."""
-    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    tail = text
     claim = None
     for raw_line in (l for l in tail.split("\n") if l.strip()):
-        # positions[i] is raw_line's index of skeleton[i] — the round-4 fix's own
-        # record, so a value's right boundary can be judged against what `raw_line`
-        # actually had there (a real separator, or nothing) after the skeleton has
-        # already discarded it.
-        skeleton_chars = []
-        positions = []
-        for i, ch in enumerate(raw_line):
-            if re.match(r"[A-Za-z0-9:]", ch):
-                skeleton_chars.append(ch)
-                positions.append(i)
-        skeleton = "".join(skeleton_chars)
-        idx = skeleton.find("SUPERSEDES:")
-        if idx != -1:
-            value_start = idx + len("SUPERSEDES:")
-            m = re.match(r"none|[0-9a-f]{12}", skeleton[value_start:])
-            if m:
-                value_end = value_start + m.end()
-                glued = (value_end < len(positions)
-                         and positions[value_end] == positions[value_end - 1] + 1)
-                body = "malformed" if glued else m.group()
-            else:
-                body = "malformed"
+        # skeleton/positions/tokens/tok_idx_for_skel: see
+        # `_confusables_skeleton`'s own docstring for the full construction
+        # (shared with `parse_v11_sections`, GH #567 warden-gate round 2).
+        # skeleton is the map-or-keep-or-drop ASCII skeleton the
+        # keyword/value search below runs against; positions[s] is
+        # skeleton[s]'s index in raw_line (used by the glued-value check);
+        # tokens is a SUPERSET of skeleton that also carries a WILDCARD
+        # entry for a dropped, non-ASCII, non-mapped codepoint, so
+        # _keyword_reachable_by_dropping_optionals below can still see it
+        # as a candidate keyword-letter substitute; tok_idx_for_skel[s] is
+        # the tokens[] index of skeleton[s], used to translate a
+        # skeleton-coordinate span into tokens[]-coordinates.
+        skeleton, positions, tokens, tok_idx_for_skel = _confusables_skeleton(raw_line)
+        # Search case-insensitively -- see parse()'s TARGET_ALPHABET_LOWER
+        # filter. `.upper()` is length-preserving on this pure-ASCII
+        # skeleton, so every index found below still lines up with
+        # `positions[]` and with `skeleton` itself (used, unchanged, for the
+        # VALUE match just below -- "none"/hex stay case-exact).
+        skeleton_upper = skeleton.upper()
+        # Rescan the whole line (`start = idx + 1` after each match),
+        # applying strongest-claim-wins WITHIN a line the same way it
+        # already applies ACROSS lines -- a single `find()` would only
+        # locate the first `SUPERSEDES:` on a line. consumed_tokens collects
+        # the tokens[]-index span of every literal match's own KEYWORD and
+        # VALUE extent (once value_start/value_end are known) so the
+        # composition guard below never re-derives a redundant "trivial"
+        # completion from tokens a literal match already resolved, and never
+        # lets a preceding wildcard-completed run borrow this match's own
+        # value to satisfy its own remainder check.
+        consumed_tokens = set()
+        start = 0
+        while True:
+            idx = skeleton_upper.find(_SUPERSEDES_KEYWORD, start)
+            if idx == -1:
+                break
+            tok_start = tok_idx_for_skel[idx]
+            tok_end = tok_idx_for_skel[idx + len(_SUPERSEDES_KEYWORD) - 1]
+            consumed_tokens.update(range(tok_start, tok_end + 1))
+            value_start = idx + len(_SUPERSEDES_KEYWORD)
+            # Matched by POSITION (`pos=value_start`) against the full
+            # `skeleton`, not by slicing `skeleton[value_start:]` first -- a
+            # compiled pattern's `match(string, pos)` returns ABSOLUTE
+            # indices in `m.end()`, so `value_end = m.end()` needs no
+            # addition, and this scan never copies the remaining tail of
+            # `skeleton` once per literal match on the line (measured
+            # flat-linear, doubling ratio 2.00 at every size from 22000 to
+            # 704000 characters). Emptiness is a plain length comparison,
+            # equally O(1).
+            value_match = _SUPERSEDES_VALUE_RE.match(skeleton, value_start)
+            # empty_is_claim=True here -- an empty remainder on the
+            # literal path is this path's own long-standing "malformed"
+            # answer (see _classify_supersedes_value's own docstring).
+            result = _classify_supersedes_value(
+                value_start >= len(skeleton), value_match, True)
+            if result is not None:
+                if isinstance(result, str):
+                    body = result
+                else:
+                    m = result
+                    value_end = m.end()
+                    tok_value_start = tok_idx_for_skel[value_start]
+                    tok_value_end = tok_idx_for_skel[value_end - 1]
+                    consumed_tokens.update(range(tok_value_start, tok_value_end + 1))
+                    # `<=`, not `==` -- a multi-character NFKD expansion's
+                    # second piece needs `<=` here (see the docstring above
+                    # for why).
+                    glued = (value_end < len(positions)
+                             and positions[value_end] <= positions[value_end - 1] + 1)
+                    body = "malformed" if glued else m.group()
+                if claim is None or claim == "none":
+                    claim = body
+            start = idx + 1
+        # A mapped confusable or an NFKD-decomposed insertion landing INSIDE
+        # the keyword can, without this check, silently REMOVE a match that
+        # would otherwise be reachable -- fail closed instead of un-detecting
+        # it. Runs on EVERY line unconditionally -- a line with a literal
+        # match is NOT exempt, since the literal loop and this guard cover
+        # disjoint attack shapes -- over a token list with the literal
+        # loop's own consumed spans removed, so a literal match's own
+        # tokens never feed a redundant "trivial" completion here.
+        #
+        # Masking is NOT purely subtractive of completions redundant with
+        # the literal match's own keyword+value span -- masking a
+        # wildcard-completion's own REMAINDER span (not just the
+        # literal match's own keyword+value span) can suppress a completion
+        # the unmasked guard would otherwise report. Measured:
+        # '<W>UPERSEDES:SUPERSEDES: none', 'SUPERSEDES<W>SUPERSEDES: none'
+        # and 'SUPERSEDES: none <W>UPERSEDES:' (`<W>` a dropped wildcard
+        # codepoint) all give an unmasked `True` but resolve `"none"` as
+        # shipped. Harmless as built, not merely "probably fine": masking a
+        # wildcard-completion's remainder requires a literal match whose own
+        # VALUE span covers it, and that same literal match has therefore
+        # already resolved the value itself -- so an attacker-visible hex
+        # prefix is always detected via the literal match instead of the
+        # guard (confirmed: the three companion shapes carrying a hex value
+        # in place of "none" above all resolve that literal hex value, not
+        # silently "none" -- the caller's `not in (None, "none")` gate
+        # treats a resolved value the same as `"malformed"`, so this is
+        # still a hard-FAIL, just via a different returned string). So
+        # masking is subtractive of completions the literal match
+        # has already made moot, not merely of ones "redundant" with it --
+        # a narrower guarantee than the sentence this replaces implied.
+        guard_tokens = tokens if not consumed_tokens else [
+            tok for k, tok in enumerate(tokens) if k not in consumed_tokens]
+        if _keyword_reachable_by_dropping_optionals(guard_tokens):
             if claim is None or claim == "none":
-                claim = body
+                claim = "malformed"
     return claim
 
 

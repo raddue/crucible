@@ -16,6 +16,8 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Violating the letter of this process is violating the spirit of debugging.**
 
+**Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
 ## Communication Requirement (Non-Negotiable)
 
 **Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
@@ -345,7 +347,7 @@ The gate routes toward debugging's own Phase 1 Reproduction investigator from th
 
 **Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See `skills/grudge/SKILL.md`.
 
-If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
+If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, requested profile `fast`; Claude Code maps it to `model: haiku`) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
 ### Domain Detection
 
@@ -389,7 +391,7 @@ Before dispatching investigation agents:
 
 **Prompt template:** `./investigator-prompt.md`
 
-Dispatch 3-6 investigation subagents in parallel using the Agent tool in a single message. All subagents use `subagent_type="general-purpose"`, `model: opus`. Pass all known context (error messages, stack traces, file paths, user description, and cartographer module context from Phase 0) verbatim to each agent -- do not make them search for context you already have.
+Dispatch 3-6 investigation subagents in parallel using the Agent tool in a single message. All subagents use `subagent_type="general-purpose"` and request the `high` profile; Claude Code maps that to `model: opus`. Pass all known context (error messages, stack traces, file paths, user description, and cartographer module context from Phase 0) verbatim to each agent -- do not make them search for context you already have.
 
 **Bias toward MORE agents, not fewer.** Each investigator is cheap. Missing a root cause is expensive. When in doubt about whether to dispatch an additional agent, dispatch it.
 
@@ -431,7 +433,7 @@ Every investigation subagent prompt MUST include the context self-monitoring blo
 
 **Prompt template:** `./synthesis-prompt.md`
 
-After all Phase 1 agents report back, dispatch a single Synthesis agent (model: opus) that receives all Phase 1 reports verbatim.
+After all Phase 1 agents report back, dispatch a single Synthesis agent (requested profile `high`; Claude Code maps it to `model: opus`) that receives all Phase 1 reports verbatim.
 
 **Trust-but-verify:** The synthesis agent does NOT take investigator claims at face value. It cross-references findings between agents, flags contradictions, and identifies claims that lack concrete evidence (file paths, line numbers, stack traces). Speculative findings are downgraded. Concrete artifacts outrank plausible theories.
 
@@ -1016,7 +1018,7 @@ At completion, read the metrics log and manifest, then compute and report:
 
 Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the debugging completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count comparable dispatches grouped by `model_profile`; report raw `model_tier` separately when useful. Include these in the debugging completion report alongside existing metrics.
 
 ### Pipeline Decision Journal
 
@@ -1269,7 +1271,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:red-team`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
 - **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
-**Does not dispatch /recon or /assay** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not assay. See #147 for rationale.
+**Does not dispatch /recon or /design approach evaluation** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not design approach evaluation. See #147 for rationale.
 
 **Required skills:**
 - **`crucible:cartographer-skill`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.

@@ -843,5 +843,161 @@ class GrudgeAtomicWriteTest(unittest.TestCase):
                         os.listdir(store_dir))
 
 
+# --------------------------------------------------------------------------- #
+# grudge dead-end record kind (#686): append -> query round-trip, path        #
+# matching, distinct rendering, and the unchanged bug-record output.          #
+# --------------------------------------------------------------------------- #
+
+class DeadEndAppendTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.outside = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.outside, ignore_errors=True)
+
+    def test_roundtrip_fields(self):
+        path = ga.append(
+            symptom="", files_touched=["src/x.py"],
+            kind="dead_end", approach="JSON wall-clock budget",
+            reason_failed="reader key-set parser chokes",
+            repo="r", store_root=self.repo, base_dir=self.outside,
+            date_fixed="2026-05-05",
+        )
+        self.assertIsNotNone(path)
+        raw = open(path, encoding="utf-8").read()
+        self.assertIn('kind: "dead_end"', raw)
+        self.assertNotIn("symptom:", raw)
+        self.assertNotIn("fixed_in_commit:", raw)
+        g = gq.parse_grudge(path)
+        self.assertEqual(g["kind"], "dead_end")
+        self.assertEqual(g["approach"], "JSON wall-clock budget")
+        self.assertEqual(g["reason_failed"], "reader key-set parser chokes")
+        self.assertEqual(g["files_touched"], ["src/x.py"])
+        self.assertEqual(g["date"], "2026-05-05")
+
+    def test_overwrite_on_approach_key(self):
+        kw = dict(files_touched=["a.py"], kind="dead_end", approach="try X",
+                  repo="r", store_root=self.repo, base_dir=self.outside)
+        p1 = ga.append(symptom="", **kw)
+        p2 = ga.append(symptom="", **kw)
+        self.assertEqual(p1, p2)
+        self.assertEqual(len([n for n in os.listdir(os.path.dirname(p1))
+                              if n.endswith(".md")]), 1)
+
+    def test_empty_approach_skipped(self):
+        self.assertIsNone(ga.append(
+            symptom="", files_touched=["a.py"], kind="dead_end",
+            approach="", repo="r", store_root=self.repo, base_dir=self.outside))
+
+    def test_refuses_to_write_inside_repo_tree(self):
+        inside = os.path.join(self.repo, ".claude", "grudge")
+        path = ga.append(
+            symptom="", files_touched=["a.py"], kind="dead_end",
+            approach="try X", repo="r", store_root=self.repo, base_dir=inside)
+        self.assertIsNone(path)
+        self.assertFalse(os.path.exists(os.path.join(inside, "r")))
+
+
+class DeadEndRenderTest(unittest.TestCase):
+    def test_dead_end_renders_distinctly(self):
+        matched = [{
+            "kind": "dead_end", "approach": "multi-pass\n  JSON",
+            "reason_failed": "parser chokes\n  on unicode",
+            "files_touched": ["a.py"],
+        }]
+        out = gq.render_block(matched, {})
+        self.assertIn("⛔ Already tried: multi-pass JSON", out)
+        self.assertIn("failed because parser chokes on unicode", out)
+        self.assertNotIn("☠", out)
+
+    def test_mixed_bug_and_dead_end(self):
+        matched = [
+            {"kind": "dead_end", "approach": "try X", "reason_failed": "no",
+             "files_touched": ["a.py"]},
+            {"symptom": "double-free", "root_cause": "missing guard",
+             "files_touched": ["b.py"]},
+        ]
+        out = gq.render_block(matched, {})
+        self.assertIn("⛔ Already tried: try X", out)
+        self.assertIn("☠ double-free", out)
+
+    def test_bug_record_render_unchanged(self):
+        matched = [{
+            "symptom": "off-by-one", "root_cause": "cmp",
+            "files_touched": ["a.py"], "fixed_in_commit": "abcdef1234",
+            "date_fixed": "2026-06-01",
+        }]
+        out = gq.render_block(matched, {})
+        self.assertIn("☠ off-by-one", out)
+        self.assertNotIn("⛔", out)
+
+
+class DeadEndQueryTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.outside = tempfile.mkdtemp()
+        open(os.path.join(self.repo, "live.py"), "w").close()
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.outside, ignore_errors=True)
+
+    def test_path_match_limit_and_cull(self):
+        ga.append(symptom="", files_touched=["live.py", "gone.py"],
+                  kind="dead_end", approach="try Y", reason_failed="nope",
+                  repo="r", store_root=self.repo, base_dir=self.outside)
+        ga.append(symptom="", files_touched=["gone2.py"],
+                  kind="dead_end", approach="try Z", reason_failed="nope",
+                  repo="r", store_root=self.repo, base_dir=self.outside)
+        matched, stats = gq.query(["live.py"], "r", self.repo, base_dir=self.outside)
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(matched[0]["kind"], "dead_end")
+        self.assertEqual(stats["skipped_stale"], 1)   # gone2.py grudge is stale
+        removed = gq.cull("r", self.repo, self.outside)
+        self.assertEqual(len(removed), 1)             # only the all-gone grudge
+
+    def test_sort_uses_date_and_limit(self):
+        for i in range(3):
+            ga.append(symptom="", files_touched=["live.py"], kind="dead_end",
+                      approach=f"try {i}", reason_failed="nope", repo="r",
+                      store_root=self.repo, base_dir=self.outside,
+                      date_fixed=f"2026-01-0{i + 1}")
+        matched, stats = gq.query(["live.py"], "r", self.repo,
+                                  base_dir=self.outside, limit=2)
+        self.assertEqual(len(matched), 2)
+        self.assertEqual(stats["truncated"], 1)
+        self.assertEqual(matched[0]["date"], "2026-01-03")   # newest first
+
+
+class DeadEndCLITest(unittest.TestCase):
+    def test_append_query_stats_cli_roundtrip(self):
+        append = os.path.join(HERE, "grudge_append.py")
+        query = os.path.join(HERE, "grudge_query.py")
+        with tempfile.TemporaryDirectory() as out:
+            repo = os.path.join(out, "repo")
+            store = os.path.join(out, "store")
+            os.makedirs(repo)
+            subprocess.run(["git", "init", "-q", repo], check=True,
+                           capture_output=True)
+            open(os.path.join(repo, "live.py"), "w").close()
+            env = dict(os.environ, CRUCIBLE_GRUDGE_DIR=store)
+            subprocess.run(
+                [sys.executable, append, "--kind", "dead_end",
+                 "--approach", "try A", "--reason-failed", "nope",
+                 "--files", "live.py"],
+                cwd=repo, env=env, check=True, capture_output=True, text=True)
+            r = subprocess.run([sys.executable, query, "live.py"],
+                               cwd=repo, env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("⛔ Already tried: try A — failed because nope", r.stdout)
+            s = subprocess.run([sys.executable, query, "--stats"],
+                               cwd=repo, env=env, capture_output=True, text=True)
+            self.assertEqual(s.returncode, 0, s.stderr)
+            self.assertIn("1 held", s.stdout)
+            self.assertIn("1 in last 7d", s.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

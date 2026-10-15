@@ -2,7 +2,7 @@
 
 A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
-49 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 12 core skills are [eval-tested](docs/evals.md) with measured A/B deltas: **+23%** on execution evals (52 evals, 475 assertions, graded blind on Claude Opus 4.8) and **+31%** on sequence/ordering evals (18 evals, Opus 4.6 — not yet re-run on 4.8).
+45 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 12 core skills are [eval-tested](docs/evals.md) with measured A/B deltas: **+23%** on execution evals (52 evals, 475 assertions, graded blind on Claude Opus 4.8) and **+31%** on sequence/ordering evals (18 evals, Opus 4.6 — not yet re-run on 4.8).
 
 Skill value scales inversely with model capability: the same execution suite moved **+29% on Opus 4.6 → +23% on Opus 4.8**. The methodology is scaffolding that keeps a model on track, so the stronger the base model, the less lift it adds — one datapoint consistent with that thesis (not a controlled comparison — the two runs differ in more than the base model, since the methodology was also corrected between them, so the move can't be cleanly attributed to capability alone; see the [eval caveats](docs/evals.md)). On weaker models (Sonnet, Haiku, or non-Anthropic models in Cursor/Codex), we *expect* the deltas to widen — a prediction, not yet measured.
 
@@ -20,7 +20,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 - **Iterative quality gates, not single-pass review** — `quality-gate` loops until clean (red-team → fix → fresh re-review), with weighted stagnation detection. Measured **+55% delta** (93% with vs 38% without — the largest delta in the suite even on Opus 4.8; see [eval results](docs/evals.md)).
 - **Full pipeline orchestration** — `build` chains design → plan → execute → complete with shadow-git checkpoints, crash recovery, and structured compaction-state blocks. One command, idea to merged PR.
-- **Adversarial testing at every level** — `adversarial-tester` writes tests designed to break the implementation; `inquisitor` runs 5 parallel attack dimensions against the full feature diff; `siege` runs 6 attacker-perspective security agents until zero Critical/High.
+- **Adversarial testing at every level** — `inquisitor` writes up to 5 tests designed to break a task's implementation and runs 5 parallel attack dimensions against full-feature diffs; `siege` runs 6 attacker-perspective security agents until zero Critical/High.
 - **Token-efficient by design** — orchestrators use [disk-mediated dispatch](skills/shared/dispatch-convention.md): full subagent prompts go to `/tmp`, only ~100-token pointers enter orchestrator context. A full build saves 73-131K tokens of fossilized context.
 - **Self-calibrating, not self-certifying** — gate verdicts append to a machine-local calibration ledger; reconciliation (falsifying past verdicts, scoring each skill's [Brier](https://en.wikipedia.org/wiki/Brier_score) calibration) and weekly reporting (the honest "caught N silent bugs" headline with a rolling-median inflation detector) now run out-of-repo, against the same store, from a separate maintainer-side repo (`raddue/crucible-eval` as of #460 — maintainer-only, not a user-actionable link), and the [Book of Grudges](skills/grudge/SKILL.md) surfaces past regressions on the files you're about to touch. Receipts between orchestrator and subagents are checked by a runtime linter (`scripts/rcpt_verify.py`), so a fabricated verdict can't pass unwitnessed.
 - **Crash-resilient and session-continuous** — `replay` resumes interrupted pipelines from the last phase boundary (10 minutes, not 90); `recall` queries a searchable session activity index that survives compaction.
@@ -50,6 +50,10 @@ git clone git@github.com:raddue/crucible.git ~/repos/crucible
 
 Then point your platform at the cloned skills directory. See [Cursor plugin docs](https://cursor.com/docs/plugins/building) and [Codex skills docs](https://developers.openai.com/codex/skills/). Some advanced features (parallel subagent dispatch, agent teams, persistent memory) are platform-specific and degrade gracefully — see [PLATFORMS.md](PLATFORMS.md).
 
+**Windows:** clone with `git config core.symlinks true` (or set it afterwards and re-check out). The repo tracks `AGENTS.md` as a symlink to `CLAUDE.md`; without symlink support that file lands as a one-line text file containing the string `CLAUDE.md` instead of the guidelines.
+
+These root instruction files apply to agents working *in this repo*. Installing Crucible links or copies `skills/` (and `agents/`, if you wire those) only — it never writes a root instruction file into your project, your home directory, or any global config, so your own `AGENTS.md`/`CLAUDE.md` is left untouched. Watch the surrounding scope rather than the install: Claude Code reads `AGENTS.md` **only when no `CLAUDE.md` exists in the current directory or any parent**, so a repo with a hand-maintained `AGENTS.md` and any ancestor `CLAUDE.md` will have the `AGENTS.md` silently ignored.
+
 ## Setup essentials
 
 **Run in auto mode** for autonomous pipelines (`/build`, `/debugging`, long `/quality-gate` runs). Auto mode lets Claude execute tool calls without per-action prompts while still confirming destructive operations. It supersedes earlier `--dangerously-skip-permissions` guidance.
@@ -62,7 +66,7 @@ For hooks (session activity index, build routing advisor), MCP-based external mo
 
 ## Documentation
 
-- [docs/skills.md](docs/skills.md) — full catalog of all 49 skills
+- [docs/skills.md](docs/skills.md) — full catalog of all 45 skills
 - [docs/architecture.md](docs/architecture.md) — how the orchestrator skills compose
 - [docs/configuration.md](docs/configuration.md) — Claude Code settings, hooks, MCP, env vars
 - [docs/evals.md](docs/evals.md) — full eval methodology and per-skill A/B deltas

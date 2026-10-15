@@ -233,6 +233,8 @@ def _render(record: dict) -> str:
     then never see attacker-injected keys. This is why the writer-side escape
     closes the class the reader's key-set validation cannot: forged keys are
     all *known* keys, so allowlisting the reader is not enough alone."""
+    if record.get("kind") == "dead_end":
+        return _render_dead_end(record)
     fm = [
         "---",
         f"schema: {SCHEMA_VERSION}",
@@ -256,6 +258,32 @@ def _render(record: dict) -> str:
     return "\n".join(fm)
 
 
+def _render_dead_end(record: dict) -> str:
+    """Render a dead-end record. Same contract as _render: every free-text value
+    is JSON-encoded on one line so it cannot smuggle a bare `---` terminator or
+    forged `key: value` lines past the fence."""
+    fm = [
+        "---",
+        f"schema: {SCHEMA_VERSION}",
+        f"hash: {record['hash']}",
+        f"repo: {json.dumps(record['repo'])}",
+        f"repo_root: {json.dumps(record['repo_root'])}",
+        f"kind: {json.dumps('dead_end')}",
+        f"approach: {json.dumps(record.get('approach', '') or '')}",
+        f"reason_failed: {json.dumps(record.get('reason_failed', '') or '')}",
+        f"files_touched: {json.dumps(record.get('files_touched', []))}",
+        f"date: {json.dumps(record.get('date', '') or '')}",
+        "---",
+        "## Approach tried",
+        (record.get("approach") or "").rstrip(),
+        "",
+        "## Why it failed",
+        (record.get("reason_failed") or "").rstrip(),
+        "",
+    ]
+    return "\n".join(fm)
+
+
 def append(
     *,
     symptom: str,
@@ -270,6 +298,9 @@ def append(
     worktree_root: Optional[str] = None,
     base_dir: Optional[str] = None,
     date_fixed: Optional[str] = None,
+    kind: str = "bug",
+    approach: str = "",
+    reason_failed: str = "",
 ) -> Optional[str]:
     """Record (write/overwrite) one grudge. Returns the file path, or None if the
     write was refused/skipped. Overwrite-on-same-key (last write wins) — NOT the
@@ -290,9 +321,18 @@ def append(
         _warn("no files_touched — grudge needs at least one file to hold a grudge against; skipped")
         return None
 
-    disc = _discriminator(symptom, anti_pattern_signature)
+    is_dead_end = kind == "dead_end"
+    if is_dead_end:
+        # A dead end has no symptom fingerprint — the failed approach IS the
+        # dedupe discriminator (retrying the same approach burns another session).
+        disc = (approach or "").strip()
+    else:
+        disc = _discriminator(symptom, anti_pattern_signature)
     if not disc:
-        _warn("empty discriminator (no anti_pattern_signature and no symptom) — nothing to key on; skipped")
+        if is_dead_end:
+            _warn("empty approach — a dead-end needs the approach that failed; skipped")
+        else:
+            _warn("empty discriminator (no anti_pattern_signature and no symptom) — nothing to key on; skipped")
         return None
 
     target_dir = grudges_dir(repo, base_dir)
@@ -311,19 +351,34 @@ def append(
         return None
 
     h = compute_hash(store_root, files_norm, disc)
-    record = {
-        "hash": h,
-        "repo": repo,
-        "repo_root": store_root,
-        "fixed_in_commit": fixed_in_commit or "",
-        "symptom": (symptom or "").strip(),
-        "root_cause": (root_cause or "").strip(),
-        "files_touched": files_norm,
-        "anti_pattern_signature": (anti_pattern_signature or "").strip(),
-        "date_fixed": date_fixed or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d"),
-        "repro": repro,
-        "why": why,
-    }
+    if is_dead_end:
+        # date_fixed is reused as the record timestamp for dead ends (nothing is
+        # "fixed"); the on-disk key is `date` so a dead end never masquerades as
+        # an ordinary bug grudge.
+        record = {
+            "hash": h,
+            "repo": repo,
+            "repo_root": store_root,
+            "kind": "dead_end",
+            "approach": (approach or "").strip(),
+            "reason_failed": (reason_failed or "").strip(),
+            "files_touched": files_norm,
+            "date": date_fixed or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d"),
+        }
+    else:
+        record = {
+            "hash": h,
+            "repo": repo,
+            "repo_root": store_root,
+            "fixed_in_commit": fixed_in_commit or "",
+            "symptom": (symptom or "").strip(),
+            "root_cause": (root_cause or "").strip(),
+            "files_touched": files_norm,
+            "anti_pattern_signature": (anti_pattern_signature or "").strip(),
+            "date_fixed": date_fixed or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d"),
+            "repro": repro,
+            "why": why,
+        }
     os.makedirs(target_dir, exist_ok=True)
     path = os.path.join(target_dir, f"{h}.md")
     # #400: overwrite-on-key is idempotent (content is deterministic by hash),
@@ -348,8 +403,10 @@ def _read_files_from(path: str) -> List[str]:
 # --------------------------------------------------------------------------- #
 def _main(argv: List[str]) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="Record a grudge (fixed bug) into the Book of Grudges.")
-    ap.add_argument("--symptom", required=True)
+    ap = argparse.ArgumentParser(description="Record a grudge (fixed bug) or dead end into the Book of Grudges.")
+    ap.add_argument("--kind", choices=("bug", "dead_end"), default="bug",
+                    help="record kind: bug (default) or dead_end (approach -> failed -> why)")
+    ap.add_argument("--symptom", default="")
     ap.add_argument("--root-cause", default="")
     # Repeatable, EQUALS-form: --files=PATH one per touched path. A value is a
     # single argv element, so a comma in a filename is data, not a delimiter,
@@ -365,6 +422,8 @@ def _main(argv: List[str]) -> int:
                     help="alias for --commit (hook paste-me form)")
     ap.add_argument("--repro", default="")
     ap.add_argument("--why", default="")
+    ap.add_argument("--approach", default="", help="dead_end: the approach that was tried")
+    ap.add_argument("--reason-failed", default="", help="dead_end: why the approach failed")
     ap.add_argument("--repo-root", default=None,
                     help="override STORE identity realpath (git-common-dir "
                     "parent; tests / explicit store identity)")
@@ -415,6 +474,7 @@ def _main(argv: List[str]) -> int:
         anti_pattern_signature=args.signature, fixed_in_commit=args.fixed_in_commit,
         repro=args.repro, why=args.why, repo=repo, store_root=store_root,
         worktree_root=worktree_root,
+        kind=args.kind, approach=args.approach, reason_failed=args.reason_failed,
     )
     if path:
         print(path)

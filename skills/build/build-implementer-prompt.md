@@ -5,6 +5,8 @@
 
 Use this template when dispatching an implementer teammate in Phase 3. Extends the base implementer prompt with team communication and context self-monitoring.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implementer-N"):
   description: "Implement Task N: [task name]"

@@ -56,6 +56,7 @@ def _qwarn(msg: str) -> None:
 _KNOWN_KEYS = frozenset({
     "schema", "hash", "repo", "repo_root", "fixed_in_commit", "symptom",
     "root_cause", "files_touched", "anti_pattern_signature", "date_fixed",
+    "kind", "approach", "reason_failed", "date",
 })
 
 
@@ -140,7 +141,8 @@ def parse_grudge(path: str) -> Optional[Dict]:
         # grudges written before the escape carry bare `key: value` (their
         # unquoted text fails json.loads and is kept verbatim).
         elif key in ("repo", "repo_root", "fixed_in_commit", "symptom",
-                     "root_cause", "date_fixed"):
+                     "root_cause", "date_fixed", "kind", "approach",
+                     "reason_failed", "date"):
             try:
                 decoded = json.loads(val) if val else ""
                 # A bare legacy value that happens to be valid JSON (e.g.
@@ -154,6 +156,7 @@ def parse_grudge(path: str) -> Optional[Dict]:
             rec[key] = val
     rec.setdefault("files_touched", [])
     rec.setdefault("anti_pattern_signature", "")
+    rec.setdefault("kind", "bug")
     return rec
 
 
@@ -300,7 +303,7 @@ def query(
             hit = _signature_hit(g.get("anti_pattern_signature", ""), scope_norm, repo_root)
         if hit:
             matched.append(g)
-    matched.sort(key=lambda g: g.get("date_fixed", ""), reverse=True)
+    matched.sort(key=lambda g: g.get("date_fixed") or g.get("date") or "", reverse=True)
     truncated = max(0, len(matched) - limit)
     stats = {
         "scanned": len(grudges),
@@ -337,6 +340,17 @@ def render_block(matched: List[Dict], stats: Dict) -> str:
 
     lines = [f"⚠️  {len(matched)} grudge(s) held against the files you're about to touch — DO NOT REPEAT:"]
     for g in matched:
+        if g.get("kind") == "dead_end":
+            approach = _one_line(g.get("approach")) or "(no approach)"
+            reason = _one_line(g.get("reason_failed"))
+            files = _escapable(", ".join(g.get("files_touched", [])))
+            line = f"  ⛔ Already tried: {approach}"
+            if reason:
+                line += f" — failed because {reason}"
+            lines.append(line)
+            if files:
+                lines.append(f"      files: {files}")
+            continue
         # #602 S-0: contributor-editable free-text fields are collapsed to one
         # line — stored text there is a description, not an identifier, so
         # losing embedded newlines is an acceptable, simple defense.
@@ -669,7 +683,7 @@ def _main(argv: List[str]) -> int:
             n = 0
             for g in grudges:
                 try:
-                    d = _dt.date.fromisoformat(g.get("date_fixed", ""))
+                    d = _dt.date.fromisoformat(g.get("date_fixed") or g.get("date") or "")
                     if (today - d).days <= days:
                         n += 1
                 except ValueError:
