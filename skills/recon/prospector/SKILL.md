@@ -16,19 +16,13 @@ Explores a codebase organically, surfaces architectural friction, and proposes c
 
 **Purpose:** Discover structural improvement opportunities in a codebase. Distinct from audit (which finds bugs in a specific subsystem) -- prospector finds what could be better across the entire codebase. Audit finds what's broken. Prospector finds what could be better.
 
-**Models:** Orchestrator, organic explorer, and competing design agents request `high`; genealogists and structured analysis request `standard`. The Claude Code examples use current reference aliases for those profiles; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for exploration and design, or the harness can observe that the active orchestrator is not running one, warn: "Prospector requests high-profile reasoning for exploration and design phases. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before exploration and design. These warnings are advisory and must not terminate the pipeline.
+**Models:** Orchestrator, organic explorer, and competing-design analysts request `high`; genealogists and structured analysis request `standard`. The examples use current reference aliases; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for exploration and proposal analysis, or the harness can observe that the active orchestrator is not running one, warn: "Recon improvement-discovery mode requests high-profile reasoning for exploration and proposal analysis. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before exploration and design. These warnings are advisory and must not terminate the pipeline.
 
 ## Invocation
 
-```
-/recon mode: improvement-discovery       # default — explore all friction types
-/recon mode: improvement-discovery focus: testability
-/recon mode: improvement-discovery focus: coupling
-/recon mode: improvement-discovery focus: complexity
-/recon mode: improvement-discovery focus: depth  # Ousterhout deep modules lens
-```
+Select improvement-discovery mode from user intent. If user narrows discovery, use `focus: testability|coupling|complexity|depth` as internal guidance; the default explores all friction types.
 
-Default mode uses the full friction example set. A `--focus` flag swaps in a targeted subset of guiding questions. The explorer is still organic — it can report friction outside its focus — but the focus tells it where to start looking.
+Default improvement discovery uses the full friction example set. A requested focus swaps in a targeted subset of guiding questions. The explorer is still organic — it can report friction outside its focus — but the focus tells it where to start looking.
 
 ## Communication Requirement (Non-Negotiable)
 

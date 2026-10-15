@@ -13,7 +13,7 @@ Adversarial review of code subsystems or non-code artifacts. Dispatches parallel
 
 **Purpose:** Review existing subsystems in a repo and report findings. Distinct from quality-gate (which fixes artifacts in a loop) -- audit is find-and-report only.
 
-**Code path is SYSTEMIC-ONLY.** On the `code` artifact type, audit reports **systemic health** — recurring patterns, structural properties, and absences across the subsystem, with **no single reproduction**. A defect with one concrete reproduction (even across multiple files) is an **instance bug** and belongs to `/delve`, not audit; audit routes it there (via the opt-in `--bugs` sub-path) or surfaces it under an explicit out-of-scope stub when `/delve` is absent. Maintainability/complexity/hotspot depth delegates to `/recon improvement-discovery mode`. See **The Systemic-Only Rule** below — it governs every code-path lens. (The non-code paths — design / plan / concept — are unchanged.)
+**Code path is SYSTEMIC-ONLY.** On the `code` artifact type, audit reports **systemic health** — recurring patterns, structural properties, and absences across the subsystem, with **no single reproduction**. A defect with one concrete reproduction (even across multiple files) is an **instance bug** and belongs to `/delve`, not audit; audit routes it there (via the opt-in `--bugs` sub-path) or surfaces it under an explicit out-of-scope stub when `/delve` is absent. Maintainability/complexity/hotspot depth delegates to `/recon` improvement-discovery mode. See **The Systemic-Only Rule** below — it governs every code-path lens. (The non-code paths — design / plan / concept — are unchanged.)
 
 **Models:** Orchestrator and analysis agents request `high`; scoping exploration requests `standard`. The Claude Code examples use the current reference aliases `model: opus` and `model: sonnet`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for synthesis, or the harness can observe that the active orchestrator is not running one, warn: "Audit requests high-profile reasoning for synthesis. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before synthesis. These warnings are advisory and must not terminate the pipeline.
 
@@ -31,7 +31,7 @@ Audit supports 4 artifact types, each with tailored analytical lenses:
 | `plan` | Feasibility | Risk & Dependencies | Completeness | Assumptions |
 | `concept` | Problem-Solution Fit | Feasibility & Cost | Stakeholder Alignment | Blind Assumptions |
 
-The `code` lenses are **systemic only** (see The Systemic-Only Rule). Maintainability/complexity is **not** a lens — audit delegates it to `/recon improvement-discovery mode`. Instance bugs are **not** a lens — audit delegates them to `/delve` via the opt-in `--bugs` sub-path.
+The `code` lenses are **systemic only** (see The Systemic-Only Rule). Maintainability/complexity is **not** a lens — audit delegates it to `/recon` improvement-discovery mode. Instance bugs are **not** a lens — audit delegates them to `/delve` via the opt-in `--bugs` sub-path.
 
 ### Invocation
 
@@ -72,7 +72,7 @@ Every `code`-path lens — Architecture, Consistency, Robustness (systemic), Tes
 **What this removes from audit's code path:** the old instance `Correctness` and `Robustness` lenses are gone. Single-site correctness/robustness bugs are `/delve`'s. audit's kept `Robustness (systemic)` lens covers only subsystem-wide robustness **patterns / absences** (e.g. "no locking discipline across any mutation path", "no boundary validates input anywhere") — never a single-site robustness bug.
 
 **Delegation contracts:**
-- **Maintainability / complexity / hotspots → `/recon improvement-discovery mode`** (it owns git-churn metrics + redesign). Not an audit lens.
+- **Maintainability / complexity / hotspots → `/recon` improvement-discovery mode** (it owns git-churn metrics + redesign). Not an audit lens.
 - **Instance bugs → `/delve`** (only when the user passes `--bugs`; see `--bugs` Sub-Path). When `/delve` is not installed, see the `/delve`-absent fallback.
 - **Test authoring → out of scope** for audit (audit never authors or fixes tests); test **staleness → `test-coverage`**. The Test-health lens only diagnoses + prioritizes systemic coverage gaps; it is never diff-scoped.
 
@@ -88,7 +88,7 @@ sites: [{file, line}, {file, line}, ...]
 
 ## `--drift` Mode (code path, opt-in)
 
-Drift compares the subsystem against an **explicit intent artifact** and reports divergence from it. It exists alongside `/recon improvement-discovery mode` without colliding: **prospector keys on git history** ("how did it get this way", churn, vestigial structure); **Drift keys on a design artifact** ("does it still match what we said").
+Drift compares the subsystem against an **explicit intent artifact** and reports divergence from it. It exists alongside `/recon` improvement-discovery mode without colliding: **prospector keys on git history** ("how did it get this way", churn, vestigial structure); **Drift keys on a design artifact** ("does it still match what we said").
 
 - Runs **only** under `audit --drift intent=<path>`. The `<path>` is an explicit design / spec / ADR / contract artifact.
 - **`--drift` without `intent=` is a usage error** — report it and stop; never auto-discover an intent artifact (auto-discovery would reopen the prospector collision).
@@ -521,7 +521,7 @@ Each lens is dispatched as a parallel agent using its prompt template. All four 
 
 All lenses output structured findings with these common fields: `{severity, file, line_range, evidence, description}`, plus the mandatory **`sites: [{file,line}, ...]`** enumeration on every code finding (see Code Finding Schema). Individual lenses add lens-specific fields (e.g., Robustness-systemic adds `failure_pattern`, Architecture adds `impact`, Consistency adds `convention_violated`, Test-health adds `coverage_gap` and `priority_rationale`, and — under `--drift` — Drift adds `intent_reference`). These canonical snake_case identifiers correspond to the bold human labels the prompt output templates emit: `failure_pattern` ↔ "Failure pattern:", `impact` ↔ "Impact:", `convention_violated` ↔ "Convention violated:", `coverage_gap` ↔ "Coverage gap:", `priority_rationale` ↔ "Priority rationale:", and `intent_reference` ↔ "Intent reference:". The orchestrator maps between identifier and label when preserving these fields. The orchestrator's Phase 3 deduplication uses the common fields for matching; lens-specific fields are preserved in the final report.
 
-**Maintainability / complexity is not a lens** — when hotspot / complexity / churn depth is wanted, audit calls `/recon improvement-discovery mode` (delegation, not duplication). **Instance correctness / single-site robustness bugs are not lenses** — they route to `/delve` via `--bugs`.
+**Maintainability / complexity is not a lens** — when hotspot / complexity / churn depth is wanted, audit calls `/recon` improvement-discovery mode (delegation, not duplication). **Instance correctness / single-site robustness bugs are not lenses** — they route to `/delve` via `--bugs`.
 
 #### Architecture
 
@@ -758,7 +758,7 @@ Each analysis template includes:
 - Silently drop findings that match existing issues (always show, let user decide)
 - **Silently drop a single-reproduction finding when `/delve` is absent** — surface it under the "Out-of-scope instance bugs (install /delve to triage)" stub.
 - **Run Drift without `--drift intent=<path>`, auto-discover an intent artifact, or advertise a Drift section when `--drift` was not passed.**
-- **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/recon improvement-discovery mode`. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `test-coverage`.
+- **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/recon` improvement-discovery mode. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `test-coverage`.
 - Exceed 1500 lines of total prompt content in any agent dispatch — this cap governs inlined prompt content per dispatch, and for non-code the shared dispatch-context bundle is held to the same 1500-line ceiling via the step-4.5 truncation order (artifact never truncated; Supporting Context then Operating Environment trimmed if over)
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
@@ -770,7 +770,7 @@ Each analysis template includes:
 - Treating this as a fix loop (audit reports, it does not fix)
 - **Reporting an instance bug (one concrete reproduction) as a systemic finding** — it is `/delve`'s, even across multiple files
 - **Suppressing a single-reproduction finding when `/delve` is absent** instead of surfacing it under the out-of-scope stub
-- **Re-implementing maintainability/complexity analysis** instead of delegating to `/recon improvement-discovery mode`; **authoring or fixing tests** instead of diagnosing systemic gaps
+- **Re-implementing maintainability/complexity analysis** instead of delegating to `/recon` improvement-discovery mode; **authoring or fixing tests** instead of diagnosing systemic gaps
 - **Running or advertising Drift without `--drift intent=<path>`**, or auto-discovering an intent artifact
 - Hardcoding tracker-specific commands (use available environment tools)
 - Losing agent results to context compaction (write to disk immediately)
@@ -782,10 +782,10 @@ Each analysis template includes:
 | Skill | How Used | When |
 |-------|----------|------|
 | `crucible:recon` | Subsystem-manifest module | Phase 1 Code Path (subsystem scoping via structured manifest). Fallback: dispatch scoping agent via `audit-scoping-prompt.md`. |
-| `/recon persistent-map mode` | Consult mode | Phase 1 (subsystem scoping and conventions) |
-| `/recon persistent-map mode` | Record mode | Phase 4 (Phase 1 manifest only) |
+| `/recon` persistent-map mode | Consult mode | Phase 1 (subsystem scoping and conventions) |
+| `/recon` persistent-map mode | Record mode | Phase 4 (Phase 1 manifest only) |
 | `crucible:delve` | Instance-bug sweep | Code path, opt-in `--bugs`: invoked as a SKILL at `effort=high` over the full subsystem; feeds the suppress-and-cite gate. (audit reaches `delve-engine` only transitively through `/delve`; it carries the separate `dispatch: delve` skill marker — see the Dispatch section.) |
-| `/recon improvement-discovery mode` | Maintainability / complexity / hotspot depth | Code path, on request — audit delegates rather than re-deriving git-churn friction |
+| `/recon` improvement-discovery mode | Maintainability / complexity / hotspot depth | Code path, on request — audit delegates rather than re-deriving git-churn friction |
 | `crucible:test-coverage` | Test **staleness** | Code path — Test-health routes staleness here (Test-health itself only diagnoses systemic coverage gaps) |
 
 - **Dispatches:** Code audit templates (architecture, consistency [2 agents], robustness-systemic, test-health, blind-spots; drift when `--drift`) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback). Instance bugs delegated to the `/delve` skill on `--bugs`.

@@ -1,20 +1,20 @@
 ---
 name: recon
-description: "Investigate codebases before tasks, map whole repositories and neighbors, maintain persistent codebase maps, or discover architectural friction and redesign candidates. Use /recon for task-scoped investigation, first-time onboarding, persistent mapping, or improvement discovery; select the matching mode."
+description: "Investigate unfamiliar code before a task, onboard to a whole repository and local neighbors, consult or maintain a persistent codebase map, or discover architectural friction and refactor candidates. Use for codebase investigation, first-time repository mapping, codebase maps, architecture friction, and refactor opportunity discovery."
 ---
 
 # Recon
 
 ## Modes
 
-Select exactly one mode from user intent. The `mode` parameter below is an internal routing label, not user-facing invocation syntax; callers may request a mode in natural language:
+Select exactly one mode from user intent; default to task-scoped investigation:
 
-- **`task-investigation`** (default): follow the core brief and optional depth-module workflow below.
-- **`whole-repo-onboarding`:** select for first-time full-repository mapping; follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
-- **`persistent-map`:** select for consulting or updating accumulated codebase knowledge; follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
-- **`improvement-discovery`:** select for open-ended improvement discovery; follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
+- **Task investigation:** follow the core brief and optional depth-module workflow below.
+- **Whole-repo onboarding:** select for first-time full-repository mapping; follow [`project-init/SKILL.md`](project-init/SKILL.md) for partitioned repo scans, optional sibling-repo topology, and structural bootstrap. It feeds the same persistent map described below. Use for first-time full-repo mapping; no task required.
+- **Persistent map:** select for consulting or updating accumulated codebase knowledge; follow [`cartographer/SKILL.md`](cartographer/SKILL.md) for consult, load, record, and defect-signature workflows; prompt files beside it define the record format. Storage remains in the harness project memory directory. Whole-repo onboarding's structural tags and precedence rules remain authoritative.
+- **Improvement discovery:** select for open-ended improvement discovery; follow [`prospector/SKILL.md`](prospector/SKILL.md) for friction analysis, genealogy, prioritization, and competing redesign proposals. Use `/design` to develop a selected redesign proposal; recon does not absorb design decisions or implementation.
 
-These are modes of `/recon`, not separate skills. For specialized output instructions, read the selected mode guide and its prompt/reference files before dispatching. In whole-repo-onboarding mode, announce the mode and follow its tiered workflow. In persistent-map mode, perform the requested consult/load/record action. In improvement-discovery mode, preserve its advisory/read-only boundary and route proposals to `/design`.
+These are modes of `/recon`, not separate skills. For specialized output instructions, read the selected mode guide and its prompt/reference files before dispatching. In whole-repo onboarding, announce the mode and follow its tiered workflow. In persistent-map work, perform the requested consult/load/record action. In improvement discovery, preserve its advisory/read-only boundary and route proposals to `/design`.
 
 ## Overview
 
@@ -79,7 +79,7 @@ List of depth modules to produce after core synthesis. Valid values:
 |---|---|---|---|
 | `impact-analysis` | Impact Analyst | high | `/design`, `/build` |
 | `consumer-registry` | Consumer Mapper | standard | `/migrate` |
-| `friction-scan` | Friction Scanner | high | `/recon` with `mode: "improvement-discovery"` |
+| `friction-scan` | Friction Scanner | high | `/recon` improvement-discovery mode |
 | `subsystem-manifest` | Manifest Builder | standard | `/audit` |
 | `diagnostic-context` | Diagnostic Gatherer | high | `/debugging` |
 | `execution-readiness` | Readiness Checker | standard | `/build` |

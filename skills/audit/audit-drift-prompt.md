@@ -16,7 +16,7 @@ Task tool (general-purpose, model: opus):
     and reporting where the subsystem has DIVERGED from that stated intent.
     You key on the supplied artifact, NOT on git history. You report
     divergence only -- you do not re-derive friction or redesign from
-    scratch (that is /recon improvement-discovery mode's job, and it keys on history, not intent).
+    scratch (that is `/recon` improvement-discovery mode's job, and it keys on history, not intent).
 
     ## The Systemic-Only Rule (binding)
 
@@ -55,7 +55,7 @@ Task tool (general-purpose, model: opus):
       (instance bug -> /delve)
     - Friction or improvement ideas NOT grounded in the intent artifact --
       do not re-derive what the design "should" be from scratch; that is
-      /recon improvement-discovery mode's job (it keys on git history, you key on the artifact)
+      `/recon` improvement-discovery mode's job (it keys on git history, you key on the artifact)
     - Divergence judged against git history rather than the supplied intent
       artifact
     - Anything when no intent artifact was supplied (this lens does not run
@@ -118,7 +118,7 @@ Task tool (general-purpose, model: opus):
     - Do NOT report a single-reproduction divergence as a Drift finding --
       the Systemic-Only Rule routes it to /delve
     - Do NOT re-derive design friction from scratch or propose redesigns
-      not grounded in the intent artifact (that's /recon improvement-discovery mode)
+      not grounded in the intent artifact (that's `/recon` improvement-discovery mode)
     - Do NOT judge divergence against git history -- judge against the
       supplied intent artifact only
     - Do NOT speculate -- every finding must cite BOTH the intent passage

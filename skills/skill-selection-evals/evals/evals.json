@@ -529,7 +529,7 @@
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
-      "reasoning": "recon whole-repo-onboarding mode owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is recon whole-repo-onboarding mode verbatim.",
+      "reasoning": "Recon should select whole-repo onboarding mode for full structural context before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap."},{,
       "difficulty": "medium"
     },
     {
@@ -557,7 +557,7 @@
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-      "reasoning": "recon improvement-discovery mode explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "reasoning": "Recon should select improvement-discovery mode to find architectural friction and propose redesigns. Task investigation maps code to answer how-it-works questions; audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
       "difficulty": "medium"
     },
     {
