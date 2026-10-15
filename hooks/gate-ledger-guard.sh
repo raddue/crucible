@@ -203,7 +203,7 @@ if [ -z "$PIPELINE_ID" ]; then
 fi
 
 # Extract project hash from the file path
-# Path format: .../.claude/projects/<hash>/memory/build-gate-ledger.md
+# Supports legacy memory-root and namespaced memory/builds/<worktree-key>/ ledgers.
 PROJECT_HASH="$(echo "$RESOLVED_PATH" | sed -n 's|.*\.claude/projects/\([^/]*\)/memory/.*|\1|p')"
 if [ -z "$PROJECT_HASH" ]; then
   # Filename matches but path is NOT the canonical ledger location — this is

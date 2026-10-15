@@ -65,8 +65,8 @@ write_marker() {
   local branch="$3"
   local pid="${4:-build-test-pipeline-id}"
   jq -nc \
-    --arg sk "$skill" --arg st "$start_time" --arg br "$branch" --arg pid "$pid" \
-    '{skill:$sk, start_time:$st, branch:$br, pipeline_id:$pid}' > "$MARKER_PATH"
+    --arg sk "$skill" --arg st "$start_time" --arg br "$branch" --arg pid "$pid" --arg root "$FAKE_PROJECT" \
+    '{skill:$sk, start_time:$st, branch:$br, pipeline_id:$pid, worktree_root:$root}' > "$MARKER_PATH"
 }
 
 # Run the hook from inside the fake project dir (so $(pwd) hashing matches),
@@ -541,19 +541,66 @@ else
 fi
 
 # ------------------------------------------------------------------------
-# Test E16 — PROJECT_HASH derivation canary (plan case 16; S3-R1).
-# Marker at ~/.claude/projects/$(tr '/' '-' on fake project)/memory/
-# → build-shaped prompt → hook finds marker and suppresses.
+# Test E16 — Namespaced builds marker suppresses only a build dispatch.
 # ------------------------------------------------------------------------
 setup_case
+WORKTREE_KEY="$(printf '%s' "$FAKE_PROJECT" | sha256sum | cut -d' ' -f1)"
+NAMESPACED_MARKER="$MEMORY_DIR/builds/$WORKTREE_KEY/.pipeline-active"
+mkdir -p "$(dirname "$NAMESPACED_MARKER")"
 write_marker "build" "$NOW_ISO" "test-branch"
+cp "$MARKER_PATH" "$NAMESPACED_MARKER"
+rm "$MARKER_PATH"
 JSON="$(make_agent_json "spec + implement + PR")"
 run_hook "$JSON"
 if [ "$RC" -eq 0 ] && ! echo "$STDERR" | grep -q 'ADVISORY'; then
-  pass E16 "PROJECT_HASH derivation canary: tr '/' '-' marker suppresses"
+  pass E16 "Namespaced current-worktree build marker suppresses advisory"
 else
-  fail E16 "PROJECT_HASH derivation mismatch: hook must look at ~/.claude/projects/\$(echo \$PROJECT_ROOT | tr '/' '-')/memory/.pipeline-active" \
-    "rc=$RC stderr=$STDERR"
+  fail E16 "Namespaced current-worktree build marker was not recognized" "rc=$RC stderr=$STDERR"
+fi
+
+# A namespaced marker for another pipeline type must not suppress build advice.
+setup_case
+mkdir -p "$(dirname "$NAMESPACED_MARKER")"
+write_marker "spec" "$NOW_ISO" "test-branch"
+cp "$MARKER_PATH" "$NAMESPACED_MARKER"
+rm "$MARKER_PATH"
+run_hook "$(make_agent_json "spec + implement + PR")"
+if [ "$RC" -eq 0 ] && echo "$STDERR" | grep -q 'ADVISORY'; then
+  pass E16b "Namespaced non-build marker does not suppress advisory"
+else
+  fail E16b "Namespaced non-build marker incorrectly suppressed advisory" "rc=$RC stderr=$STDERR"
+fi
+
+# An ownerless or foreign legacy build marker cannot suppress another worktree.
+setup_case
+jq -nc --arg sk "build" --arg st "$NOW_ISO" --arg br "test-branch" \
+  '{skill:$sk,start_time:$st,branch:$br,pipeline_id:"legacy-no-owner"}' > "$MARKER_PATH"
+run_hook "$(make_agent_json "spec + implement + PR")"
+if [ "$RC" -eq 0 ] && echo "$STDERR" | grep -q 'ADVISORY'; then
+  pass E16c "Ownerless legacy build marker does not suppress advisory"
+else
+  fail E16c "Ownerless legacy build marker incorrectly suppressed advisory" "rc=$RC stderr=$STDERR"
+fi
+
+setup_case
+jq -nc --arg sk "build" --arg st "$NOW_ISO" --arg br "test-branch" --arg root "$TMPDIR_BASE/foreign" \
+  '{skill:$sk,start_time:$st,branch:$br,pipeline_id:"legacy-foreign",worktree_root:$root}' > "$MARKER_PATH"
+run_hook "$(make_agent_json "spec + implement + PR")"
+if [ "$RC" -eq 0 ] && echo "$STDERR" | grep -q 'ADVISORY'; then
+  pass E16d "Foreign-worktree legacy marker does not suppress advisory"
+else
+  fail E16d "Foreign-worktree legacy marker incorrectly suppressed advisory" "rc=$RC stderr=$STDERR"
+fi
+
+setup_case
+mkdir -p "$(dirname "$NAMESPACED_MARKER")"
+jq -nc --arg sk "build" --arg st "$NOW_ISO" --arg br "test-branch" --arg root "$TMPDIR_BASE/foreign" \
+  '{skill:$sk,start_time:$st,branch:$br,pipeline_id:"namespaced-foreign",worktree_root:$root}' > "$NAMESPACED_MARKER"
+run_hook "$(make_agent_json "spec + implement + PR")"
+if [ "$RC" -eq 0 ] && echo "$STDERR" | grep -q 'ADVISORY'; then
+  pass E16e "Foreign-worktree namespaced marker does not suppress advisory"
+else
+  fail E16e "Foreign-worktree namespaced marker incorrectly suppressed advisory" "rc=$RC stderr=$STDERR"
 fi
 
 # ------------------------------------------------------------------------

@@ -327,6 +327,7 @@ Graphify" note for the division of labor. Do not fold one into the other.
   "scratch_dir": "<scratch directory path>",
   "dispatch_dir": "/tmp/crucible-dispatch-<session-id>/",
   "branch": "<git branch at pipeline start>",
+  "worktree_root": "<git rev-parse --show-toplevel; build markers only, optional for other skills>",
   "baseline_sha": "<HEAD SHA at pipeline start>"
 }
 ```
@@ -339,13 +340,13 @@ Graphify" note for the division of labor. Do not fold one into the other.
 
 **Detection (at pipeline start):**
 1. Check `<scratch>/.pipeline-active`
-2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`), proceed normally
+2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`; build markers also include `worktree_root`), proceed normally
 3. Found, same `pipeline_id` as current session -> compaction recovery (within-session, existing behavior)
 4. Found, different `pipeline_id` -> previous pipeline crashed. Check `branch` field against current `git branch --show-current`:
    - **Branch matches:** offer resume per the skill's resume logic (see `crucible:replay` for full orchestration, or per-skill detection-only for secondary skills)
    - **Branch mismatch:** warn the user: *"Previous [skill] on branch [marker.branch] crashed at Phase [phase]. You are currently on [current-branch]. Switch to [marker.branch] before resuming? [switch+resume / start fresh / abort]"*. Do NOT proceed with resume on the wrong branch — checkpoint restore would contaminate the current branch.
 
-**Where `<scratch>` is:** The pipeline's persistent scratch directory (`~/.claude/projects/<hash>/memory/`).
+**Where `<scratch>` is:** The pipeline's persistent scratch directory. Most pipelines use `~/.claude/projects/<hash>/memory/`; `/build` uses `~/.claude/projects/<project-hash>/memory/builds/<sha256(git rev-parse --show-toplevel)>/` so concurrent worktrees have independent markers and recovery state. Build markers include `worktree_root`; older markers without it remain readable but do not prove worktree ownership.
 
 ## Compaction Recovery
 

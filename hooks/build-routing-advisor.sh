@@ -222,8 +222,25 @@ fi
 
 # ── 11. Pipeline-active marker check ───────────────────────────────────
 MARKER="$PROJECT_MEMORY/.pipeline-active"
+WORKTREE_KEY="$(printf '%s' "$PROJECT_ROOT" | sha256sum 2>/dev/null | cut -d' ' -f1)"
+WORKTREE_MARKER=""
+[ -n "$WORKTREE_KEY" ] && WORKTREE_MARKER="$PROJECT_MEMORY/builds/$WORKTREE_KEY/.pipeline-active"
 MARKER_ACTIVE=0
-if [ -f "$MARKER" ]; then
+if [ -n "$WORKTREE_MARKER" ] && [ -f "$WORKTREE_MARKER" ] \
+   && [ "$(jq -r '.skill // empty' "$WORKTREE_MARKER" 2>/dev/null)" = "build" ] \
+   && [ "$(jq -r '.worktree_root // empty' "$WORKTREE_MARKER" 2>/dev/null)" = "$PROJECT_ROOT" ]; then
+  MARKER="$WORKTREE_MARKER"
+elif [ -f "$MARKER" ]; then
+  LEGACY_SKILL="$(jq -r '.skill // empty' "$MARKER" 2>/dev/null)"
+  LEGACY_ROOT="$(jq -r '.worktree_root // empty' "$MARKER" 2>/dev/null)"
+  # Legacy build markers suppress only when they prove ownership of this worktree.
+  if [ "$LEGACY_SKILL" = "build" ] && [ "$LEGACY_ROOT" != "$PROJECT_ROOT" ]; then
+    MARKER=""
+  fi
+else
+  MARKER=""
+fi
+if [ -n "$MARKER" ] && [ -f "$MARKER" ]; then
   MARKER_SKILL="$(jq -r '.skill // empty' "$MARKER" 2>/dev/null)"
   MARKER_START="$(jq -r '.start_time // empty' "$MARKER" 2>/dev/null)"
   MARKER_BRANCH="$(jq -r '.branch // empty' "$MARKER" 2>/dev/null)"
