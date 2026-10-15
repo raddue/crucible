@@ -166,7 +166,7 @@ Overall: **98% with skill vs 67% without, +31% average delta.** Sequence complia
 ## #537 Sonnet Pin: Wording-Diff Sanity Check (Not a Full Blind A/B, Claude Sonnet 5)
 
 #537 pins `crucible-qg-fix` from `model: inherit` to `model: sonnet` and touches wording in
-`skills/quality-gate/SKILL.md` and `skills/red-team/SKILL.md` (both carry `evals/evals.json`),
+`skills/quality-gate/SKILL.md` (the absorbed red-team evals live in its `evals/evals.json`),
 triggering CLAUDE.md's "eval before you publish" rule. A full blind A/B (14 cases × old/new,
 each a live multi-round gate run) was judged disproportionate for a prose/pin diff — reduced to
 **2 representative cases, old (git HEAD pre-#537) vs. new (working tree post-#537), 4 live agent

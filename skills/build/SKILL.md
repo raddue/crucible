@@ -1361,8 +1361,8 @@ Build is the outermost orchestrator. The **design and plan** gates route via `cr
 
 | Pipeline Stage | Artifact Type | Replaces |
 |---------------|---------------|----------|
-| Phase 1, Step 2 (after design) | design | Existing `crucible:quality-gate (red-team mode)` on design |
-| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:quality-gate (red-team mode)` on plan |
+| Phase 1, Step 2 (after design) | design | Existing `crucible:quality-gate` on design (preserved red-team review) |
+| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:quality-gate` on plan (preserved red-team review) |
 | Phase 4 (single warden gate) | code | `crucible:warden` — runs the red-team leg (+ temper/delve/inquisitor/siege) |
 
 For the **code leg**, code review (`crucible:temper`), inquisitor (`crucible:inquisitor`), and the quality-gate red-team leg are now consolidated inside `crucible:warden` — temper does structured quality checks, inquisitor writes cross-component adversarial tests, and the red-team leg does adversarial artifact review (plus delve and a conditional siege run). The three purposes still stand, but warden drives them as one disjunction-of-native-gates rather than as separate steps.

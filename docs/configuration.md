@@ -35,4 +35,4 @@ Optional PreToolUse hook (`hooks/build-routing-advisor.sh`) that warns — witho
 
 ## External Model Review (MCP)
 
-For independent code review from non-Anthropic models (Gemini, OpenAI, etc.), configure `.claude/consensus-config.yaml` using the example at [consensus-config-example.yaml](../skills/quality-gate/consensus-config-example.yaml) and register the MCP server in `.mcp.json`. See the consensus and external review skill descriptions in [skills.md](skills.md) for details.
+For independent code review from non-Anthropic models (Gemini, OpenAI, etc.), configure `.claude/consensus-config.yaml` using the example at [consensus-config-example.yaml](../skills/quality-gate/consensus-config-example.yaml) and register the MCP server in `.mcp.json`. See the quality-gate consensus mechanism in [skills.md](skills.md) for details.
