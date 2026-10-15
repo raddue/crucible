@@ -9,10 +9,6 @@
 - Architecture · Provider Adapters · Parallel Dispatch · Aggregation
 - Testing
 
----
-name: consensus
-description: Multi-model consensus for high-stakes quality decisions. Opt-in MCP-based system that dispatches prompts to multiple LLM providers in parallel and synthesizes their responses. Used by quality-gate (stagnation judge, periodic red-team) and design (Challenger).
----
 
 ## Overview
 

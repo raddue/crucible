@@ -227,7 +227,7 @@ Task tool (subagent_type: crucible-red-team):
       of the *next* round checks.
       **And the `PASS` leg is now *reached*.** The linter is invoked with a repeatable
       `--root` — `--tier2 --strict --root <dispatch-root> --root <findings-root>`
-      (`quality-gate/SKILL.md` › Receipt Linter defines `<findings-root>`; it is **not**
+      (`quality-gate/receipt-consensus.md` › Receipt Linter defines `<findings-root>`; it is **not**
       always the scratch directory itself) — and the orchestrator is obliged to supply, as that second root, the
       directory whose top level holds `[FINDINGS_OUTPUT_PATH]`; resolution is a literal join
       with no search, so the bare basename you cite is probed only at that root's top level. When it does, your findings file resolves and the `PASS` leg's
@@ -236,7 +236,7 @@ Task tool (subagent_type: crucible-red-team):
       `PASS` leg degraded to `UNVERIFIABLE: witness <findings-file> (no file under root)`,
       exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. **Cite the file by the
       shortest name that resolves under the root you were given.** Under the
-      findings-file location pin (`quality-gate/SKILL.md` › *Findings-file location
+      findings-file location pin (`quality-gate/loop.md` › *Findings-file location
       pin*) that is the **bare basename**, and that remains the correct citation for
       the ordinary case. If — and only if — your findings file is genuinely one or
       more directories below a supplied root, a **root-relative** path —

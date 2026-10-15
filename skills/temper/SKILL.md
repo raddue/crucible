@@ -27,7 +27,7 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 
 Temper reviews **code diffs only**. Use a different skill for:
 
-- **Design docs / plans / concepts** — use `/audit` or `/red-team`.
+- **Design docs / plans / concepts** — use `/audit` or `/quality-gate` red-team mode.
 - **Systemic multi-site pattern review** — subsystem-wide patterns, absences, or structural drift with **no single reproduction** — use `/audit`. (temper itself drives delve-engine's parallel fan-out for *instance-bug* enumeration — one-reproduction defects; it does not defer that wholesale to `/audit`. The boundary is the reproduction discriminator: one concrete reproduction is temper/delve's; a no-single-repro pattern is `/audit`'s.)
 - **Executable cross-component bug-hunting** (adversarial tests against assembled features) — use `/inquisitor`.
 - **Security-specific review** with attacker-perspective coverage — use Claude Code's built-in `/security-review` or `/siege` for a deep multi-agent security audit.

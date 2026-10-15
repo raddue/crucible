@@ -7,10 +7,6 @@
 - Depth Calibration · The Iron Law · Rationalization Prevention · Red Flags
 - Dual-Mode Operation · Terminal Verdict Emit · External Model Review (Optional) · Integration
 
----
-name: red-team
-description: Use when you need adversarial review of any artifact — design docs, implementation plans, code, PRs, or documentation. Iterates until clean or stagnation.
----
 
 # Red Team
 
@@ -37,7 +33,7 @@ These args apply ONLY in standalone-mode iterative-loop invocations. When qualit
 **Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
 
 - `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/loop.md`): **10** for code artifacts, **3** for hypothesis artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
-- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/red-team`; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
+- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/quality-gate` red-team mode; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
 
 ## When to Use
 

@@ -7,11 +7,6 @@
 - Compaction Recovery · Stale Audit Results · Invocation Convention · Red Flags
 - Integration
 
----
-name: dependency-audit
-description: Ecosystem-appropriate dependency vulnerability audit. Walks the project for package.json, Cargo.toml, requirements.txt, pyproject.toml manifests and runs npm/cargo/pip-audit. Produces a structured supply-chain signal with normalized severities. Used by build alongside quality-gate; can also be invoked standalone. Triggers on /dependency-audit, 'audit dependencies', 'scan vulnerabilities', 'check CVEs'.
-origin: crucible
----
 <!-- MODEL-TIER: security-hard-out -->
 
 # Dependency Audit
@@ -25,7 +20,7 @@ Runs ecosystem-appropriate dependency audit commands and produces a normalized s
 ## When to Use
 
 - **Build pipeline:** Invoked in parallel with quality-gate on code-artifact phases. Both produce independent signals; build's gate ledger integrates them.
-- **Standalone:** User runs `/dependency-audit` directly to scan a project ad-hoc.
+- **Standalone:** User requests a standalone dependency audit via `/quality-gate` dependency-audit mode to scan a project ad-hoc.
 - **CI / scheduled runs:** Invoked by a cron-style schedule to catch dependency drift between feature work.
 
 ## Skill Arguments
@@ -216,7 +211,7 @@ The `generated-at` timestamp marks when results were produced. Results are valid
 `dependency-audit` is invoked:
 
 - **By build** — as quality-gate’s independent preflight lane on code artifacts. Build’s gate ledger integrates the result.
-- **By the user** — via `/quality-gate` dependency-audit mode (also accepts the legacy request phrase `/dependency-audit`).
+- **By the user** — via `/quality-gate` dependency-audit mode (legacy wording "audit dependencies" routes here).
 - **By schedule** — via `/loop` or `/schedule` for periodic supply-chain scans.
 
 The dependency-audit lane does not invoke quality-gate red-team mode. It produces its own signal; consumption is the caller's responsibility.

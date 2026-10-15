@@ -68,8 +68,8 @@ array entries, oldest first). **Consensus reviewer keying (S3/S7, round 2).** Th
 `consensus` only when the emitter actually received and used a **completed or
 partial consensus REVIEW result for this round** — the
 `consensus_query(mode="review")` call that produces red-team findings at
-`skills/quality-gate/SKILL.md:385-393`. Two pitfalls are fixed here:
-- **Mode (S7):** `skills/quality-gate/SKILL.md:394` and `:671-694` also invoke
+`skills/quality-gate/loop.md`. Two pitfalls are fixed here:
+- **Mode (S7):** `skills/quality-gate/loop.md` and `skills/quality-gate/stagnation.md` also invoke
   `consensus_query(mode="verdict")` for the stagnation judge *later in the same
   round*. That result's `per_model` describes the **judge**, not the artifact
   reviewer, and the two arrays can differ (separate call, separate
@@ -77,7 +77,7 @@ partial consensus REVIEW result for this round** — the
   time and source the `consensus` key **only** from it. Never use the
   verdict-mode result for the reviewer key; the consensus stagnation judge is
   **not** represented in `model_resolution` (design §9 reserves no key for it).
-- **Eligibility is not occurrence (S3):** `skills/quality-gate/SKILL.md:385-393`
+- **Eligibility is not occurrence (S3):** `skills/quality-gate/loop.md`
   falls back to a single red-team when consensus is unavailable on an eligible
   round. On that reachable path the key must be `red-team` — the model that
   actually reviewed — not `consensus`. Never key from calendar/config
@@ -124,7 +124,7 @@ from the endpoint-reported name still yields `ran: "unknown"` (no adapter
 observes the response name today).
 
 **Recovery across compaction (S3, round 9).** The gate checkpoints every three rounds
-and carries recovery state from disk (`skills/quality-gate/SKILL.md:1093-1117`,
+and carries recovery state from disk (`skills/quality-gate/recovery.md`,
 `:1121-1125`), so a review result living only in memory across the review→verdict seam
 is a normal lifecycle transition, not an edge case. Persist the review-mode `per_model`
 list and its use status to `<findings-root>/round-<N>-review-result.json` **at dispatch time,
@@ -134,7 +134,7 @@ persisted and nothing in memory.
 
 **Rollback invalidates the record (S5, round 10).** Retention across compaction and
 invalidation on rollback are different requirements: existing recovery discards an
-incomplete `round-(N+1)-*.md` (`skills/quality-gate/SKILL.md:1091-1095`) but would leave
+incomplete `round-(N+1)-*.md` (`skills/quality-gate/recovery.md`) but would leave
 this JSON in place, so a replayed round could consume a stale `review_used`/`per_model`
 and falsely attribute an abandoned review. Two rules prevent that: the JSON records the
 **review dispatch id** it was written for, and the emitter consumes it **only** when that
@@ -148,7 +148,7 @@ the scratch dir is shared, so a flat `<scratch>/round-<N>-review-result.json` le
 chunk K's local round 1 overwrite chunk K−1's record (and a rollback delete the
 wrong chunk's evidence). The record therefore lives at the top level of **that
 round's findings root** — `<scratch>` on a non-chunked gate, `<scratch>/chunk-K` for
-the in-progress chunk of a chunked gate (`skills/quality-gate/SKILL.md:342`) — and
+the in-progress chunk of a chunked gate (`skills/quality-gate/artifact-preflight.md`) — and
 carries its `chunk`, its **local** round, and the review dispatch id. Consumption
 requires all three to match the current completed round; rollback deletion is
 scoped to that same findings root. **Test:** two chunks whose local round 1 both
@@ -157,14 +157,14 @@ other chunk's record (nor force a false `null` row).
 
 **Cross-chunk integration round (S4, round 12).** The integration round's directory
 is the reserved `cross-chunk` (INV-A15), which no `chunk-K` substitution names — the
-gate pins a home for none of its round files (`skills/quality-gate/SKILL.md:293`). It
+gate pins a home for none of its round files (`skills/quality-gate/recovery.md`). It
 therefore gets its own root and coordinate here: the record is
 `<scratch>/cross-chunk/round-N-review-result.json` with coordinate
 `chunk="cross-chunk"`, and its rollback scope is that directory only. Test it
 against a preceding chunk's **same local round**: recovery must read the integration
 record rather than that chunk's, and neither rollback may delete the other's.
 
-**The record home is not the findings root (S5, round 13).** `skills/quality-gate/SKILL.md`
+**The record home is not the findings root (S5, round 13).** `skills/quality-gate/recovery.md`
 leaves **every** integration-round file home and the `<findings-root>` itself unpinned
 (`SKILL.md:293` and its Round History), so pinning this record's path is not enough: the
 round's findings, journal, coverage and linter second root can land elsewhere or nowhere
@@ -175,13 +175,13 @@ the run asserts that the record's directory **is** that round's findings root -
 `test "$(dirname "$record")" = "$FINDINGS_ROOT"` and
 `test "$(dirname "$record")" = "$(dirname "$ROUND_FINDINGS")"` - and never against
 the **receipt's** directory: the receipt legitimately lives in the dispatch root or is
-piped to the linter as `-` (`skills/quality-gate/SKILL.md:30`), so comparing the two is
+piped to the linter as `-` (`skills/quality-gate/loop.md`), so comparing the two is
 unsatisfiable for the normal layout and would stop every integration round instead of
 verifying co-location (F1, round 17). A missing `$FINDINGS_ROOT` refuses the round, naming
 the unpinned-root gap rather than emitting a record no linter root covers.
 
 **Row unit (S5, round 2).** The Tier-A ledger row is emitted **once per gate
-run** (`skills/quality-gate/SKILL.md:1204`), but `model_resolution` describes
+run** (`skills/quality-gate/recovery.md`), but `model_resolution` describes
 **only the round that produced this emitted verdict** (the terminal round) —
 the only round whose `per_model` the emitter can trust at emit time. Earlier
 rounds' contributors are deliberately **excluded** and must not be inferred
@@ -211,7 +211,7 @@ unavailable-consensus fallback path; (b) design §9 does not pin whether
 persisting per-round `per_model` in round history at review time (a
 design-level change); (c) at/above the stagnation threshold,
 `consensus_query(mode="verdict")` **replaces** the single `qg-judge` dispatch
-(`skills/quality-gate/SKILL.md:673-687`), so the consensus judge that actually
+(`skills/quality-gate/stagnation.md`), so the consensus judge that actually
 decided termination can be absent from the row entirely — design §9 reserves no key
 for it, and inventing a separate verdict-judge consensus key is an architectural
 change the plan must not make on its own (S4, round 5); (d) `quality-gate` step 5.4
@@ -251,7 +251,7 @@ adapter observes the endpoint-reported model name).
 
 **Type-resolution fallback (S1, round 4).** When the harness cannot resolve an
 agent type and the dispatch runs as `general-purpose` on the inherited/session
-model (`skills/quality-gate/SKILL.md:244,535`, plus Task 9's new qg-verifier and
+model (`skills/quality-gate/loop.md`, plus Task 9's new qg-verifier and
 qg-judge warnings), the named agent def was **not** dispatched. Recording its
 nominal `model:` pin as `ran` would log an inherited Opus verifier as `sonnet`,
 or an inherited Sonnet red-team as `opus` — precisely the model flip this feature
