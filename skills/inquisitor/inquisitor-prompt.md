@@ -64,7 +64,7 @@ Task tool (general-purpose, model: opus):
        - Each test is independent — no shared mutable state
        - Include a brief comment explaining the attack vector and why
          cross-component interaction makes it dangerous
-       - Focus on interactions the per-task adversarial tester COULD NOT
+       - Focus on interactions per-task adversarial testing COULD NOT
          have caught (it only saw individual task diffs)
 
     5. **Run each test and record the result.**

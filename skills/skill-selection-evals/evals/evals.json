@@ -35,14 +35,14 @@
       "dimension": "direct",
       "boundary": "test-methodology",
       "prompt": "I just finished implementing the rate limiter. Try to break it \u2014 find edge cases I missed.",
-      "expected_skill": "adversarial-tester",
+      "expected_skill": "inquisitor",
       "common_mistakes": [
         "test-coverage",
         "test-driven-development",
         "red-team"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
-      "reasoning": "Implementation is done \u2014 this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Adversarial-tester reads implementation diffs and writes tests designed to make it break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
+      "reasoning": "Implementation is done \u2014 this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Inquisitor per-task mode reads implementation diffs and writes tests designed to make them break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
       "difficulty": "easy"
     },
     {
@@ -163,11 +163,10 @@
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
-        "red-team",
-        "adversarial-tester"
+        "red-team"
       ],
       "context": "Full feature assembled from multiple components. Need to find integration issues across component boundaries, not review a single artifact or existing subsystem.",
-      "reasoning": "Inquisitor runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Adversarial-tester finds edge cases in a single implementation, not cross-component integration issues.",
+      "reasoning": "Inquisitor full-feature mode runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Inquisitor per-task mode finds edge cases in one implementation.",
       "difficulty": "hard"
     },
     {
@@ -593,13 +592,12 @@
       "dimension": "direct",
       "boundary": "adversarial-scope",
       "prompt": "I just finished the JWT parser. Write tests that try to break this one function.",
-      "expected_skill": "adversarial-tester",
+      "expected_skill": "inquisitor",
       "common_mistakes": [
-        "inquisitor",
         "test-coverage"
       ],
       "context": "A single completed implementation; the ask is to write tests that break that one component.",
-      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break \u2014 per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
+      "reasoning": "Inquisitor per-task mode reads one implementation and writes up to 5 tests designed to make it break. Inquisitor full-feature mode hunts cross-component bugs. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
       "difficulty": "medium"
     },
     {

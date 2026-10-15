@@ -23,8 +23,7 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 | **checkpoint** | Shadow git checkpoint system for pipeline rollback. Snapshots working directory state at pipeline boundaries using isolated shadow repositories (GIT_DIR/GIT_WORK_TREE). Supports create, list, restore (full directory or single file), deduplication, eviction (50 max), and pre-restore safety snapshots. Consumed by build, quality-gate, and debugging. |
 | **worktree** | Create isolated git worktrees for feature work with smart directory selection and safety verification. |
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
-| **adversarial-tester** | Reads completed implementation and writes up to 5 tests designed to expose unknown failure modes. Targets edge cases, boundary conditions, and runtime behavior the implementer didn't anticipate. |
-| **inquisitor** | Full-feature cross-component adversarial testing. Runs 5 parallel adversarial dimensions (wiring, integration, edge cases, state/lifecycle, regression) against the complete implementation diff to find bugs that per-task testing misses. |
+| **inquisitor** | Writes up to 5 adversarial tests for one task's runtime failure modes, or runs 5 parallel dimensions (wiring, integration, edge cases, state/lifecycle, regression) against a full-feature diff. Triggers on 'break it', 'adversarial test', 'stress test implementation', 'find weaknesses', and cross-component bug-hunting. |
 | **migrate** | Autonomous migration planning and execution. Takes a migration target (framework upgrade, API version bump, dependency major version, deprecation removal) and produces a phased migration plan with compatibility verification. Optionally executes via build's refactor mode. |
 
 ## Quality & Audit

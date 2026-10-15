@@ -181,7 +181,7 @@ Counts are literal occurrences of `CANONICAL: shared/<file>` references in skill
 |---|---|---|
 | `design` | Brainstorming into designs, dimension exploration, tradeoff presentation | Contract emission (0.4k), phase-process scaffolding (0.5k) |
 | `assay` | Weighing options vs constraints, confidence scoring, kill criteria | Report schema (0.3k) |
-| `adversarial-tester` | Inventing plausible failure modes for an implementation | Report format (0.3k), skip condition (0.2k) |
+| Inquisitor per-task mode | Inventing plausible failure modes for an implementation | Report format (0.3k), skip condition (0.2k) |
 | `delve` (skill) | Owns the delve-engine judgment (repro-verifiable defects) | Scope resolution + preflight (0.9k — forge-agnostic range, diff size cap) |
 | `planning` | Plan quality/content | Header + task-structure formats (0.6k), refactoring-task metadata (0.3k) |
 | `source-driven-development` | Detect→fetch→implement→cite protocol on real artifacts | Fetched-endpoint ledger use (→ fetched-content-containment) |
