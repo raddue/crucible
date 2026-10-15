@@ -110,7 +110,7 @@ After compaction, before re-writing the status file:
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files (see Session State below)
 3. Emit a Compression State Block into the conversation to seed the new context window
-3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, hypothesis changes, file modifications), use `/recall` to query `events.jsonl` with filters for targeted recovery.
+3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, hypothesis changes, file modifications), use the recall reference (`/getting-started recall <query>`, `getting-started/recall.md`) to query `events.jsonl` with filters for targeted recovery.
 4. Write the updated status file
 5. Output inline status to CLI
 
@@ -1043,7 +1043,7 @@ Decision types:
 After the Implementation agent reports back, the orchestrator evaluates four possible outcomes:
 
 **Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.4 (scope check), then Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
-- **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
+- **RECOMMENDED:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture the debugging journey and lessons learned
 - **Chronicle signal fallback:** If forge retrospective will not run (user declined, session ending),
   append a minimal chronicle signal directly:
   - Construct signal: `v=1`, `ts=now`, `skill="debugging"`, `outcome` from fix verification,
@@ -1277,7 +1277,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`/recon` persistent-map mode** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
 **Recommended skills:**
-- **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)
+- **`crucible:getting-started` (`forge.md`)** -- Retrospective after fix verified (captures debugging lessons)
 - **`crucible:checkpoint`** -- Shadow git checkpoints before implementation, sibling fixes, and quality gate (pre-debug-fix-cycle-N, pre-where-else, pre-debug-gate). Provides structured rollback for fix attempts and sibling work.
 
 ## Real-World Impact

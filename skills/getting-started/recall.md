@@ -1,10 +1,13 @@
----
-name: recall
-description: Query session history from the persistent activity index. Returns event logs, summaries, and filtered views that survive context compaction.
-origin: crucible
----
-
 # Recall
+
+## Contents
+
+- [Session Index Discovery](#session-index-discovery)
+- [Query Modes](#query-modes)
+- [Output Format](#output-format)
+- [Event Schema Reference](#event-schema-reference)
+- [Integration with Pipeline Skills](#integration-with-pipeline-skills)
+- [Red Flags](#red-flags)
 
 Query the session activity index for event history, file change logs, decisions, and errors. The session index is written continuously by the PostToolUse hook and persists across compaction events.
 
@@ -34,6 +37,8 @@ The session index lives at:
 **Tool constraint:** Use Read and Glob tools for session-index access. Do not use Bash to access `~/.claude/` paths (safety hooks block this).
 
 ## Query Modes
+
+`/recall <query>` below is historical notation, not a slash command: invoke `/getting-started recall <query>` (or ask for session history); the query is the caller arguments captured in `getting-started/SKILL.md`, and the query modes are unchanged.
 
 ### No Arguments: `/recall`
 
@@ -104,11 +109,11 @@ Each line in `events.jsonl` follows this schema (see `skills/shared/session-inde
 
 ## Integration with Pipeline Skills
 
-Pipeline skills can invoke `/recall` internally after compaction to supplement CSB-based recovery:
+Pipeline skills can run this recall reference (`/getting-started recall <query>`) internally after compaction to supplement CSB-based recovery:
 
 1. **Existing recovery:** Read CSB / pipeline-status.md / handoff manifest
 2. **Supplementary:** Read `summary.md` from the session index for narrative context
-3. **Targeted:** Query specific events via `/recall` for focused context (e.g., `/recall errors` to recover error history)
+3. **Targeted:** Query specific events via `/getting-started recall <query>` for focused context (e.g., `/getting-started recall errors` to recover error history)
 
 This is additive -- it does not replace existing recovery mechanisms.
 

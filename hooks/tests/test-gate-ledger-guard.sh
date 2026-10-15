@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 27 test cases validating allow/block behavior.
+# Runs 32 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=27
+TOTAL=32
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -628,6 +628,30 @@ CONTENT="$(make_ledger "build-test-027" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_
 JSON="$(make_json "$NONCANON_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 27 "Non-canonical build-gate-ledger.md PASS write ignored" 0 "$RC"
+
+# ========================================================================
+# Tests 28–31: namespaced build ledger remains enforced, including non-normalized paths.
+# ========================================================================
+reset_state
+NAMESPACED_LEDGER="$MEMORY_DIR/builds/0123456789abcdef/build-gate-ledger.md"
+CONTENT="$(make_ledger "build-test-028" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+n=28
+for path in "$NAMESPACED_LEDGER" "$MEMORY_DIR/builds/0123456789abcdef/./build-gate-ledger.md" "$MEMORY_DIR/builds/0123456789abcdef//build-gate-ledger.md" "$MEMORY_DIR/builds/0123456789abcdef/quality-gate/../build-gate-ledger.md"; do
+  JSON="$(make_json "$path" "$CONTENT")"
+  set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+  check "$n" "Namespaced ledger PASS write remains enforced: $path" 2 "$RC"
+  n=$((n + 1))
+done
+
+# Edit against a namespaced ledger must retain the same guard.
+reset_state
+NAMESPACED_LEDGER="$MEMORY_DIR/builds/0123456789abcdef/build-gate-ledger.md"
+EXISTING="$(make_ledger "build-test-028" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+mkdir -p "$(dirname "$NAMESPACED_LEDGER")"
+printf '%s\n' "$EXISTING" > "$NAMESPACED_LEDGER"
+EDIT_JSON="$(make_edit_json "$NAMESPACED_LEDGER" "Status: IN_PROGRESS" "Status: PASS")"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 32 "Namespaced build-gate-ledger PASS Edit remains enforced" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""

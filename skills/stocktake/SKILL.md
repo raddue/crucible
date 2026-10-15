@@ -235,7 +235,7 @@ Save efficiency report data to `skills/stocktake/results.json` under a new `effi
 
 ## Integration
 
-- **crucible:forge** — Feed-forward checks stocktake results timestamp; nudges when 30+ days stale
+- **crucible:getting-started** (`forge.md`) — Feed-forward checks stocktake results timestamp; nudges when 30+ days stale
 - Evaluation is blind: same checklist applies regardless of skill origin
 
 ## Red Flags

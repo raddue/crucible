@@ -14,7 +14,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 ## Session Activity Index (hooks)
 
-Crucible includes PostToolUse hooks (`hooks/session-index.sh`, `hooks/session-summary.sh`) that log session events for compaction recovery and the `/recall` skill. To enable, add to your **untracked** `.claude/settings.local.json` (or user-global `~/.claude/settings.json`):
+Crucible includes PostToolUse hooks (`hooks/session-index.sh`, `hooks/session-summary.sh`) that log session events for compaction recovery and the recall workflow (`skills/getting-started/recall.md`). To enable, add to your **untracked** `.claude/settings.local.json` (or user-global `~/.claude/settings.json`):
 
 ```json
 {

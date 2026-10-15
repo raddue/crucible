@@ -1,0 +1,74 @@
+name: release
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type release to publish the current main commit"
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+jobs:
+  release:
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'dev') || (github.event_name == 'workflow_dispatch' && inputs.confirm == 'release' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install "pytest==9.0.3"
+      - name: Record release target
+        id: target
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Confirm release target is main
+        run: |
+          if ! git merge-base --is-ancestor "${{ steps.target.outputs.sha }}" origin/main; then
+            echo "Release commit is not reachable from origin/main" >&2
+            exit 1
+          fi
+      - name: Run required test suite
+        env:
+          CRUCIBLE_SUITE_TIMEOUT: "1800"
+        run: bash scripts/run_tests.sh
+      - name: Validate version and changelog
+        id: version
+        run: |
+          version=$(python3 scripts/package_release.py --validate-release)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Ensure release tag does not already exist
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
+            echo "Tag v${{ steps.version.outputs.version }} already exists" >&2
+            exit 1
+          fi
+      - name: Build and smoke-check release ZIP
+        run: python3 scripts/package_release.py --ref "${{ steps.target.outputs.sha }}" --output "$RUNNER_TEMP/crucible-v${{ steps.version.outputs.version }}.zip" --smoke --notes-output "$RUNNER_TEMP/release-notes.md"
+      - name: Add install instructions and checksum to notes
+        run: |
+          cd "$RUNNER_TEMP"
+          sha256sum "crucible-v${{ steps.version.outputs.version }}.zip" > "crucible-v${{ steps.version.outputs.version }}.zip.sha256"
+          {
+            printf '\n## Install\n\nExtract ZIP into `~/repos/crucible`, then use README symlink commands unchanged:\n\n```bash\nmkdir -p ~/repos/crucible\nunzip -o crucible-v${{ steps.version.outputs.version }}.zip -d ~/repos/crucible\nmkdir -p ~/.claude/skills\nln -sf ~/repos/crucible/skills/* ~/.claude/skills/\nmkdir -p ~/.claude/agents\nln -sf ~/repos/crucible/agents/* ~/.claude/agents/\n```\n\nSHA-256: `'
+            cut -d ' ' -f1 "crucible-v${{ steps.version.outputs.version }}.zip.sha256"
+            printf '`\n'
+          } >> release-notes.md
+      - name: Publish GitHub Release and version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            "$RUNNER_TEMP/crucible-v${{ steps.version.outputs.version }}.zip" \
+            "$RUNNER_TEMP/crucible-v${{ steps.version.outputs.version }}.zip.sha256" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Crucible v${{ steps.version.outputs.version }}" \
+            --target "${{ steps.target.outputs.sha }}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
