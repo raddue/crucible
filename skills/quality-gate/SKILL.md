@@ -1,6 +1,6 @@
 ---
 name: quality-gate
-description: Iterative adversarial review and remediation of artifacts until clean or stagnation. Use for quality gate, red-team this design/plan/code/PR/documentation, adversarial review, multi-model consensus or stagnation judge, audit dependencies, scan vulnerabilities, and check CVEs; includes standalone red-team mode and dependency-audit preflight lane.
+description: Runs iterative adversarial review and remediation of artifacts until clean or stagnation. Applies when asked for a quality gate, to red-team this design, plan, code, PR, or documentation, invoke multi-model consensus or a stagnation judge, audit dependencies, scan vulnerabilities, or check CVEs. Includes standalone red-team and dependency-audit modes.
 origin: crucible
 ---
 
