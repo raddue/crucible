@@ -37,8 +37,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
 | audit | Subagent dispatch for parallel analytical lenses | Lenses run sequentially in-context |
 | delve | Subagent dispatch for finder fan-out + verify gate | Finders run sequentially |
-| recon | Subagent dispatch for parallel scouts | Scouts run sequentially |
-| prospector | Subagent dispatch for parallel exploration | Explores sequentially |
+| recon | Subagent dispatch for parallel task scouts, partition scans, and friction analysis | Scouts, explorers, or analysts run sequentially |
 | siege | Parallel attacker-perspective agents (scales 3–6) | Perspectives run sequentially |
 | spec | Subagent dispatch for per-ticket investigation | Tickets processed sequentially |
 | build (migration mode) | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
@@ -57,8 +56,8 @@ These skills require features specific to Claude Code. They will not work on oth
 |-------|-------------------|---------------------|
 | build | Agent teams (TeamCreate, TaskCreate, SendMessage) | Orchestrates 20+ subagents across 4 phases; sequential fallback exists but is Claude Code-specific |
 | getting-started (forge reference) | Persistent memory (`~/.claude/projects/<hash>/memory/forge/`) | Retrospectives must persist across sessions to provide value |
-| cartographer-skill | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
-| project-init | Persistent cartographer memory + subagent scan | Onboarding output must persist across sessions, like cartographer's |
+| recon persistent-map mode | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
+| recon whole-repo-onboarding mode | Persistent map memory + subagent scan | Onboarding output must persist across sessions |
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
 | getting-started (recall reference) | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
@@ -107,7 +106,7 @@ Skills reference each other using the `crucible:` prefix (e.g., `crucible:qualit
 
 ### Persistent Storage
 
-Two skills (forge, cartographer-skill) store data in `~/.claude/projects/<project-hash>/memory/`. Other platforms would need an equivalent persistent storage mechanism for these skills to accumulate knowledge across sessions.
+Forge and recon persistent-map mode store data in `~/.claude/projects/<project-hash>/memory/`. Other platforms would need an equivalent persistent storage mechanism for these skills to accumulate knowledge across sessions.
 
 ## Migration Roadmap
 
@@ -115,7 +114,7 @@ Full cross-platform support would require:
 
 1. **Abstract tool references** — Replace Claude Code tool names in instructional text with platform-agnostic language (e.g., "spawn a subagent" instead of "use the Agent tool")
 2. **Platform adapter layer** — Create per-platform configuration that maps abstract operations to concrete tool calls
-3. **Storage abstraction** — Define a platform-agnostic storage interface for forge and cartographer-skill
+3. **Storage abstraction** — Define a platform-agnostic storage interface for forge and recon persistent-map mode
 4. **Build skill refactor** — Replace TeamCreate/TaskCreate orchestration with a platform-agnostic dispatch pattern
 5. **Namespace resolution** — Map `crucible:` prefix to each platform's skill invocation syntax
 

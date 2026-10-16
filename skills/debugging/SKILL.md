@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Includes grudge regression-oracle pre-flight and recording fixed bugs. Triggers on /grudge, check grudges, record a grudge, any past bugs here, regression oracle, bug graveyard.
 ---
 
 # Systematic Debugging
@@ -17,6 +17,174 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 **Violating the letter of this process is violating the spirit of debugging.**
 
 **Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
+## Grudge regression oracle — read/write mechanics (#271)
+
+### Where grudges live (read this first)
+
+The grudgebook is **machine-local and per-repo**, NEVER inside a git tree:
+
+```
+$CRUCIBLE_GRUDGE_DIR  (or ~/.claude/crucible/grudge)
+  /<repo>/grudges/<hash>.md
+```
+
+Grudges carry private file paths + repro detail and crucible is PUBLIC, so the
+live store must stay outside any repo (mirrors the calibration ledger central
+store, PR #326). `scripts/grudge_append.py` **refuses** to write into the current
+repo's tree. The committed `.crucible/grudge/grudges/*.md` are **synthetic
+fixtures only**. Isolation is by `repo_root` (git toplevel realpath), so two
+checkouts that share a basename never bleed into each other.
+
+### Resolving the helpers (cwd-independent)
+
+A gating skill runs with an arbitrary cwd, so locate the scripts by absolute path
+from the plugin root (same convention as `shared/ledger-append.md`):
+
+```
+# plugin layout is invariant: <plugin_root>/skills/<name>/ and <plugin_root>/scripts/
+plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+query="$plugin_root/scripts/grudge_query.py"
+append="$plugin_root/scripts/grudge_append.py"
+# If unresolved: emit a one-line stderr warning and SKIP. The grudgebook is
+# advisory; a missing query/record must NEVER block or fail the host skill.
+```
+
+### Read mode (pre-flight — "what grudges do we hold here?")
+
+Before writing/reviewing code, pass the in-scope files (absolute, `./`-prefixed,
+or repo-relative — all normalized) to the query helper and inject any output into
+your working context as a hard constraint:
+
+```
+python3 "$query" path/to/file1 path/to/file2 [--with-signatures] [--limit N]
+```
+
+- Path match is always on. Add `--with-signatures` when you already have file
+  contents in hand (it greps `anti_pattern_signature` regexes against file bodies).
+- Non-empty output = grudges held against these files. Treat each `☠` line as
+  **DO NOT REPEAT** — do not re-introduce that bug. A `⛔ Already tried: …`
+  line is a dead end — that approach failed before, do not re-try it unchanged.
+- Maintenance: `--stats` (how many grudges held / recently written — spot
+  starvation) and `--cull` (strike settled grudges whose files are all gone).
+- A stderr line `grudge: scanned=… matched=… skipped_stale=…` always prints so a
+  silent/empty grudgebook is visible.
+
+### Write mode (record a grudge — on bug resolution / fix(*) PR)
+
+When a bug is confirmed fixed, record it (best-effort; a failed record logs to
+stderr and never fails the host skill). Pass the **store identity** explicitly
+(DEC-4): the git-common-dir parent, shared across linked worktrees — NOT this
+worktree's root, which would key the record to a worktree and lose it when that
+worktree is removed. `--worktree-root` is left to default (the filesystem root
+is resolved from where the skill runs; the store identity mirrors the hook's
+own resolution, `hooks/grudge-resolution-guard.sh` §7):
+
+```
+store_common="$(cd "$(pwd)" 2>/dev/null && realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)"
+store_root="$(dirname "$store_common" 2>/dev/null)"
+store_key="$(basename "$store_root" 2>/dev/null)"
+python3 "$append" \
+  --symptom "one-line observable failure" \
+  --root-cause "one-line underlying cause" \
+  --files=src/a.py --files=src/b.py \
+  --signature "optional regex or literal snippet that fingerprints the bug" \
+  --commit "<fixing sha>" \
+  --repo-root "$store_root" --repo "$store_key" \
+  --repro "minimal repro steps" \
+  --why "why this kept happening"
+```
+
+### Dead ends — record an abandoned approach
+
+When an approach was **actually tried and abandoned** — nothing broke, so there is
+no symptom fingerprint, but re-trying it burns another session — record a
+**dead end** instead:
+
+```
+python3 "$append" \
+  --kind dead_end \
+  --approach "one-line approach that was tried" \
+  --reason-failed "why it failed" \
+  --files=src/a.py --files=src/b.py
+```
+
+- The dedupe key is the **approach** (a dead end has no symptom/signature).
+  Same approach + files → overwrite (last write wins).
+- `--symptom` is not needed (and ignored) for dead ends; an empty `--approach`
+  is skipped.
+
+### Grudge schema
+
+```markdown
+---
+schema: 1
+hash: <sha256(repo_root|sorted-normalized(files_touched)|discriminator)[:12]>
+repo: "<basename>"            # cosmetic dir name
+repo_root: "<abs realpath>"   # isolation key; reads filter on this
+fixed_in_commit: "<sha>"      # recorded, NOT part of the key
+symptom: "<one-line>"         # dedupe discriminator when no signature
+root_cause: "<one-line>"
+files_touched: ["repo/rel/path", ...]
+anti_pattern_signature: "<regex or literal snippet>"   # optional
+date_fixed: "YYYY-MM-DD"
+---
+## Repro
+<steps>
+## Why this kept happening
+<expanded root cause>
+```
+
+Every free-text value is JSON-encoded ([#602](https://github.com/raddue/crucible/issues/602)):
+a field containing a newline, a bare `---` line, or `key: value` lines must not
+be able to smuggle forged keys or an early terminator into the frontmatter.
+(`schema` and `hash` are emitted bare — a constant int and a hex digest that
+cannot carry a newline.) The reader (`grudge_query.parse_grudge`) also rejects
+unknown keys and duplicates — never trust a line the writer cannot emit.
+
+**Dedupe:** key excludes `fixed_in_commit` (one bug can be fixed in many commits);
+`discriminator = anti_pattern_signature` when non-empty else `symptom`. Same key →
+overwrite (last write wins). A grudge with neither files nor a discriminator is
+rejected.
+
+A **dead end** (`--kind dead_end`) omits `fixed_in_commit`, `symptom`,
+`root_cause` and `anti_pattern_signature` entirely — a bug grudge's frontmatter
+never grows a `kind` key, so the existing on-disk shape is untouched. Its
+schema instead carries the abandoned approach and the reason it failed:
+
+```markdown
+---
+schema: 1
+hash: <sha256(repo_root|sorted-normalized(files)|approach)[:12]>
+repo: "<basename>"
+repo_root: "<abs realpath>"
+kind: "dead_end"
+approach: "<one-line approach tried>"
+reason_failed: "<why it failed>"
+files_touched: ["repo/rel/path", ...]
+date: "YYYY-MM-DD"
+---
+## Approach tried
+<approach>
+## Why it failed
+<reason>
+```
+
+`discriminator = approach`; same key → overwrite. A dead end with no files or no
+approach is rejected.
+
+### Consumers (where the wiring lives)
+
+- **Pre-flight (read):** `build` (Phase 2, post-design/pre-implementation),
+  `quality-gate` (round-1 dispatch), `debugging` (opening phase).
+- **Write:** `debugging` (resolution phase), `finish/merge` (on `fix(*)` PRs).
+
+### Non-goals (v1)
+
+No semantic search (glob + regex only); no cross-**user** shared grudgebook
+(sanitized community grudges — v1.1 candidate); no `settings.json` hook.
+
+
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -250,7 +418,7 @@ Orchestrator: Parse initial context (error message, failing test, user descripti
     |
     v
 Phase 0: Repro & scope coherence gate (pass silently / ask one question / flag-and-proceed)
-    |  then Load codebase context (crucible:cartographer-skill)
+    |  then Load codebase context (`/recon` persistent-map mode)
     |
     v
 Phase 1: Dispatch 3-6 parallel investigation subagents
@@ -328,7 +496,7 @@ Decision (best-effort and fast — a well-formed report passes silently with zer
 
 The gate routes toward debugging's own Phase 1 Reproduction investigator from the front door; it never silently blocks — it either passes, asks exactly one clarifying question, or flags-and-proceeds (the recorded `[DEC-N]` outcome line below IS the flag — there is no separate surfaced warning), mirroring the best-effort discipline of the grudge pre-flight below. Record the gate outcome (`pass | asked-then-proceeded | repro-lead-proceeded`) as a `[DEC-N]` line under `## Decisions Carried Forward` in the Phase 0→1 handoff, so Synthesis and later phases see why Reproduction was prioritized.
 
-**Before any investigation dispatch,** use `crucible:cartographer-skill` (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
+**Before any investigation dispatch,** use `/recon` persistent-map mode (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 **Defect signature loading (for investigators):**
 1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory
@@ -345,7 +513,7 @@ The gate routes toward debugging's own Phase 1 Reproduction investigator from th
    - Non-match companion file IS loaded for investigators, truncated to 50 entries at load time with note "(list truncated to 50 most recent entries)"
 5. **`Last loaded` update:** Loading is pure-read. After all investigator dispatches complete, batch-update the `Last loaded` field to today on all signatures that were loaded.
 
-**Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See `skills/grudge/SKILL.md`.
+**Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See this section for the grudge regression-oracle mechanics.
 
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, requested profile `fast`; Claude Code maps it to `model: haiku`) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
@@ -902,7 +1070,7 @@ When count of existing signatures would exceed 20 after writing:
 4. Write-before-delete ordering: dispatch the recorder first, then delete pruned files after the recorder succeeds
 
 **Step 3: Dispatch recorder (orchestrator)**
-Dispatch a Sonnet cartographer recorder agent using `crucible:cartographer-skill` recorder-prompt.md with the "Record defect signature" directive. Provide:
+Dispatch a Sonnet recorder agent using the template `skills/recon/cartographer/recorder-prompt.md` with the "Record defect signature" directive. Provide:
 - Phase 4.5 scan report (generalized pattern, confirmed siblings, reverted siblings, skipped siblings)
 - Original fix metadata (file path, commit SHA, commit message summary, issue number)
 - Cartographer module names from Phase 0 (or directory prefix fallbacks)
@@ -971,7 +1139,7 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 **If all tests PASS:** Debugging workflow is complete.
 
-**Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and record with the **store identity** (DEC-4: the git-common-dir parent, shared across linked worktrees, NOT this worktree's root which would lose the record when the worktree is removed): `store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"` `store_key="$(basename "$store_root" 2>/dev/null)"`, then run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files="<path 1>" --files="<path 2>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repo-root "$store_root" --repo "$store_key" --repro "<minimal repro>" --why "<why it kept happening>"`. See `skills/grudge/SKILL.md`.
+**Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and record with the **store identity** (DEC-4: the git-common-dir parent, shared across linked worktrees, NOT this worktree's root which would lose the record when the worktree is removed): `store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"` `store_key="$(basename "$store_root" 2>/dev/null)"`, then run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files="<path 1>" --files="<path 2>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repo-root "$store_root" --repo "$store_key" --repro "<minimal repro>" --why "<why it kept happening>"`. See the pre-flight section for the grudge regression-oracle mechanics.
 
 **If some tests FAIL** (gaps reveal incomplete fix coverage):
 1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)
@@ -1051,7 +1219,7 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
     `metrics={hypotheses count, root_cause_category from fix, where_else_hits count}`
   - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
   - If forge retrospective WILL run, skip this step (forge Step 8.5 handles it)
-- **RECOMMENDED:** Use crucible:cartographer-skill (record mode) — persist any new codebase knowledge discovered during investigation
+- **RECOMMENDED:** Use `/recon` persistent-map mode (record mode) — persist any new codebase knowledge discovered during investigation
 
 **Test passes immediately (no fix applied)** -- The implementer's reproduction test passed before any fix was written. Two possibilities:
 1. **Bug was already resolved** (by investigation side effects, environment change, or prior cycle). Verify by running the original reproduction steps. If the original bug is gone: proceed to Phase 5 but **skip Step 1 (quality-gate on code)** since there is no code change. Go directly to Step 2 (code review) scoped to the reproduction test file only.
@@ -1274,7 +1442,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 **Does not dispatch /recon or /design approach evaluation** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not design approach evaluation. See #147 for rationale.
 
 **Required skills:**
-- **`crucible:cartographer-skill`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
+- **`/recon` persistent-map mode** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
 **Recommended skills:**
 - **`crucible:getting-started` (`forge.md`)** -- Retrospective after fix verified (captures debugging lessons)

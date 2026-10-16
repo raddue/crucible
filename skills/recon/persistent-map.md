@@ -1,9 +1,18 @@
----
-name: cartographer-skill
-description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when collaborators need module-specific context for implementation or review
----
+# Persistent Map
 
-# Cartographer
+**Trigger phrases:** codebase map, cartographer, consult the map, record codebase discovery, load module context.
+
+## Contents
+
+- [Overview](#overview)
+- [When to Use](#when-to-use)
+- [Storage and size caps](#storage)
+- [Record, consult, load](#mode-1-record-discovery)
+- [Module map and conventions formats](#what-gets-recorded)
+- [Defect signatures](#defect-signatures)
+- [With Forge and Graphify](#integration)
+
+
 
 ## Overview
 
@@ -14,7 +23,7 @@ Living architectural map of the codebase that accumulates across sessions. After
 
 **Core principle:** The agent that re-discovers the same codebase every session wastes the first 20% of every task. The Cartographer remembers the terrain.
 
-**Announce at start:** "I'm using the cartographer skill to [record what I learned about this area / consult the codebase map / load module context for a subagent]."
+**Announce at start:** "I'm using recon's persistent-map mode to [record what I learned about this area / consult the codebase map / load module context for a subagent]."
 
 ## When to Use
 
@@ -39,7 +48,7 @@ digraph cartographer_modes {
 
 **Three modes:**
 - **Record** — after significant exploration during build, debugging, or investigation
-- **Consult** — before design, planning, or execution (pairs with `crucible:getting-started` (`forge.md`) feed-forward)
+- **Consult** — before design, planning, or execution (pairs with `getting-started` (`forge.md`) feed-forward)
 - **Load** — when dispatching implementer/reviewer/investigator subagents into a mapped area
 
 ## Storage
@@ -87,7 +96,7 @@ After any significant exploration — the agent read 5+ files, traced a call cha
 
 ### The Process
 
-1. Dispatch a **Cartographer Recorder** subagent (Sonnet) using `./recorder-prompt.md`
+1. Dispatch a **Cartographer Recorder** subagent (Sonnet) using `./cartographer/recorder-prompt.md`
 2. Provide: list of files explored, what was learned, any surprises or gotchas discovered
 3. Subagent returns structured updates for the relevant files
 4. Write or update the appropriate files:
@@ -334,7 +343,7 @@ If no signatures are pruning-eligible, the count temporarily exceeds 20 until th
 
 ### When to Trigger
 
-Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work. Runs alongside `crucible:getting-started` (`forge.md`) feed-forward.
+Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work. Runs alongside `getting-started` (`forge.md`) feed-forward.
 
 ### The Process
 
@@ -402,8 +411,8 @@ Cartographer and Forge are complementary:
 - **Together** they eliminate the `wrong-assumption` deviation type that Forge keeps logging
 
 During feed-forward, both run:
-1. `crucible:getting-started` (`forge.md`) feed-forward → process warnings
-2. `crucible:cartographer-skill` consult → structural awareness
+1. `getting-started` (`forge.md`) feed-forward → process warnings
+2. `/recon` persistent-map mode consult → structural awareness
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.
 
@@ -417,15 +426,15 @@ owns derived structure. See `shared/dispatch-convention.md` ("Graphify Consult")
 for when a dispatch should point an agent at a fresh graph — cartographer
 maintains no call graph and should not replicate one.
 
-### Skills That Should Call Cartographer
+### Caller Integration for Persistent-Map Mode
 
 | Calling Skill | Mode | When | What to Pass |
 |---------------|------|------|--------------|
-| `crucible:build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
-| `crucible:build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
-| `crucible:build` | Record | Phase 4, after completion | Files explored, modules touched |
-| `crucible:debugging` | Load | Phase 1 investigator dispatch | Module names |
-| `crucible:debugging` | Record | After fix verified | What was learned |
+| `/build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
+| `/build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
+| `/build` | Record | Phase 4, after completion | Files explored, modules touched |
+| `/debugging` | Load | Phase 1 investigator dispatch | Module names |
+| `/debugging` | Record | After fix verified | What was learned |
 
 **Cartographer is RECOMMENDED, not REQUIRED.** Like Forge, it is a knowledge accelerator, not a quality gate.
 
@@ -491,4 +500,4 @@ maintains no call graph and should not replicate one.
 
 ## Prompt Templates
 
-- `./recorder-prompt.md` — Post-exploration discovery recorder dispatch
+- `./cartographer/recorder-prompt.md` — Post-exploration discovery recorder dispatch

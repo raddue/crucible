@@ -18,7 +18,7 @@
 
 ### Step 0: Load Module Context for Subagents
 
-- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (load mode) — when dispatching implementers and reviewers, include relevant module files, conventions.md, and landmines.md in their dispatch files
+- **RECOMMENDED SUB-SKILL:** Use crucible:recon (persistent-map mode) (load mode) — when dispatching implementers and reviewers, include relevant module files, conventions.md, and landmines.md in their dispatch files
 
 - **Defect signature loading (for implementers only):**
   1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory

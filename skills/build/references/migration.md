@@ -42,7 +42,7 @@ Autonomous migration planning and execution: analyzes a migration target, maps b
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Purpose:** Bridge between prospector discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. Build's migration mode makes it autonomous.
+**Purpose:** Bridge between recon improvement discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. Build's migration mode makes it autonomous.
 
 **Two modes:**
 - **Plan + Execute** (default) -- produces a phased migration plan, then executes each phase through build
@@ -251,7 +251,7 @@ Dispatch the **Migration Analyzer** (Opus, Agent tool, Explore subagent) using `
 **Input:**
 - Migration description from user
 - Cartographer data (if available)
-- Framework context from dependency manifests (following prospector's Phase 0.5 pattern: read package.json, *.csproj, requirements.txt, go.mod, Cargo.toml, etc.)
+- Framework context from dependency manifests (following improvement discovery's Phase 0.5 pattern: read package.json, *.csproj, requirements.txt, go.mod, Cargo.toml, etc.)
 
 **The analyzer investigates:**
 - Changelog / migration guide (CHANGELOG.md, MIGRATION.md, UPGRADING.md in repo or dependency)
@@ -492,8 +492,8 @@ After all consumer waves complete:
 Cleanup is a distinct phase because premature shim removal is the most common migration failure mode. Keeping it separate ensures the user explicitly approves shim removal.
 
 **Post-cleanup:**
-- Dispatch `crucible:cartographer-skill` (record mode) -- record migration discoveries
-- Dispatch `crucible:getting-started` (`forge.md`) (retrospective) -- capture migration outcome and lessons
+- Dispatch `/recon` persistent-map mode (record mode) -- record migration discoveries
+- Dispatch `crucible:getting-started (`forge.md`)` (retrospective) -- capture migration outcome and lessons
 - Delete `.pipeline-active` marker from the scratch directory
 
 ---
@@ -526,16 +526,16 @@ Escalate to the user when:
 |-------|----------|------|
 | `crucible:recon` | Consumer-registry module | Phase 0 (structural context + direct consumer discovery). Fallback: Blast Radius Mapper discovers consumers from scratch. |
 | `crucible:design` approach evaluation | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without scoring. |
-| `crucible:cartographer-skill` | Consult mode | Phase 0 (module boundaries for blast radius) |
-| `crucible:cartographer-skill` | Record mode | Phase 8 (record migration discoveries) |
-| `crucible:getting-started` (`forge.md`) | Feed-forward | Phase 0 (past migration lessons) |
-| `crucible:getting-started` (`forge.md`) | Retrospective | Phase 8 (capture migration outcome) |
+| `/recon` persistent-map mode | Consult mode | Phase 0 (module boundaries for blast radius) |
+| `/recon` persistent-map mode | Record mode | Phase 8 (record migration discoveries) |
+| `crucible:getting-started (`forge.md`)` | Feed-forward | Phase 0 (past migration lessons) |
+| `crucible:getting-started (`forge.md`)` | Retrospective | Phase 8 (capture migration outcome) |
 | `crucible:build` | Refactor mode | Phase 7 (per-phase execution for restructuring phases) |
 | `crucible:build` | Feature mode | Phase 7 (per-phase execution for additive phases) |
 | `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase; explicit immutable mode) |
 | `crucible:quality-gate` | Plan gate | After Phase 5 (artifact type: plan, on migration plan; explicit immutable mode) |
 | `crucible:test-coverage` | Per-phase audit | Phase 7 (test alignment after each phase) |
-| `crucible:prospector` | Upstream | Prospector discovers "modernize X"; migrate plans the transition |
+| `/recon` improvement-discovery mode | Upstream | Recon improvement discovery identifies modernization friction; migrate plans the transition |
 
 ## Prompt Templates
 

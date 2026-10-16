@@ -83,7 +83,7 @@ Bypassing it with `gh pr merge --admin` is possible, but tightly constrained.
   (`AGENTS.md` here is a symlink to `CLAUDE.md`). Any read result other than
   success or HTTP 404 (absent) means do not bypass — report and ask.
 - **All of these must verify before the bypass:** the PR targets `main`; its diff
-  touches neither `CLAUDE.md`/`AGENTS.md` nor anything under `skills/merge-pr/`;
+  touches neither `CLAUDE.md`/`AGENTS.md` nor `skills/finish/merge.md`;
   `gh pr checks <n> --watch` exits 0 ("no checks reported" counts as *not*
   verified); `headRefOid` is unchanged afterwards; `reviewDecision` is not
   `CHANGES_REQUESTED` and there are zero unresolved review threads. Anything

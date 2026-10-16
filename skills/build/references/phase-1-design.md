@@ -85,7 +85,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, feed-forward mode) — consult past lessons before starting
-- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (consult mode) — review codebase map for structural awareness
+- **RECOMMENDED SUB-SKILL:** Use crucible:recon (persistent-map mode) (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
 - **OVERRIDE:** When design completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.

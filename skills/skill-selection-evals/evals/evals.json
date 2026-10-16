@@ -133,7 +133,10 @@
       "boundary": "review-direction",
       "prompt": "Address the comments on my PR, but first check whether the reviewer is right about the old export being unused.",
       "expected_skill": "temper",
-      "common_mistakes": ["delve", "quality-gate"],
+      "common_mistakes": [
+        "delve",
+        "quality-gate"
+      ],
       "context": "Inbound review feedback with a codebase claim to verify before editing.",
       "reasoning": "Temper's feedback mode verifies claims before implementing and pushes back when code contradicts the reviewer.",
       "difficulty": "medium"
@@ -144,7 +147,10 @@
       "boundary": "review-direction",
       "prompt": "Respond to review comments on the PR. Two suggestions conflict with our supported platform versions.",
       "expected_skill": "temper",
-      "common_mistakes": ["audit", "quality-gate"],
+      "common_mistakes": [
+        "audit",
+        "quality-gate"
+      ],
       "context": "Inbound comments require technical evaluation, not an outbound fresh-eyes review.",
       "reasoning": "Temper's feedback mode evaluates platform compatibility and responds with technical pushback when warranted.",
       "difficulty": "medium"
@@ -155,7 +161,10 @@
       "boundary": "review-direction",
       "prompt": "Review feedback lists six items; item five says 'handle the edge case' but doesn't identify one. Fix the other five now.",
       "expected_skill": "temper",
-      "common_mistakes": ["build", "quality-gate"],
+      "common_mistakes": [
+        "build",
+        "quality-gate"
+      ],
       "context": "One unclear item can affect the rest of a multi-item fix.",
       "reasoning": "Temper's feedback mode clarifies all unclear items before implementing any item.",
       "difficulty": "hard"
@@ -323,7 +332,6 @@
         "build"
       ],
       "common_mistakes": [
-        "build",
         "planning"
       ],
       "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline. Tests design-before-build ordering discipline.",
@@ -340,7 +348,6 @@
         "verify"
       ],
       "common_mistakes": [
-        "debugging",
         "finish"
       ],
       "context": "Active bug requiring investigation, fix, and verified confirmation before deployment.",
@@ -357,10 +364,7 @@
         "planning",
         "build"
       ],
-      "common_mistakes": [
-        "build",
-        "design"
-      ],
+      "common_mistakes": [],
       "context": "User explicitly requests the full pipeline: design exploration, task planning, then implementation.",
       "reasoning": "The user spells out the three-phase cascade: design (explore options, investigate questions), planning (break into tasks with ordering), build (implement). Skipping to build alone misses design exploration. Design alone misses the planning phase that produces the task breakdown. The full sequence ensures each phase informs the next.",
       "difficulty": "hard"
@@ -529,13 +533,12 @@
       "dimension": "direct",
       "boundary": "onboarding-entry",
       "prompt": "I just cloned this repo and have never seen it. Give me full structural context before I start.",
-      "expected_skill": "project-init",
+      "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
         "getting-started"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
-      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
+      "reasoning": "Recon whole-repo-onboarding mode handles first-time structural context and cross-repo topology.",
       "difficulty": "medium"
     },
     {
@@ -556,13 +559,12 @@
       "dimension": "context-dependent",
       "boundary": "onboarding-entry",
       "prompt": "Onboard me to this unfamiliar codebase so I have context before the first real task.",
-      "expected_skill": "project-init",
+      "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
-      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). getting-started's workshop reference tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
+      "reasoning": "Recon whole-repo-onboarding mode handles first-time structural context and cross-repo topology.",
       "difficulty": "medium"
     },
     {
@@ -584,13 +586,12 @@
       "dimension": "direct",
       "boundary": "explore-vs-improve",
       "prompt": "Where are the structural problems in this codebase? What should I refactor?",
-      "expected_skill": "prospector",
+      "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "reasoning": "Recon friction-scan mode finds architectural friction and proposes redesign candidates.",
       "difficulty": "medium"
     },
     {
@@ -598,13 +599,12 @@
       "dimension": "negative",
       "boundary": "explore-vs-improve",
       "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
-      "expected_skill": "project-init",
+      "expected_skill": "recon",
       "common_mistakes": [
-        "recon",
         "prospector"
       ],
       "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for project-init over recon.",
-      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
+      "reasoning": "Recon whole-repo-onboarding mode handles first-time structural context and cross-repo topology.",
       "difficulty": "hard"
     },
     {
@@ -761,12 +761,12 @@
       "dimension": "negative",
       "boundary": "decision-record",
       "prompt": "Record this bug so we don't repeat it",
-      "expected_skill": "grudge",
+      "expected_skill": "debugging",
       "common_mistakes": [
         "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-      "reasoning": "grudge is the book of grudges — bug regression memory. design’s decision-record subflow records decisions with alternatives, not bugs.",
+      "reasoning": "Debugging includes the absorbed grudge regression-memory protocol for recording fixed bugs.",
       "difficulty": "easy"
     },
     {

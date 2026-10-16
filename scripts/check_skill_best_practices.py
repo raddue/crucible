@@ -18,6 +18,22 @@ SETUP = re.compile(r"\b(?:requires?|dependencies|prerequisites?|setup|install|st
 WHEN = re.compile(r"\b(?:when|whenever|before|after|use (?:when|before|after|for)|used for|triggers? on|for tasks? (?:that|involving))\b", re.I)
 PERSONAL = re.compile(r"\b(?:you|your|we|our|my)\b|(?<![\w/])i\b(?![./])", re.I)
 QUOTED = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|\u2018[^\u2019]*\u2019|(?<!\w)\u0027[^\u0027]*\u0027(?!\w)|`[^`]*`')
+ANCHOR = re.compile(r"\]\(#([^)]+)\)")
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
+
+def broken_anchors(text: str, path: Path, root: Path) -> list[str]:
+    slugs: set[str] = set()
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        match = HEADING.match(line)
+        if match:
+            slug = re.sub(r"[^\w -]", "", match.group(1).lower()).replace(" ", "-")
+            count = counts.get(slug, 0)
+            slugs.add(f"{slug}-{count}" if count else slug)
+            counts[slug] = count + 1
+    return [f"{path.relative_to(root)}:{number}: unresolved #{anchor}"
+            for number, line in enumerate(text.splitlines(), 1)
+            for anchor in ANCHOR.findall(line) if anchor not in slugs]
 
 
 def references(text: str, source: Path, root: Path) -> set[Path]:
@@ -104,6 +120,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
         if description and not WHEN.search(description):
             problems["Frontmatter"].append("description lacks when-to-use signal")
 
+        problems["Contents"].extend(broken_anchors("\n".join(lines), skill, root))
         direct = references("\n".join(body), skill, root)
         nested = set()
         read_refs = {}
@@ -117,6 +134,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
             text = read_refs.get(ref)
             if text is None:
                 text = read_markdown(ref, problems["Contents"])
+            problems["Contents"].extend(broken_anchors(text, ref, root))
             if len(text.splitlines()) > 100 and not has_contents(text):
                 problems["Contents"].append(f"{ref.relative_to(root)}: >100 lines, no contents list in first 20")
         for index, line in enumerate(body):
@@ -146,9 +164,9 @@ def render(results: dict[str, dict[str, list[str]]]) -> str:
     return header + "\n".join(rows + details) + "\n"
 
 
-def main(root: Path = ROOT, write_report: bool = False) -> int:
+def main(root: Path = ROOT, write_report: bool = False, report_path: Path | None = None) -> int:
     results = audit(root)
-    report = root / "docs" / "skill-practices-audit.md"
+    report = report_path or root / "docs" / "skill-practices-audit.md"
     if write_report:
         report.parent.mkdir(parents=True, exist_ok=True)
         content = render(results)
@@ -160,11 +178,13 @@ def main(root: Path = ROOT, write_report: bool = False) -> int:
             for item in checks[column]:
                 print(f"WARN {name} {column}: {item}")
     if write_report:
-        print(f"Scorecard: {report.relative_to(root)}")
+        print(f"Scorecard: {report}")
     return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write-report", action="store_true", help="update docs/skill-practices-audit.md")
-    raise SystemExit(main(write_report=parser.parse_args().write_report))
+    parser.add_argument("--report-path", type=Path, help="write generated scorecard to this path")
+    args = parser.parse_args()
+    raise SystemExit(main(write_report=args.write_report, report_path=args.report_path))

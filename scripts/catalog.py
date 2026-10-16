@@ -42,7 +42,7 @@ CATEGORIES: dict[str, list[str]] = {
         "worktree", "parallel", "inquisitor",
     ],
     "Quality & Audit": [
-        "delve", "audit", "siege", "prospector", "quality-gate",
+        "delve", "audit", "siege", "quality-gate",
         "test-coverage", "temper", "verify",
         "finish", "warden",
     ],
@@ -50,7 +50,6 @@ CATEGORIES: dict[str, list[str]] = {
         "debugging",
     ],
     "Knowledge & Learning": [
-        "project-init", "grudge",
     ],
     "Utilities": [
         "distill",
@@ -59,7 +58,7 @@ CATEGORIES: dict[str, list[str]] = {
         "stocktake", "anvil", "getting-started", "orchestrator",
     ],
     "Eval & Maintenance (internal)": [
-        "cartographer-skill", "temper-eval-collect", "temper-eval-calibrate",
+        "temper-eval-collect", "temper-eval-calibrate",
         "skill-selection-evals",
     ],
 }

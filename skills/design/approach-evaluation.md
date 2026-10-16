@@ -180,7 +180,7 @@ These make decisions revisitable without re-running the full analysis.
 | `/spec` | `architecture` | Recon brief + cascading decisions (autonomous — confidence routing) | Evaluator generates |
 | `/build` migration mode | `strategy` | Recon brief + migration analysis | Evaluator generates |
 
-**Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not design approach evaluation), `/prospector` (competing design evaluation is more sophisticated than this subflow for this use case). See #147 for rationale.
+**Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not design approach evaluation), `/recon` improvement-discovery mode (competing redesign exploration is more specialized than this subflow). See #147 for rationale.
 
 ### Consumer Dispatch Examples
 
