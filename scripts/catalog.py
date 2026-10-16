@@ -44,6 +44,7 @@ CATEGORIES: dict[str, list[str]] = {
     "Quality & Audit": [
         "delve", "audit", "siege", "quality-gate",
         "temper", "verify",
+        "skill-selection-evals",
         "finish", "warden",
     ],
     "Debugging": [
@@ -56,10 +57,6 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "Maintenance & Meta": [
         "stocktake", "anvil", "getting-started", "orchestrator",
-    ],
-    "Eval & Maintenance (internal)": [
-        "temper-eval-collect", "temper-eval-calibrate",
-        "skill-selection-evals",
     ],
 }
 

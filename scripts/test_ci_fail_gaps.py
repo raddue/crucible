@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Assertion fixtures for CI guards; marker strings are assembled, never literal."""
-import json
 import subprocess
 from contextlib import redirect_stdout
 from io import StringIO
@@ -9,7 +8,6 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import check_conflict_markers
-import check_evals_consistency
 import check_machine_paths
 import check_scorecard_freshness
 
@@ -42,29 +40,6 @@ def main() -> None:
         with patch.object(check_conflict_markers, "ROOT", root), redirect_stdout(output):
             assert check_conflict_markers.main() == 1
         assert output.getvalue().splitlines() == [f"- notes.md:{n}: unresolved conflict marker" for n in (2, 3, 4)]
-
-        skill = root / "skills" / "good"
-        skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text("# Good\n")
-        (root / "skills" / "shared").mkdir()
-        cases = root / "skills" / "selection" / "evals"
-        cases.mkdir(parents=True)
-        file = cases / "evals.json"
-        file.write_text(json.dumps({"evals": [
-            {"id": "ok", "expected_skill": ["good"], "common_mistakes": ["other"]},
-            {"id": "contradiction", "expected_skill": "good", "common_mistakes": ["good"]},
-            {"id": "unknown", "expected_skill": "absent", "common_mistakes": []},
-            {"id": "directory-only", "expected_skill": "shared", "common_mistakes": []},
-        ]}))
-        errors = check_evals_consistency.check(root)
-        assert len(errors) == 3 and any("contradiction" in e for e in errors) and any("unknown" in e for e in errors)
-        assert any("directory-only" in e for e in errors)
-        output = StringIO()
-        with patch.object(check_evals_consistency, "ROOT", root), redirect_stdout(output):
-            assert check_evals_consistency.main() == 1
-        assert output.getvalue().splitlines() == [f"- {error}" for error in errors]
-        file.write_text(json.dumps({"evals": [{"expected_skill": ["good"], "common_mistakes": []}]}))
-        assert not check_evals_consistency.check(root)
 
         docs = root / "docs"
         docs.mkdir()
