@@ -20,6 +20,8 @@ def main() -> None:
 
         skill = root / "skills" / "good"
         skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Good\n")
+        (root / "skills" / "shared").mkdir()
         cases = root / "skills" / "selection" / "evals"
         cases.mkdir(parents=True)
         file = cases / "evals.json"
@@ -27,9 +29,11 @@ def main() -> None:
             {"id": "ok", "expected_skill": ["good"], "common_mistakes": ["other"]},
             {"id": "contradiction", "expected_skill": "good", "common_mistakes": ["good"]},
             {"id": "unknown", "expected_skill": "absent", "common_mistakes": []},
+            {"id": "directory-only", "expected_skill": "shared", "common_mistakes": []},
         ]}))
         errors = check_evals_consistency.check(root)
-        assert len(errors) == 2 and any("contradiction" in e for e in errors) and any("unknown" in e for e in errors)
+        assert len(errors) == 3 and any("contradiction" in e for e in errors) and any("unknown" in e for e in errors)
+        assert any("directory-only" in e for e in errors)
         file.write_text(json.dumps({"evals": [{"expected_skill": ["good"], "common_mistakes": []}]}))
         assert not check_evals_consistency.check(root)
 
