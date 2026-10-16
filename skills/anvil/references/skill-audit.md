@@ -1,5 +1,19 @@
 # Skill-suite audit
 
+Absorbed from `stocktake` (#720); original audit mechanics retained, with routing/cache retargeting and compatibility notes.
+
+## Contents
+
+- [When to Activate](#when-to-activate)
+- [Modes](#modes)
+- [Quick Scan Flow](#quick-scan-flow)
+- [Full Stocktake Flow](#full-stocktake-flow)
+- [Efficiency Report Flow](#efficiency-report-flow)
+- [Results File Schema](#results-file-schema)
+- [Safety](#safety)
+- [Integration](#integration)
+- [Red Flags](#red-flags)
+
 Audits all crucible skills for overlap, staleness, broken references, and quality.
 
 **Announce at start:** "I'm using anvil to audit skill health."

@@ -54,9 +54,9 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison was blocked because four Claude CLI calls failed authentication before outputs existed. No scored outputs or valid A/B delta are available; do not claim a measured quality improvement.
 
-## Issue #720: skill-suite audit → anvil
+## Issue #720: skill-suite audit → anvil (2026-10-16)
 
-A paired old-audit/merged-anvil behavioral A/B was not run. The source audit instructions were copied into `skills/anvil/references/skill-audit.md`, with command and cache paths retargeted; no model outputs were graded and no performance delta is claimed. Four skill-selection cases live in `skills/anvil/evals/routing.json` for full-suite health, cached quick scan, efficiency reporting, and anvil's existing single-skill edit/eval workflow; these fixtures have not been run as a live routing eval. The selection harness moved to `crucible-eval` in #739. Run a matched paired eval before claiming behavioral parity.
+A paired old-audit/merged-anvil behavioral A/B was not run. The source audit instructions were copied into `skills/anvil/references/skill-audit.md`, with command and cache paths retargeted; no model outputs were graded and no performance delta is claimed. Five skill-selection cases live in `skills/anvil/evals/routing.json` for full-suite health, cached quick scan, efficiency reporting, anvil's existing single-skill edit/eval workflow, and legacy `stocktake`/`skill-creator` trigger names; these fixtures have not been run as a live routing eval. The selection harness moved to `crucible-eval` in #739. Run a matched paired eval before claiming behavioral parity.
 
 ## Issue #720: review-feedback → temper (2026-10-15)
 

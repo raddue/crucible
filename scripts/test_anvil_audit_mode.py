@@ -16,6 +16,8 @@ def test_audit_mode():
     assert "## Contents" in skill
     assert "references/skill-audit.md" in skill
     assert "overlap" in description and "staleness" in description and "broken references" in description
+    assert "stocktake" in description and "skill-creator" in description
+    assert description.split("description: ", 1)[1].strip() in (ROOT / "docs/skills.md").read_text()
     assert "skills/anvil/results.json" in audit
     assert "skills/stocktake/results.json" in audit  # legacy cache retained until copied
     assert "no subagent dispatch" in audit
@@ -30,6 +32,10 @@ def test_audit_mode():
         assert "stocktake" not in json.dumps(case).lower()
         assert "anvil" not in case.get("common_mistakes", [])
     assert sum(case.get("boundary") == "anvil-skill-audit" for case in cases) >= 3
+    legacy = next(case for case in cases if case["id"] == "anvil-legacy-triggers-05")
+    assert "stocktake" in legacy["prompt"] and "skill-creator" in legacy["prompt"]
+    assert legacy["expected_skill"] == "anvil" and "anvil" not in legacy["common_mistakes"]
+    assert next(case for case in cases if case["id"] == "anvil-skill-edit-04")["boundary"] == "anvil-skill-edit"
 
 
 if __name__ == "__main__":

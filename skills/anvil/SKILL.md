@@ -1,6 +1,6 @@
 ---
 name: anvil
-description: Create, modify, and evaluate skills; audit the whole skill set for overlap, staleness, broken references, quality, and efficiency. Use for new skills, skill edits, eval benchmarks, description routing, or a quick/full skill-health audit and efficiency report.
+description: Create, modify, and evaluate skills (formerly skill-creator); audit the whole skill set for overlap, staleness, broken references, quality, and efficiency (formerly stocktake). Use for new skills, skill edits, eval benchmarks, description routing, or a quick/full skill-health audit and efficiency report.
 ---
 
 # Anvil (skill-creator)

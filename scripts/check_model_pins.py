@@ -25,7 +25,7 @@ Security-surface set (evaluated on the repo-relative path):
     pure-prose stem-matcher like skills/shared/security-signals.md cannot host
     a fable pin, so it is not forced to carry a marker);
   - carve-outs (never security-surface): skills/audit/**,
-    skills/test-coverage/**, skills/anvil/** — the skill-suite audit mode's
+    skills/test-coverage/**, skills/anvil/references/skill-audit.md — the skill-suite audit mode's
     lenses are ELIGIBLE-PENDING-VERIFICATION in the model-tier policy, so
     forcing a hard-out marker onto them would contradict the taxonomy.
 
@@ -101,7 +101,8 @@ EXPLICIT_SECURITY_SKILLS = {"skills/quality-gate/dependency-audit.md"}
 EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md"}
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
-CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/anvil/")
+CARVE_OUTS = ("skills/audit/", "skills/test-coverage/")
+CARVE_OUT_FILES = {"skills/anvil/references/skill-audit.md"}
 
 # Each regex captures the VALUE REGION after `model:`, not a single token:
 # form 1 to the first `#` or end-of-line, forms 2-3 to the closing paren.
@@ -660,7 +661,7 @@ def is_fable(value: str) -> bool:
 
 def is_security_surface(rel: str, text: str) -> bool:
     """Membership in the machine-checkable security-surface set."""
-    if rel.startswith(CARVE_OUTS):
+    if rel.startswith(CARVE_OUTS) or rel in CARVE_OUT_FILES:
         return False
     if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES or rel in EXPLICIT_SECURITY_SKILLS:
         return True
