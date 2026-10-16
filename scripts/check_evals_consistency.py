@@ -31,7 +31,7 @@ def check(root: Path) -> list[str]:
 def main() -> int:
     errors = check(ROOT)
     if errors:
-        print("\n".join(errors))
+        print("\n".join(f"- {error}" for error in errors))
         return 1
     print("OK — eval expected skills consistent")
     return 0

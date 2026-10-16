@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Assertion fixtures for CI guards; marker strings are assembled, never literal."""
 import json
+import subprocess
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import check_conflict_markers
 import check_evals_consistency
@@ -32,6 +36,12 @@ def main() -> None:
         assert check_conflict_markers.offenders(root, ["notes.md", "binary.png"]) == [
             "notes.md:2", "notes.md:3", "notes.md:4"]
         assert not check_conflict_markers.offenders(root, ["binary.png"])
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "add", "notes.md"], cwd=root, check=True)
+        output = StringIO()
+        with patch.object(check_conflict_markers, "ROOT", root), redirect_stdout(output):
+            assert check_conflict_markers.main() == 1
+        assert output.getvalue().splitlines() == [f"- notes.md:{n}: unresolved conflict marker" for n in (2, 3, 4)]
 
         skill = root / "skills" / "good"
         skill.mkdir(parents=True)
@@ -49,6 +59,10 @@ def main() -> None:
         errors = check_evals_consistency.check(root)
         assert len(errors) == 3 and any("contradiction" in e for e in errors) and any("unknown" in e for e in errors)
         assert any("directory-only" in e for e in errors)
+        output = StringIO()
+        with patch.object(check_evals_consistency, "ROOT", root), redirect_stdout(output):
+            assert check_evals_consistency.main() == 1
+        assert output.getvalue().splitlines() == [f"- {error}" for error in errors]
         file.write_text(json.dumps({"evals": [{"expected_skill": ["good"], "common_mistakes": []}]}))
         assert not check_evals_consistency.check(root)
 

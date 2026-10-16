@@ -28,7 +28,7 @@ def main() -> int:
     files = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().strip("\0").split("\0")
     found = offenders(ROOT, files)
     if found:
-        print("Unresolved conflict markers:\n" + "\n".join(found))
+        print("\n".join(f"- {entry}: unresolved conflict marker" for entry in found))
         return 1
     print("OK — no tracked conflict markers")
     return 0
