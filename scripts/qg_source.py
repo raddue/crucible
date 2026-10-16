@@ -1,5 +1,6 @@
 """Read the quality-gate runbook across its flat reference files for contract checks."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "skills/quality-gate"
@@ -11,6 +12,10 @@ PARTS = (
 
 def read_runbook() -> str:
     body = ROOT.joinpath("SKILL.md").read_text(encoding="utf-8")
+    match = re.search(r"Read these flat references in order.*?\n(.*?)(?=\n\n)", body, re.S)
+    documented = tuple(re.findall(r"`([^`]+\.md)`", match.group(1))) if match else ()
+    if documented != PARTS:
+        raise ValueError(f"quality-gate Contents references differ from qg_source.PARTS: {documented!r}")
     for name in PARTS:
         reference = ROOT.joinpath(name).read_text(encoding="utf-8")
         body += reference.split("\n\n", 2)[2]  # Strip only the generated contents list.

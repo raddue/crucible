@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Executable oracle for the Second-Pass-Findings scoring rule (#561 fresh round 12 F1).
 
-Faithful executable transcription of the `qg-score-second-pass-population`
-CONTRACT block in `skills/quality-gate/SKILL.md` (Score source, step 7) and its
-mirror in `skills/quality-gate/red-team-prompt.md`'s `### Second Pass Findings`
-bracket. Both prose homes describe ONE parsing/scoring rule; this module is
+Faithful executable transcription of the scoring rule described in
+`skills/quality-gate/red-team-prompt.md`.
+That prose describes ONE parsing/scoring rule; this module is
 that rule's single executable implementation, so a round-11-style in-place
 prose inversion that keeps every checker-pinned phrase intact but flips the
 rule's actual behavior is caught by re-running this scorer against the
@@ -73,8 +72,8 @@ _DECLARED_RE = re.compile(
 _BOUNDARY_PUNCT_RE = re.compile(r"^\s*[(\[,.:;]")
 # ...or by a dash, REQUIRING at least one whitespace char before it — this is
 # NOT the same optional-whitespace convention as the punctuation set above.
-# Both prose homes (quality-gate/SKILL.md:324, red-team-prompt.md:156) state
-# this asymmetry explicitly and deliberately: "whitespace followed by a dash
+# The `### Second Pass Findings` rule in red-team-prompt.md states this
+# asymmetry explicitly and deliberately: "whitespace followed by a dash
 # (-, –, or — — a spaced dash counts, an unspaced one does not)". SIEGE-FA-2
 # (PR #583 warden gate): the #583 Edge Cases AV4 change widened this to `\s*`
 # on the theory that requiring whitespace was an oversight (so `Fatal—rationale`
