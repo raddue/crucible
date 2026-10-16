@@ -47,4 +47,3 @@ You: [Fix t3]
 ```
 
 The Round-2 verdict is **Issues-Found, not Clean**, even though both carried members resolved — Track A admitted a new gating finding (`t3`), and a new-admit round is never Clean. Clean is reached only in Round 3, which resolves the carried member and admits no new gating finding.
-
