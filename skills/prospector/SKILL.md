@@ -707,7 +707,7 @@ After context compaction:
 - **Hands off to:** `crucible:build` (refactor mode) — design doc becomes context for build's design phase
 - **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
-- **Does NOT use:** `crucible:quality-gate` (prospector is advisory, not a fix loop), `crucible:red-team`
+- **Does NOT use:** `crucible:quality-gate` (prospector is advisory, not a fix loop), `crucible:quality-gate (red-team mode)`
 - **Does not dispatch /recon** -- organic exploration serves a different purpose than structured investigation. Does not dispatch /design approach evaluation -- competing redesign exploration is more specialized than that subflow for this use case. See #147 for rationale.
 
 ## Subagent Dispatch Summary

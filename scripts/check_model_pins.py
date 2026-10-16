@@ -13,7 +13,7 @@ so this is a PR-time gate, not an author-time one). Two rules:
   (b) FAIL any file in the security-surface set that LACKS the marker.
 
 Security-surface set (evaluated on the repo-relative path):
-  - dir allowlist: skills/siege/**, skills/dependency-audit/** — marker
+  - dir allowlist: skills/siege/**; explicit skills/quality-gate/dependency-audit.md — marker
     required for EVERY .md there, pin or no pin (everything in a known
     security skill dir matters);
   - explicit file: agents/crucible-red-team.md — not blocked *content* but the
@@ -32,7 +32,7 @@ Security-surface set (evaluated on the repo-relative path):
 Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
-convention, see skills/consensus/SKILL.md), or bracket-suffixed
+convention, see skills/quality-gate/consensus-mechanism.md), or bracket-suffixed
 (`claude-fable-*[1m]`, this repo's own bracket-suffix pin form). The neutral
 `model_profile:` key introduced by the model-agnostic dispatch policy is
 scanned alongside `model:` so a security-named file cannot evade the
@@ -96,7 +96,8 @@ import collections, pathlib, re, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "<!-- MODEL-TIER: security-hard-out -->"
 
-DIR_ALLOWLIST = ("skills/siege/", "skills/dependency-audit/")
+DIR_ALLOWLIST = ("skills/siege/",)
+EXPLICIT_SECURITY_SKILLS = {"skills/quality-gate/dependency-audit.md"}
 EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md"}
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
@@ -661,7 +662,7 @@ def is_security_surface(rel: str, text: str) -> bool:
     """Membership in the machine-checkable security-surface set."""
     if rel.startswith(CARVE_OUTS):
         return False
-    if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES:
+    if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES or rel in EXPLICIT_SECURITY_SKILLS:
         return True
     base = pathlib.PurePosixPath(rel).name.lower()
     if any(stem in base for stem in NAME_STEMS):

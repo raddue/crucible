@@ -24,8 +24,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 
 | Skill | Platform Feature Used | Degraded Behavior |
 |-------|----------------------|-------------------|
-| quality-gate | Subagent dispatch for fresh reviewers each round | Agent reviews iteratively in-context (anchoring risk) |
-| red-team | Subagent dispatch for Devil's Advocate reviewers | Agent plays Devil's Advocate in-context |
+| quality-gate (including red-team mode) | Subagent dispatch for fresh Devil's Advocate reviewers each round | Agent reviews iteratively in-context (anchoring risk) |
 | inquisitor | 5 parallel adversarial dimensions | Dimensions run sequentially |
 | temper | Subagent dispatch for review | Agent reviews in-context |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
@@ -48,7 +47,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | getting-started (compass reference) | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
 | finish (safe PR merge subflow) | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
 | distill | External document converters (pandoc, pdftotext, LibreOffice) | Cannot ingest binary document formats |
-| dependency-audit | External auditors (npm/cargo/pip-audit) | No supply-chain signal produced |
+| quality-gate dependency-audit lane | External auditors (npm/cargo/pip-audit) | No supply-chain signal produced |
 | source-driven-development | Live documentation fetch (web access) | Falls back to (possibly stale) training recall |
 
 ### Tier 3 — Platform-Dependent
@@ -64,7 +63,7 @@ These skills require features specific to Claude Code. They will not work on oth
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
 | getting-started (recall reference) | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
-| consensus | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
+| quality-gate consensus mechanism | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
 | temper-eval-calibrate | Session-dispatch eval harness (Claude Code) | Wraps live session invocations; no portable equivalent |
 | temper-eval-collect | Task-tool parallel reviewer dispatch (Claude Code) | Live reviewer dispatch is harness-specific |
 | skill-selection-evals | Anthropic skill-creator eval harness (anvil's ancestor) | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |

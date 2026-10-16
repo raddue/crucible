@@ -32,7 +32,7 @@ def _read(rel):
 
 
 # (skill file, required helper invocation(s))
-READ_CONSUMERS = ["skills/build/SKILL.md", "skills/quality-gate/SKILL.md", "skills/debugging/SKILL.md"]
+READ_CONSUMERS = ["skills/build/SKILL.md", "skills/quality-gate/artifact-preflight.md", "skills/debugging/SKILL.md"]
 WRITE_CONSUMERS = ["skills/debugging/SKILL.md", "skills/finish/merge.md"]
 
 

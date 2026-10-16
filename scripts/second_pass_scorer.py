@@ -3,7 +3,7 @@
 
 Faithful executable transcription of the `qg-score-second-pass-population`
 CONTRACT block in `skills/quality-gate/SKILL.md` (Score source, step 7) and its
-mirror in `skills/red-team/red-team-prompt.md`'s `### Second Pass Findings`
+mirror in `skills/quality-gate/red-team-prompt.md`'s `### Second Pass Findings`
 bracket. Both prose homes describe ONE parsing/scoring rule; this module is
 that rule's single executable implementation, so a round-11-style in-place
 prose inversion that keeps every checker-pinned phrase intact but flips the
@@ -379,7 +379,7 @@ def _parse_headline_entries_in_span(
     marker-based ("a `#### <title>` heading is recommended formatting for
     readability; it is never itself what makes text an entry, precisely so a
     missing heading cannot zero out an otherwise-labelled Fatal"). The
-    Steel-Man-Then-Kill block `red-team/red-team-prompt.md` MANDATES for every
+    Steel-Man-Then-Kill block `quality-gate/red-team-prompt.md` MANDATES for every
     Fatal/Significant finding is five `**Finding:**`/`**Best Defense:**`/`**Why
     The Defense Fails:**`/`**Severity:**`/`**Proposed Fix:**` lines with NO
     `####` heading, so a findings file written exactly to spec scored

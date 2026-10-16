@@ -1,8 +1,12 @@
----
-name: dependency-audit
-description: Ecosystem-appropriate dependency vulnerability audit. Walks the project for package.json, Cargo.toml, requirements.txt, pyproject.toml manifests and runs npm/cargo/pip-audit. Produces a structured supply-chain signal with normalized severities. Used by build alongside quality-gate; can also be invoked standalone. Triggers on /dependency-audit, 'audit dependencies', 'scan vulnerabilities', 'check CVEs'.
-origin: crucible
----
+# Contents
+
+- When to Use · Skill Arguments · Manifest Scanning · Ecosystem Detection and Ordering
+- Audit Tool Availability · Audit Tool Error Handling · Severity Normalization · Output Model
+- Tool Availability · Summary · npm — packages/api/package.json — FINDINGS · pip — src/requirements.txt — FINDINGS
+- pip — src/pyproject.toml — FINDINGS · Warnings · Overall Result Computation · Blocking and Prompting Behavior
+- Compaction Recovery · Stale Audit Results · Invocation Convention · Red Flags
+- Integration
+
 <!-- MODEL-TIER: security-hard-out -->
 
 # Dependency Audit
@@ -15,8 +19,8 @@ Runs ecosystem-appropriate dependency audit commands and produces a normalized s
 
 ## When to Use
 
-- **Build pipeline:** Invoked in parallel with quality-gate on code-artifact phases. Both produce independent signals; build's gate ledger integrates them.
-- **Standalone:** User runs `/dependency-audit` directly to scan a project ad-hoc.
+- **Build pipeline:** Build invokes this mode in parallel with warden's code-artifact review gate (which invokes the full quality-gate red-team leg). Both produce independent signals; build's gate ledger integrates them.
+- **Standalone:** User requests a standalone dependency audit via `/quality-gate` dependency-audit mode to scan a project ad-hoc.
 - **CI / scheduled runs:** Invoked by a cron-style schedule to catch dependency drift between feature work.
 
 ## Skill Arguments
@@ -206,11 +210,11 @@ The `generated-at` timestamp marks when results were produced. Results are valid
 
 `dependency-audit` is invoked:
 
-- **By build** — alongside `crucible:quality-gate` on phase 4 (code-artifact gate). Both run in parallel; build's gate ledger integrates the results.
-- **By the user** — directly via `/dependency-audit`.
+- **By build** — in parallel with warden's code-artifact gate, as a separate `quality-gate` dependency-audit-mode invocation. Build integrates the result in its gate ledger.
+- **By the user** — via `/quality-gate` dependency-audit mode (legacy wording "audit dependencies" routes here).
 - **By schedule** — via `/loop` or `/schedule` for periodic supply-chain scans.
 
-`dependency-audit` does NOT invoke `crucible:quality-gate` or `crucible:red-team`. It produces its own signal; consumption is the caller's responsibility.
+The dependency-audit lane does not invoke quality-gate red-team mode. It produces its own signal; consumption is the caller's responsibility.
 
 ## Red Flags
 
@@ -224,6 +228,6 @@ The `generated-at` timestamp marks when results were produced. Results are valid
 
 | Skill | Relationship |
 |---|---|
-| `crucible:build` | Primary caller. Invokes alongside `crucible:quality-gate` on code-artifact phases. |
-| `crucible:quality-gate` | Sibling skill. Both produce independent signals on code artifacts; quality-gate consumes the same artifact for adversarial review while this skill audits its dependencies. |
+| `crucible:build` | Primary caller. Dispatches this mode in parallel with warden's code-artifact gate and integrates the result. |
+| `crucible:quality-gate` full gate | Separate invocation. The full gate reviews the code artifact; this mode audits dependencies without entering the red-team loop. |
 | `crucible:audit` | Audit skill consumes dependency-audit findings as supporting context when auditing subsystems with dependency surface. |

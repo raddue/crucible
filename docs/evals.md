@@ -46,6 +46,9 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
 | inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated harness (#424) has since exercised the dispatch directly: Phase 1 found no *identification-breadth* lift from the fan-out, and Phase 1b found no lift from the dimension *taxonomy* — but Phase 1b's execution measurement shows a real **+29 pp lift (execution harness, detection axis) from parallel test-writing breadth** over a bare baseline — see *Inquisitor Fan-Out* / *Phase 1b* below |
 
+## Issue #720: Quality-Gate Hub Merge (matched single-prompt A/B, Claude Opus 5.5)
+
+Matched old (`git show edf71fb^:skills/quality-gate/SKILL.md`) and merged quality-gate (43-line entry plus eight flat runbook refs) on one adversarial webhook-plan prompt. Both arms used `claude -p --model claude-opus-5-5 --tools ''`, no tools or edits, and disclosed simulation rather than claiming reviewer execution. A fixed 10-item rubric covered unsigned ingestion, SSRF, unbounded retry, unreplicated Redis, severity, weighted score, fresh re-review, non-PASS, no fabricated execution, and siege. **Old 10/10; merged 10/10; delta 0 percentage points.** Outputs and prompts: `/tmp/crucible-qg-720-ab/`. This is one matched, ceilinged prompt; it shows no regression on the sampled review path but cannot validate live dispatch, standalone red-team mode, consensus or dependency-audit behavior. The structural suite covers those wiring contracts separately.
 ## Finish / safe-merge consolidation A/B (#720)
 
 A `/anvil` A/B has not been run for this merge. The merge preserves the source `skills/merge-pr/SKILL.md` mechanics in `skills/finish/merge.md` and makes `/finish` the single routing target, but behavioral non-regression remains unmeasured; run the paired eval before publication.
@@ -178,7 +181,7 @@ Overall: **98% with skill vs 67% without, +31% average delta.** Sequence complia
 ## #537 Sonnet Pin: Wording-Diff Sanity Check (Not a Full Blind A/B, Claude Sonnet 5)
 
 #537 pins `crucible-qg-fix` from `model: inherit` to `model: sonnet` and touches wording in
-`skills/quality-gate/SKILL.md` and `skills/red-team/SKILL.md` (both carry `evals/evals.json`),
+`skills/quality-gate/SKILL.md` (the absorbed red-team evals live in its `evals/evals.json`),
 triggering CLAUDE.md's "eval before you publish" rule. A full blind A/B (14 cases × old/new,
 each a live multi-round gate run) was judged disproportionate for a prose/pin diff — reduced to
 **2 representative cases, old (git HEAD pre-#537) vs. new (working tree post-#537), 4 live agent

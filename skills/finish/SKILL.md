@@ -442,7 +442,7 @@ git worktree remove <worktree-path>
 
 ## Defer-Ledger Corpus Seeding (#303)
 
-After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see the **Defer-ledger handoff (#303)** paragraph in `skills/quality-gate/SKILL.md` for the producer side and its `## Cost-Cap and Diminishing-Return Signals` section for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
+After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see the **Defer-ledger handoff (#303)** paragraph in `skills/quality-gate/recovery.md` for the producer side and `skills/quality-gate/cost-fix.md` › Cost-Cap and Diminishing-Return Signals for ledger format for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
 
 For each ledger file found, **create-or-append** the `## Accepted` section to `docs/retrospectives/defer-ledger/<issue-number>.md` (where `<issue-number>` is the GitHub issue number associated with this run; derive from branch name `<prefix>/<NNN>-...` or from the PR's linked issue). If the target file does not exist, create it (creating the `docs/retrospectives/defer-ledger/` directory first if absent) with a top-level `# Defer ledger — issue #<N>` header.
 
@@ -471,7 +471,7 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
 
 **Pairs with:**
 - **worktree** - Cleans up worktree (if applicable)
-- **crucible:red-team** — Adversarial review before presenting options. Note: finish uses `crucible:red-team` directly rather than `crucible:quality-gate` because it doesn't produce a typed artifact — it's a pre-completion sanity check, not an iterative gate.
+- **crucible:quality-gate (standalone red-team mode)** — Adversarial full loop before presenting options. Finish has no typed artifact, so select the preserved standalone red-team loop rather than the typed-artifact gate.
 
 **Recommended:**
 - **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)

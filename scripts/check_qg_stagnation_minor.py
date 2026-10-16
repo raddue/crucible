@@ -10,7 +10,7 @@ pinning is what prevents a self-match (a checker that never globs cannot read
 itself), so the pinned phrases need NOT be obfuscated/split.
 
 Path-pinning to `quality-gate/SKILL.md` is load-bearing: the checker must NOT
-scan `red-team/SKILL.md`, whose "Only Fatal and Significant count" /
+scan `quality-gate/red-team-mode.md`, whose "Only Fatal and Significant count" /
 external-findings "do NOT count toward stagnation scoring" lines are
 deliberately retained per the #358 two-vocabulary separation (design D2). It
 is therefore intentionally scoped away from those intentionally-retained lines.
@@ -47,6 +47,8 @@ values, never a substring that includes or straddles a `**`). Exits 0 when
 aligned, 1 with a `- <error>` list otherwise. Stdlib only.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -157,7 +159,7 @@ def check_skill(text: str) -> list[str]:
 def _read(path: pathlib.Path, errs: list[str]) -> str | None:
     """Read a pinned target file; on failure append a clean error (no crash)."""
     try:
-        return path.read_text(encoding="utf-8")
+        return read_runbook() if path == SKILL else path.read_text(encoding="utf-8")
     except (FileNotFoundError, UnicodeDecodeError, OSError) as err:
         errs.append(f"{path} missing or unreadable: {err}")
         return None

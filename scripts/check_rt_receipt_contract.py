@@ -9,9 +9,9 @@ Acceptance test for #366 (design:
 `docs/plans/2026-06-06-366-rt-qg-receipt-contract-design.md`). Asserts the design's
 acceptance criteria over exactly FOUR named skill-methodology Markdown files:
 
-    skills/red-team/red-team-prompt.md   — Report Format / RCPT v1.1 / worked examples
+    skills/quality-gate/red-team-prompt.md   — Report Format / RCPT v1.1 / worked examples
     skills/quality-gate/SKILL.md         — consumption + fix-agent supersession + writer-inversion
-    skills/red-team/SKILL.md             — standalone consumption (Tier-1 lint, no Layer-2 sweep)
+    skills/quality-gate/red-team-mode.md             — standalone consumption (Tier-1 lint, no Layer-2 sweep)
     skills/shared/return-convention.md   — kind=grep artifact/range clarification
 
 Each assertion is keyed to a design AC and carries an ID prefix ([A1], [C13], …) in
@@ -36,12 +36,14 @@ Exits 0 if all assertions hold, 1 with a bulleted violation list otherwise.
 Mirrors `scripts/check_canonical_drift.py` and `scripts/check_i2_marker.py`.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RT_PROMPT = ROOT / "skills/red-team/red-team-prompt.md"
+RT_PROMPT = ROOT / "skills/quality-gate/red-team-prompt.md"
 QG_SKILL = ROOT / "skills/quality-gate/SKILL.md"
-RT_SKILL = ROOT / "skills/red-team/SKILL.md"
+RT_SKILL = ROOT / "skills/quality-gate/red-team-mode.md"
 RETURN_CONV = ROOT / "skills/shared/return-convention.md"
 
 # Worked-example markers Task 1 DECLARES and Task 2 emits verbatim (load-bearing
@@ -62,7 +64,7 @@ _NEGATION_TOKENS = (
 # FA2-2 (PR #583 warden gate): the pre-existing closed vocabulary (not/never/
 # excluding/except/ignor*) was trivially evaded by "less"/"minus"/"omitting"/
 # "apart from"/"other than" — verified live: replacing "plus any Fatal/
-# Significant..." with "less any..." in red-team/SKILL.md inverts the
+# Significant..." with "less any..." in quality-gate/red-team-mode.md inverts the
 # polarity of #561's entire thesis and every checker relying on this
 # vocabulary still PASSed. Not a full fix for the general "oracle-pattern
 # vocabulary-only pin" class (tracked separately) — a narrower vocabulary
@@ -75,14 +77,14 @@ def _negates(anchor: str, scope: str) -> bool:
     negation of whatever follows it in prose — without the `(?!-)` guard,
     the literal state name "NOT-SATISFIABLE" false-positives every polarity
     check on an anchor phrase appearing anywhere in the same clause after
-    it, live-verified against `skills/red-team/SKILL.md` step 4's own
+    it, live-verified against `skills/quality-gate/red-team-mode.md` step 4's own
     NOT-SATISFIABLE treatment sentence."""
     return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b(?!-)[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
 
 
 # Detail-token set for the #561 second-pass-population parse's stale-prone
 # normalization/boundary/fence-parity content — shared by [A6e] (the
-# red-team-prompt.md bracket) and [D19]/[D19b] (red-team/SKILL.md's step-3/
+# red-team-prompt.md bracket) and [D19]/[D19b] (quality-gate/red-team-mode.md's step-3/
 # step-4 restatement homes, #561 fresh round 6 S4). Mirrors
 # check_qg_second_pass_score.py's own `_pointer_or_complete` and its
 # `detail_tokens` tuple (own copy, per this repo's stdlib-only/no-cross-file-
@@ -459,7 +461,7 @@ def check_rt_prompt(text: str) -> list[str]:
         # (#561 fresh round 5 S1): check_qg_second_pass_score.py's (p)
         # assertion's `_pointer_or_complete` covers only two of what is now a
         # SIX-home restatement census (#561 fresh round 6 S4 widened the
-        # census from four to six — see [D19]/[D19b] below, red-team/SKILL.md's
+        # census from four to six — see [D19]/[D19b] below, quality-gate/red-team-mode.md's
         # two standalone-consumption sites): (1) the anti-rationalization row
         # and (2) INV-561-1, both in SKILL.md, are pinned by
         # check_qg_second_pass_score.py's (p); `red-team-prompt.md`'s bracket
@@ -1067,7 +1069,7 @@ def check_qg(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# D. red-team/SKILL.md — standalone consumption (design AC#4)
+# D. quality-gate/red-team-mode.md — standalone consumption (design AC#4)
 # ---------------------------------------------------------------------------
 
 # Hard SAFETY CEILING for [D19]/[D19b]'s scope, not the primary boundary —
@@ -1173,7 +1175,7 @@ def check_rt_skill(text: str) -> list[str]:
     d19_m = re.search(r"Single source of truth", text)
     d19_scope = _paragraph_scope(
         d19_m, text, _D19_WINDOW, errs,
-        "[D19] red-team/SKILL.md: the 'Single source of truth' paragraph",
+        "[D19] quality-gate/red-team-mode.md: the 'Single source of truth' paragraph",
     )
     d19_ok = (bool(d19_m)
               and "cited findings" in d19_scope
@@ -1183,7 +1185,7 @@ def check_rt_skill(text: str) -> list[str]:
               and "### Second Pass Findings" in d19_scope)
     if not d19_ok:
         errs.append(
-            "[D19] red-team/SKILL.md: the 'Single source of truth' paragraph is missing "
+            "[D19] quality-gate/red-team-mode.md: the 'Single source of truth' paragraph is missing "
             "wording pinning BOTH the qualitative branch and the weighted-score loop to "
             "the cited findings file's severity sections, widened to include "
             "'### Second Pass Findings' (#561) (e.g. 'cited findings' + section heading "
@@ -1192,7 +1194,7 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("Second Pass Findings", d19_scope):
         errs.append(
-            "[D19] red-team/SKILL.md: the 'Single source of truth' paragraph NEGATES "
+            "[D19] quality-gate/red-team-mode.md: the 'Single source of truth' paragraph NEGATES "
             "'### Second Pass Findings' (e.g. 'explicitly EXCLUDING' immediately before "
             "it) instead of widening the population to include it (#561 round 1 S1: a "
             "bare co-presence check is satisfied by the negated sentence too)"
@@ -1204,7 +1206,7 @@ def check_rt_skill(text: str) -> list[str]:
         # the entry/severity parse and must go stale-proof the same way [A6e]
         # protects red-team-prompt.md's bracket.
         d19_pointer_err = _pointer_or_complete(
-            d19_scope, "[D19] red-team/SKILL.md: the 'Single source of truth' paragraph"
+            d19_scope, "[D19] quality-gate/red-team-mode.md: the 'Single source of truth' paragraph"
         )
         if d19_pointer_err:
             errs.append(
@@ -1219,7 +1221,7 @@ def check_rt_skill(text: str) -> list[str]:
     d19b_m = re.search(r"### 4\. Re-review after fixes", text)
     d19b_scope = _paragraph_scope(
         d19b_m, text, _D19B_WINDOW, errs,
-        "[D19b] red-team/SKILL.md: step 4's re-review score-comparison paragraph",
+        "[D19b] quality-gate/red-team-mode.md: step 4's re-review score-comparison paragraph",
     )
     d19b_ok = (bool(d19b_m)
                and "cited findings" in d19b_scope
@@ -1228,14 +1230,14 @@ def check_rt_skill(text: str) -> list[str]:
                and "### Second Pass Findings" in d19b_scope)
     if not d19b_ok:
         errs.append(
-            "[D19b] red-team/SKILL.md: step 4's re-review score-comparison paragraph is "
+            "[D19b] quality-gate/red-team-mode.md: step 4's re-review score-comparison paragraph is "
             "missing wording widening its weighted-score loop to include "
             "'### Second Pass Findings' (#561) — a mention in the step-3 paragraph "
             "([D19]) does not satisfy this; step 4 is a separate live entry point"
         )
     elif _negates("Second Pass Findings", d19b_scope):
         errs.append(
-            "[D19b] red-team/SKILL.md: step 4's re-review score-comparison paragraph "
+            "[D19b] quality-gate/red-team-mode.md: step 4's re-review score-comparison paragraph "
             "NEGATES '### Second Pass Findings' (e.g. 'explicitly EXCLUDING' "
             "immediately before it) instead of widening the population to include it "
             "(#561 round 1 S1: a bare co-presence check is satisfied by the negated "
@@ -1245,7 +1247,7 @@ def check_rt_skill(text: str) -> list[str]:
         # (#561 fresh round 6 S4): a sixth restatement home, mirroring [D19]'s
         # pointer-or-complete requirement above.
         d19b_pointer_err = _pointer_or_complete(
-            d19b_scope, "[D19b] red-team/SKILL.md: step 4's re-review score-comparison paragraph"
+            d19b_scope, "[D19b] quality-gate/red-team-mode.md: step 4's re-review score-comparison paragraph"
         )
         if d19b_pointer_err:
             errs.append(
@@ -1264,7 +1266,7 @@ def check_rt_skill(text: str) -> list[str]:
     d22_m = re.search(r"The ledger is emitted every round", text)
     d22_scope = _paragraph_scope(
         d22_m, text, _D22_WINDOW, errs,
-        "[D22] red-team/SKILL.md: the round-ledger 'Total findings' paragraph",
+        "[D22] quality-gate/red-team-mode.md: the round-ledger 'Total findings' paragraph",
     )
     d22_ok = (bool(d22_m)
               and "Total findings" in d22_scope
@@ -1273,7 +1275,7 @@ def check_rt_skill(text: str) -> list[str]:
                    or "same single source" in d22_scope))
     if not d22_ok:
         errs.append(
-            "[D22] red-team/SKILL.md: the round-ledger 'Total findings: N "
+            "[D22] quality-gate/red-team-mode.md: the round-ledger 'Total findings: N "
             "(F: x, S: y, M: z)' paragraph does not state that its counts "
             "derive from the cited findings file's own section count — the "
             "same single source the Score source rule (quality-gate/"
@@ -1283,7 +1285,7 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("cited findings file", d22_scope):
         errs.append(
-            "[D22] red-team/SKILL.md: the round-ledger 'Total findings' "
+            "[D22] quality-gate/red-team-mode.md: the round-ledger 'Total findings' "
             "paragraph NEGATES its population source instead of asserting "
             "it (#561 fresh round 10 S1 polarity guard)"
         )
@@ -1293,7 +1295,7 @@ def check_rt_skill(text: str) -> list[str]:
               and ("Layer-2 sweep" in text or "Layer 2 sweep" in text))
     if not d20_ok:
         errs.append(
-            "[D20] red-team/SKILL.md: missing standalone Tier-1-lint pin AND a 'Layer-2 sweep' "
+            "[D20] quality-gate/red-team-mode.md: missing standalone Tier-1-lint pin AND a 'Layer-2 sweep' "
             "(QG-only / 'no Layer-2 sweep') exclusion pin"
         )
 
@@ -1311,7 +1313,7 @@ def check_rt_skill(text: str) -> list[str]:
         and "NOT approved" in directional_m.group(0)
     ):
         errs.append(
-            "[D21] red-team/SKILL.md: the 'No Fatal/Significant issues' approve "
+            "[D21] quality-gate/red-team-mode.md: the 'No Fatal/Significant issues' approve "
             "branch does not carry the directional SEVERITY-COUNTS discrepancy "
             "exception — a declared fatal+significant total EXCEEDING the "
             "orchestrator's own counted population must make the artifact NOT "
@@ -1319,7 +1321,7 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("EXCEEDS the orchestrator's own counted population", directional_m.group(0)):
         errs.append(
-            "[D21] red-team/SKILL.md: the directional SEVERITY-COUNTS "
+            "[D21] quality-gate/red-team-mode.md: the directional SEVERITY-COUNTS "
             "discrepancy exception NEGATES 'EXCEEDS the orchestrator's own "
             "counted population' instead of asserting it (#561 round 1 S1 "
             "polarity guard)"
@@ -1340,7 +1342,7 @@ def check_rt_skill(text: str) -> list[str]:
         and "escalate to the user" in empty_wo_rt_m.group(0)
     ):
         errs.append(
-            "[D21] red-team/SKILL.md: the directional exception's approve-"
+            "[D21] quality-gate/red-team-mode.md: the directional exception's approve-"
             "void branch is missing the Empty-work-order carve-out — on a "
             "0/0 own-count discrepancy, standalone red-team must escalate "
             "to the user (declared + counted numbers) rather than "
@@ -1350,7 +1352,7 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("does NOT route to the fix mechanism", empty_wo_rt_m.group(0)):
         errs.append(
-            "[D21] red-team/SKILL.md: the Empty-work-order carve-out "
+            "[D21] quality-gate/red-team-mode.md: the Empty-work-order carve-out "
             "NEGATES 'does NOT route to the fix mechanism' instead of "
             "asserting it (#561 fresh round 9 S3 polarity guard)"
         )
@@ -1366,7 +1368,7 @@ def check_rt_skill(text: str) -> list[str]:
     step4_scope = d19b_scope
     if "Directional exception" not in step4_scope:
         errs.append(
-            "[D21] red-team/SKILL.md: step 4's re-review comparison does not "
+            "[D21] quality-gate/red-team-mode.md: step 4's re-review comparison does not "
             "reference the step-3 directional SEVERITY-COUNTS discrepancy "
             "exception by name (#561 fresh round 7 S4)"
         )
@@ -1391,7 +1393,7 @@ def check_rt_skill(text: str) -> list[str]:
         and "skips the not-satisfiable loop and escalates to the user directly" in step4_scope
     ):
         errs.append(
-            "[D21] red-team/SKILL.md: step 4 is missing its own Empty-work-"
+            "[D21] quality-gate/red-team-mode.md: step 4 is missing its own Empty-work-"
             "order carve-out — on a 0/0 own-count discrepancy, step 4 must "
             "escalate to the user directly rather than looping as "
             "not-satisfiable, mirroring step 3's own carve-out for the "
@@ -1400,7 +1402,7 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("skips the not-satisfiable loop and escalates to the user directly", step4_scope):
         errs.append(
-            "[D21] red-team/SKILL.md: step 4's empty-work-order carve-out "
+            "[D21] quality-gate/red-team-mode.md: step 4's empty-work-order carve-out "
             "NEGATES 'skips the not-satisfiable loop and escalates to the "
             "user directly' instead of asserting it (#561 fresh round 10 S2 "
             "polarity guard)"
@@ -1423,7 +1425,7 @@ def check_rt_skill(text: str) -> list[str]:
         and "loop back to step 3, per the not-satisfiable treatment above" in step4_scope
     ):
         errs.append(
-            "[D21] red-team/SKILL.md: step 4's directional exception does "
+            "[D21] quality-gate/red-team-mode.md: step 4's directional exception does "
             "not replace the vacuous UNLESS-forcing with its own "
             "NOT-SATISFIABLE treatment ('draw neither a progress nor a "
             "regression conclusion' / 'loop back to step 3, per the "
@@ -1435,13 +1437,13 @@ def check_rt_skill(text: str) -> list[str]:
         )
     elif _negates("draw neither a progress nor a regression conclusion", step4_scope):
         errs.append(
-            "[D21] red-team/SKILL.md: step 4's NOT-SATISFIABLE treatment "
+            "[D21] quality-gate/red-team-mode.md: step 4's NOT-SATISFIABLE treatment "
             "NEGATES 'draw neither a progress nor a regression conclusion' "
             "instead of asserting it (#561 round 1 S1 polarity guard)"
         )
     if "Discrepancy is not-satisfiable" not in step4_scope:
         errs.append(
-            "[D21] red-team/SKILL.md: step 4's own branch enumeration does "
+            "[D21] quality-gate/red-team-mode.md: step 4's own branch enumeration does "
             "not include the not-satisfiable discrepancy case as its own "
             "listed outcome, distinct from Progress and Stagnation (#561 "
             "fresh round 12 S3)"
@@ -1484,7 +1486,7 @@ def check_return_conv(text: str) -> list[str]:
 # Selftest — negative controls for [D19]/[D19b]/[A6]/[A6b] (#561 round 2 S3, S4).
 #
 # S3 demonstrated live that the OLD [D19] (a whole-file `in text` check) passed
-# on a fixture with all three red-team/SKILL.md widenings reverted PLUS one
+# on a fixture with all three quality-gate/red-team-mode.md widenings reverted PLUS one
 # unrelated stray mention of "### Second Pass Findings" elsewhere in the file.
 # S4 demonstrated live that deleting red-team-prompt.md's `### Second Pass
 # Findings` section and downgrading "## Second Pass (REQUIRED)" to "(optional)"
@@ -1494,7 +1496,7 @@ def check_return_conv(text: str) -> list[str]:
 
 # Pointer sentence for [D19]/[D19b]'s #561 fresh round 6 S4 fix — identical
 # text appended to both the step-3 and step-4 paragraphs, mirroring the real
-# red-team/SKILL.md edit.
+# quality-gate/red-team-mode.md edit.
 _D19_POINTER = (
     " See `skills/quality-gate/SKILL.md`'s `qg-score-second-pass-population` "
     "CONTRACT block (Score source, step 7) for the parse."
@@ -1611,7 +1613,7 @@ def _selftest_d19() -> list[str]:
     # Polarity guard negative controls (#561 round 1 S1): mutate by REPLACING
     # each widening clause's pin with its negated form, not by deleting it —
     # demonstrated live: negating "check_rt_receipt_contract.check_rt_skill on
-    # red-team/SKILL.md" passed both baseline and negated with zero errors
+    # quality-gate/red-team-mode.md" passed both baseline and negated with zero errors
     # before this fix, because a bare 'Second Pass Findings' co-presence check
     # is satisfied by the negated sentence too.
     step3_negated = _D19_GOOD_RT_SKILL.replace(
@@ -2318,7 +2320,7 @@ def main(argv: list[str] | None = None) -> int:
 
     errs: list[str] = []
     errs += check_rt_prompt(RT_PROMPT.read_text(encoding="utf-8"))
-    errs += check_qg(QG_SKILL.read_text(encoding="utf-8"))
+    errs += check_qg(read_runbook())
     errs += check_rt_skill(RT_SKILL.read_text(encoding="utf-8"))
     errs += check_return_conv(RETURN_CONV.read_text(encoding="utf-8"))
 

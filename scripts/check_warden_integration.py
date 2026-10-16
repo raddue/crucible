@@ -36,7 +36,7 @@ legitimately survives — build's eval-gate pointer lists "temper, inquisitor,
 optional siege, quality-gate" dispatches by name; build's warden step says "Do
 NOT separately invoke temper / inquisitor / siege / quality-gate"; finish's
 Step-2.75 note says "Run this BEFORE red-team"; finish's anti-pattern / Integration
-lines name `crucible:red-team` (Task 18 owns that disclosed-deferred prose). None
+lines name the retired `crucible:red-team` dispatch (Task 18 owns that disclosed-deferred prose). None
 of those are `Use crucible:<leg>`, so keying on the dispatch form leaves them be.
 
 SECTION-SCOPED, NOT WHOLE-FILE: build/SKILL.md carries the `## Phase 4: Completion`
