@@ -1751,7 +1751,7 @@ check 307 "a shared-clone grudge clears a worktree candidate by files — contra
 # (e) the same round trip through the OTHER identity — the one the writers
 #     actually use. `grudge_append.resolve_repo()` keys a record by
 #     `git rev-parse --show-toplevel`, i.e. the WORKTREE, whenever no
-#     --repo/--repo-root is passed, and neither skills/grudge nor merge-pr
+#     --repo/--repo-root is passed, and neither skills/grudge nor finish merge
 #     Step 7.5 passes them. Step 7 arms on either key, so step 13 must query
 #     either key: a worktree-keyed grudge has to clear a worktree candidate.
 hook_case t24wtown

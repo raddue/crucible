@@ -1,6 +1,14 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 37 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 36 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+
+## Contents
+
+- [Pick by what you're doing](#pick-by-what-youre-doing)
+- [Quick reference by trigger phrase](#quick-reference-by-trigger-phrase)
+- [Pipelines (composition)](#pipelines-composition)
+- [What's not in this list (intentionally)](#whats-not-in-this-list-intentionally)
+- [See also](#see-also)
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -74,9 +82,9 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has 37 skills; this list curates ~15. Skills omitted here are either:
-- **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `adversarial-tester`, `checkpoint`, `verify`, `assay`, `innovate`) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+Crucible has 36 skills; this list curates ~15. Skills omitted here are either:
+- **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `checkpoint`, `verify`) — invoked indirectly, not part of the user-facing menu.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -84,4 +92,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 37-skill catalog with eval deltas
+- `docs/skills.md` — full 36-skill catalog with eval deltas

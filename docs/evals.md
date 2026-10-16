@@ -50,6 +50,13 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison was blocked because four Claude CLI calls failed authentication before outputs existed. No scored outputs or valid A/B delta are available; do not claim a measured quality improvement.
 
+## Finish / safe-merge consolidation A/B (#720)
+
+A `/anvil` A/B has not been run for this merge. The merge preserves the source `skills/merge-pr/SKILL.md` mechanics in `skills/finish/merge.md` and makes `/finish` the single routing target, but behavioral non-regression remains unmeasured; run the paired eval before publication.
+
+## Getting-started bundle A/B (#720, 2026-10-15)
+
+
 ## Issue #720: Adversarial-Tester Absorption into Inquisitor (matched single-eval A/B, `cx/gpt-6-luna[1m]`)
 
 A matched full-feature run of eval 1 in `skills/inquisitor/evals/evals.json` scored **10/10 expectations for both baseline and merged Inquisitor: 0 percentage-point delta**. Both arms used the same prompt, model/session, and five-dimension mode. Each named behavioral issues, provided fix guidance, and proposed tests explicitly marked NOT WRITTEN / NOT RUN; no test execution was claimed. This is one response per arm on one eval, both at ceiling: directional only, no statistical robustness or evidence about per-task mode. The earlier mode-mismatched per-task/full-feature comparison (6/10 vs 10/10, −40 pp) is not used as the merge delta. Matched outputs and item-by-item rubric: `/tmp/crucible-720-anvil-matched/`; short record: `skills/inquisitor-workspace/iteration-1/anvil-ab.md`. Add a dedicated per-task eval in a future measurement to assess the absorbed Phase 3 behavior.

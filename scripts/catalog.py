@@ -56,7 +56,7 @@ CATEGORIES: dict[str, list[str]] = {
         "distill",
     ],
     "Maintenance & Meta": [
-        "stocktake", "merge-pr", "anvil", "getting-started", "orchestrator",
+        "stocktake", "anvil", "getting-started", "orchestrator",
     ],
     "Eval & Maintenance (internal)": [
         "temper-eval-collect", "temper-eval-calibrate",
