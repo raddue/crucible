@@ -14,13 +14,16 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | distill | PASS | PASS | PASS | PASS | PASS | PASS |
 | finish | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
-| grudge | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | quality-gate | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | recon | PASS | FAIL | PASS | PASS | PASS | FAIL |
+| project-init | PASS | PASS | PASS | FAIL | PASS | FAIL |
+| prospector | FAIL | FAIL | PASS | PASS | PASS | FAIL |
+| quality-gate | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
+| recon | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | replay | PASS | PASS | PASS | PASS | PASS | PASS |
 | review-feedback | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | siege | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
@@ -43,8 +46,8 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `build` Contents (2): skills/shared/return-convention.md: >100 lines, no contents list in first 20; skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `build` Scripts (4): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic); SKILL.md:337: script step lacks nearby dependency/setup note (heuristic); SKILL.md:592: script step lacks nearby dependency/setup note (heuristic); … and 1 more
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
-- `debugging` Body (1): 1285 body lines (max 500)
-- `debugging` Scripts (2): SKILL.md:348: script step lacks nearby dependency/setup note (heuristic); SKILL.md:974: script step lacks nearby dependency/setup note (heuristic)
+- `debugging` Body (1): 1453 body lines (max 500)
+- `debugging` Scripts (2): SKILL.md:516: script step lacks nearby dependency/setup note (heuristic); SKILL.md:1142: script step lacks nearby dependency/setup note (heuristic)
 - `delve` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
 - `design` Contents (3): skills/design/approach-evaluation.md: >100 lines, no contents list in first 20; skills/design/decision-records.md: >100 lines, no contents list in first 20; skills/design/innovation.md: >100 lines, no contents list in first 20
 - `design` Frontmatter (1): description should use third-person, not first/second-person voice
@@ -57,6 +60,14 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `planning` Frontmatter (1): description should use third-person, not first/second-person voice
 - `quality-gate` Contents (1): skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `recon` Contents (4): skills/recon/cartographer/recorder-prompt.md: >100 lines, no contents list in first 20; skills/recon/persistent-map.md: >100 lines, no contents list in first 20; skills/recon/whole-repo-onboarding.md: >100 lines, no contents list in first 20; … and 1 more
+- `project-init` Frontmatter (1): description should use third-person, not first/second-person voice
+- `prospector` Body (1): 726 body lines (max 500)
+- `prospector` Contents (1): skills/prospector/REFERENCE.md: >100 lines, no contents list in first 20
+- `quality-gate` Body (1): 1854 body lines (max 500)
+- `quality-gate` Contents (3): skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
+- `quality-gate` Scripts (1): SKILL.md:907: script step lacks nearby dependency/setup note (heuristic)
+- `recon` Body (1): 893 body lines (max 500)
+- `recon` Contents (1): skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20
 - `review-feedback` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `siege` Body (1): 1035 body lines (max 500)
 - `siege` Contents (4): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20; … and 1 more

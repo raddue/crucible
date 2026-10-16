@@ -37,11 +37,11 @@ WRITE_CONSUMERS = ["skills/debugging/SKILL.md", "skills/finish/merge.md"]
 
 
 def main():
-    skill = _read("skills/grudge/SKILL.md")
-    _check("O-8 grudge skill exists", skill is not None)
+    skill = _read("skills/debugging/SKILL.md")
+    _check("O-8 grudge mechanics live in debugging skill", skill is not None)
     if skill:
-        _check("O-8 grudge skill documents query helper", "grudge_query.py" in skill)
-        _check("O-8 grudge skill documents append helper", "grudge_append.py" in skill)
+        _check("O-8 debugging documents query helper", "grudge_query.py" in skill)
+        _check("O-8 debugging documents append helper", "grudge_append.py" in skill)
 
     for rel in READ_CONSUMERS:
         text = _read(rel)

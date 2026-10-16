@@ -615,10 +615,12 @@ EXPECTED_ADDED_LINES = [
     "If this step is skipped or fails, Path B's Stop hook "
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
+    "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.",
     "",
 ] + _ADDED_TAIL
 EXPECTED_REMOVED_LINES = [
     '  --files "<comma-separated files the PR changed>" \\',
+    "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md`.",
 ] + _REMOVED_TAIL
 
 # Command words that may precede the real command word in a simple command.
@@ -866,9 +868,40 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
 def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     root = Path(tempfile.mkdtemp(dir=tmp))
     skill = root / MERGE_PR_SKILL
-    skill.parent.mkdir(parents=True)
-    skill.write_text("### Step 7.5: Record a grudge\n\n```bash\n" + EXPECTED_STEP_75_FENCE + "\n```\n", encoding="utf-8")
-    return root, ""
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    # The `---` frontmatter fences are load-bearing fixture, not decoration: a
+    # REMOVED line whose own text starts with `--` renders as `---…` in a diff,
+    # which a header filter anchored on a bare `---` prefix silently eats.
+    head = ("---\nname: merge-pr\n---\n\n"
+            "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n")
+    # The pre-R4 comma-joined, pre-R3 (no store identity) sentinel fence, as the
+    # base commit 3193271 carried it — fetched from the real history.
+    old_fence = ('# only for fix(*) PRs\n'
+                 'plugin_root="$(realpath "<this-skill-base-dir>/../..")"\n'
+                 'python3 "$plugin_root/scripts/grudge_append.py" \\\n'
+                 '  --symptom "<PR title minus the fix() prefix>" \\\n'
+                 '  --root-cause "<from PR body, if stated>" \\\n'
+                 '  --files "<comma-separated files the PR changed>" \\\n'
+                 '  --commit "<squash/merge SHA>" \\\n'
+                 '  --why "<from PR body, if stated>"')
+    skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md`.\n"
+                     + "\n" + "".join(line + "\n" for line in _REMOVED_TAIL),
+                     encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD").stdout.strip()
+    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n"]
+               + [line + "\n" for line in EXPECTED_ADDED_LINES[6:9]]
+               + ["\n"]
+               + [line + "\n" for line in _ADDED_TAIL])
+    skill.write_text("".join(working), encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "add paragraph")
+    return root, base
+
 
 def selftest() -> int:
     failures: list[str] = []
