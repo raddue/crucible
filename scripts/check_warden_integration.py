@@ -60,6 +60,8 @@ import pathlib
 import re
 import sys
 
+from build_source import read_runbook
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / "skills/build/SKILL.md"
 FINISH = ROOT / "skills/finish/SKILL.md"
@@ -358,7 +360,7 @@ def main() -> int:
         if not path.is_file():
             errs.append(f"{path.relative_to(ROOT)} does not exist")
             continue
-        errs.extend(checker(path.read_text(encoding="utf-8")))
+        errs.extend(checker(read_runbook() if path == BUILD else path.read_text(encoding="utf-8")))
 
     if errs:
         print("WARDEN INTEGRATION CHECK FAILED:")

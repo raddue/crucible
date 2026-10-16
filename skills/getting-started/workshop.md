@@ -1,6 +1,13 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~35 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+## Contents
+
+- [Pick by what you're doing](#pick-by-what-youre-doing)
+- [Quick reference by trigger phrase](#quick-reference-by-trigger-phrase)
+- [Pipelines (composition)](#pipelines-composition)
+- [What's not in this list (intentionally)](#whats-not-in-this-list-intentionally)
+- [See also](#see-also)
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~34 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -22,7 +29,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | `/temper` | Iterative code review on a PR or `<base>..<head>` range. Loops fresh-eyes reviewers until clean. Forge-agnostic (GitHub / GitLab / Bitbucket / self-hosted). Renamed from `/code-review` on 2026-05-17. |
 | `/debugging` | Any bug, test failure, or unexpected behavior. Hypothesis loop, fix dispatch, verification. |
 | `/quality-gate` | Iterative red-team on any artifact (design doc, plan, code, hypothesis). Loops until clean or stagnation. Invoked by other orchestrators; invoke directly when the artifact is standalone. |
-| `/migrate` | Framework upgrade, API version bump, major dependency change, deprecation removal. Produces a phased migration plan and optionally executes it via build's refactor mode. |
+| `/build` (migration mode) | Framework upgrade, API version bump, major dependency change, deprecation removal. Produces a phased migration plan and optionally executes it via build's feature/refactor mode, one build run per migration phase. |
 
 ### Inspection and discovery
 
@@ -58,7 +65,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | "What does X do?" / "How does this codebase work?" | `/recon` |
 | "What should I refactor?" | `/prospector` |
 | "Run quality gate on this" | `/quality-gate` |
-| "Upgrade React to 19" / "Remove deprecated APIs" | `/migrate` |
+| "Upgrade React to 19" / "Remove deprecated APIs" | `/build` (migration mode) |
 | "I'm done, what's next?" | `/finish` |
 | "Write a retrospective" | `/getting-started` → `forge.md` |
 | "End of session, write a handoff" | `/getting-started` → `handoff.md` |
@@ -74,9 +81,9 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has ~35 skills; this list curates ~15. Skills omitted here are either:
-- **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `checkpoint`, `verify`, `assay`, `innovate`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+Crucible has ~34 skills; this list curates ~15. Skills omitted here are either:
+- **Sub-skills** dispatched by orchestrators (e.g., quality-gate red-team mode, `inquisitor`, `checkpoint`, `verify`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, consensus, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -84,4 +91,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 35-skill catalog with eval deltas
+- `docs/skills.md` — full 34-skill catalog with eval deltas

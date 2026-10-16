@@ -56,7 +56,7 @@ Distinct from `task:` which describes *what* to investigate; `context:` describe
 **Recognized context keys:**
 - `decisions` — list of prior design/implementation decisions
 - `constraints` — list of constraints affecting investigation
-- `target` — specific symbol/module for `consumer-registry` depth module (used by `/migrate`). Falls back to the `task:` string if absent.
+- `target` — specific symbol/module for `consumer-registry` depth module (used by `/build` migration mode). Falls back to the `task:` string if absent.
 
 **`session_id`** (optional)
 Enables cross-invocation caching within a session. When provided, the Structure Scout report is cached and reused on subsequent invocations with the same session_id. Pattern Scout always runs fresh (its output varies with cascading context). Parent skills generate the session_id (e.g., `/design` uses its run timestamp). Without a session_id, no caching occurs.
@@ -67,7 +67,7 @@ List of depth modules to produce after core synthesis. Valid values:
 | Module | Agent | Model | Primary Consumer |
 |---|---|---|---|
 | `impact-analysis` | Impact Analyst | high | `/design`, `/build` |
-| `consumer-registry` | Consumer Mapper | standard | `/migrate` |
+| `consumer-registry` | Consumer Mapper | standard | `/build` migration mode |
 | `friction-scan` | Friction Scanner | high | `/prospector` |
 | `subsystem-manifest` | Manifest Builder | standard | `/audit` |
 | `diagnostic-context` | Diagnostic Gatherer | high | `/debugging` |
@@ -890,7 +890,7 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 
 **Records to:** `crucible:cartographer-skill` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
 
-**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
+**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/build` migration mode (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
 
 **Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design), `/prospector` (organic exploration is different), `/project-init` (bootstraps cartographer, complementary purpose). See #147 for rationale.
 

@@ -6,7 +6,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | --- | --- | --- | --- | --- | --- | --- |
 | anvil | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | audit | FAIL | FAIL | PASS | PASS | PASS | FAIL |
-| build | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
+| build | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | cartographer-skill | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | checkpoint | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | debugging | FAIL | PASS | PASS | PASS | FAIL | FAIL |
@@ -16,7 +16,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | finish | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| migrate | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
@@ -36,16 +35,15 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 20/32 | 13/32 | 32/32 | 24/32 | 24/32 | 6/32 |
+| TOTAL | 23/32 | 13/32 | 32/32 | 24/32 | 25/32 | 7/32 |
 
-## Violations (91)
+## Violations (82)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `build` Body (1): 1424 body lines (max 500)
 - `build` Contents (2): skills/shared/return-convention.md: >100 lines, no contents list in first 20; skills/spec/contract-schema.md: >100 lines, no contents list in first 20
-- `build` Scripts (4): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic); SKILL.md:337: script step lacks nearby dependency/setup note (heuristic); SKILL.md:592: script step lacks nearby dependency/setup note (heuristic); … and 1 more
+- `build` Scripts (1): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic)
 - `cartographer-skill` Frontmatter (1): description should use third-person, not first/second-person voice
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
 - `debugging` Body (1): 1453 body lines (max 500)
@@ -57,7 +55,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
 - `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
 - `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `migrate` Body (1): 549 body lines (max 500)
 - `orchestrator` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
 - `planning` Frontmatter (1): description should use third-person, not first/second-person voice

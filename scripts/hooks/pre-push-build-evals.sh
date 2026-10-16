@@ -31,7 +31,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     else
         range="${remote_sha}..${local_sha}"
     fi
-    files=$(git diff --name-only "$range" -- skills/build/SKILL.md 'skills/build/*-prompt.md' 2>/dev/null || true)
+    files=$(git diff --name-only "$range" -- skills/build/SKILL.md 'skills/build/*-prompt.md' 'skills/build/references/*.md' 2>/dev/null || true)
     if [ -n "$files" ]; then
         echo "[build-evals reminder] About to push changes to:"
         echo "$files" | sed 's/^/  - /'
