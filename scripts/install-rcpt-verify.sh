@@ -11,7 +11,8 @@
 #
 # Run ONCE per host, by the operator, as root:  sudo scripts/install-rcpt-verify.sh
 # Override the install dir or interpreter via CRUCIBLE_RCPT_INSTALL_DIR / PYTHON;
-# overrides must be absolute, shell-safe paths.
+# if overriding the install dir, set the same path in shared/return-convention.md
+# and the installer documentation. Overrides must be absolute, shell-safe paths.
 set -eu
 
 TARGET="${CRUCIBLE_RCPT_INSTALL_DIR:-/usr/local/libexec/crucible}"
@@ -19,6 +20,7 @@ PY="${PYTHON:-/usr/bin/python3}"
 case "$TARGET" in /*) ;; *) echo "install dir must be absolute: $TARGET" >&2; exit 1 ;; esac
 case "$PY" in /*) ;; *) echo "python path must be absolute: $PY" >&2; exit 1 ;; esac
 case "$TARGET$PY" in *[!A-Za-z0-9_./-]*) echo "paths may contain only letters, digits, _, ., /, and -" >&2; exit 1 ;; esac
+case "$TARGET" in /usr/local/libexec/crucible) ;; *) echo "NOTE: update skills/shared/return-convention.md and all consumer references to use this CRUCIBLE_RCPT_INSTALL_DIR override: $TARGET" >&2 ;; esac
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/rcpt_verify.py"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -35,6 +37,7 @@ check_ancestors() {
     while :; do
         [ -d "$parent" ] && [ ! -L "$parent" ] || {
             echo "$label ancestor must be a real directory: $parent" >&2
+        [ "$label" != target ] || echo "Create it first: sudo install -d -o root -g root -m 0755 \"$parent\"" >&2
             exit 1
         }
         owner_mode=$(stat -c '%u:%a' "$parent")
@@ -42,6 +45,7 @@ check_ancestors() {
         mode=${owner_mode#*:}
         [ "$owner" = 0 ] && [ $((0$mode & 022)) -eq 0 ] || {
             echo "$label ancestor must be root-owned and not group/world-writable: $parent" >&2
+            [ "$label" != target ] || echo "Create it first: sudo install -d -o root -g root -m 0755 \"$parent\"" >&2
             exit 1
         }
         [ "$parent" = / ] && break
@@ -49,6 +53,12 @@ check_ancestors() {
     done
 }
 check_ancestors target "$TARGET"
+TARGET_PARENT=$(dirname -- "$TARGET")
+if [ ! -d "$TARGET_PARENT" ]; then
+    echo "target parent does not exist: $TARGET_PARENT" >&2
+    echo "Create it first: sudo install -d -o root -g root -m 0755 \"$TARGET_PARENT\"" >&2
+    exit 1
+fi
 check_ancestors python "$PY"
 # The system python path can be a symlink; validate its resolved destination too.
 PY=$(readlink -f -- "$PY")
@@ -98,3 +108,4 @@ echo "wrapper:            $TARGET/rcpt-verify"
 echo
 echo "Mandated lint invocation (receipt on stdin, the '-' positional):"
 echo "  $TARGET/rcpt-verify --tier2 --strict --root <dispatch-root> --root <findings-root> --ledger <dispatch-root>/receipt-ledger.jsonl -"
+echo "Set CRUCIBLE_RCPT_INSTALL_DIR in the consuming convention if this target differs from its documented default."
