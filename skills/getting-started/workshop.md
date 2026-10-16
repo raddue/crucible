@@ -1,6 +1,6 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the workflows a user typically invokes directly. Crucible ships 26 skills total, including sub-skills dispatched internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the workflows a user typically invokes directly. Crucible ships 25 skills total, including sub-skills dispatched internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 ## Contents
 
@@ -82,9 +82,9 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has 26 skills; this list curates ~15. Skills omitted here are either:
+Crucible has 25 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `inquisitor`, `checkpoint`, `verify`, plus quality-gate's red-team mode) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+- **Utility / meta** (e.g., `anvil` (including skill-suite audits), `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -92,5 +92,5 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the skills compose
-- `docs/skills.md` — full 26-skill catalog with eval deltas
-- `docs/skills.md` — full 26-skill catalog with eval deltas
+- `docs/skills.md` — full 25-skill catalog with eval deltas
+- `docs/skills.md` — full 25-skill catalog with eval deltas

@@ -4,6 +4,19 @@ version: 1
 
 # Return Convention (Ledger Return Protocol)
 
+## Contents
+
+- [Purpose](#purpose)
+- [Receipt Grammar (v1)](#receipt-grammar-v1)
+- [Witness Protocol](#witness-protocol)
+- [Parent-Child Receipt Binding](#parent-child-receipt-binding)
+- [Two-Tier Receipt Linter](#two-tier-receipt-linter)
+- [Composition](#composition)
+- [Example Receipts](#example-receipts)
+- [Tripwire Manifest (Layer 2 — v1.1)](#tripwire-manifest-layer-2--v11)
+- [Integration Checklist for Pilot Skills](#integration-checklist-for-pilot-skills)
+- [Version History](#version-history)
+
 > Canonical reference for the subagent → orchestrator return channel.
 > A skill **adopts** this convention by referencing it via
 > `<!-- CANONICAL: shared/return-convention.md -->`. Within an adopting skill, every

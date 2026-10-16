@@ -26,6 +26,7 @@ docs/research/audit-innovate-*.md
 docs/research/eval-rerun-*/
 skills/*-workspace/
 skills/skill-creator/
+skills/anvil/results.json
 skills/stocktake/results.json
 skills/temper/evals/last_run.json
 skills/inquisitor/evals/last_run.json
