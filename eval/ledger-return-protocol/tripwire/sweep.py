@@ -45,6 +45,8 @@ class LintError(layer1.LintError):
 
 
 def parse_receipt_v11(text):
+    if text.startswith("RCPT v1.1 "):
+        return layer1.parse_v11_sections(text)
     """Parse v1.1 receipt: Layer 1 sections + TRIPWIRE + SUPERSEDES [+ TRIPWIRE-CHILD]."""
     version_m = re.match(r"^RCPT v(1|1\.1) ", text)
     if not version_m:

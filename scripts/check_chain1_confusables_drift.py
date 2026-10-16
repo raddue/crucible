@@ -293,12 +293,11 @@ def sanity_check_reachability(mapping) -> list:
     letters, in a well-formed value (a 12-hex run, or "none") otherwise --
     and assert the resulting claim is not `None`, i.e. the substitution is
     DETECTED by the actual running mechanism, not merely present in the
-    table. Runs in under half a second against the real 766-entry table.
+    table. Runs against the committed confusables table.
 
-    (MINOR 4, round-10 quality-gate: for a target that is one of the
-    keyword's own letters, only that letter's FIRST position is exercised
-    (`pos_list[0]` below) -- for target `S` this is position 0, never 5 or
-    9; for `E`, position 3, never 6 or 8. ROUND-11 CORRECTION (quality-gate
+    The target-coverage loop exercises every matching position in both
+    `SUPERSEDES:` and `TRIPWIRE-CHILD:` so repeated letters and punctuation
+    do not escape reachability coverage. ROUND-11 CORRECTION (quality-gate
     SIGNIFICANT 2): round-10's own claim that Task 2's
     `test_every_documented_confusable_for_a_keyword_letter_is_reachable`
     already covers the OTHER positions was false as written -- that test's
@@ -332,10 +331,29 @@ def sanity_check_reachability(mapping) -> list:
             f"is nothing to fail)")
         return problems
     for src, target in mapping.items():
+        if target in "TRIPWIRE-CHILD:" or target == "l":
+            kw = "TRIPWIRE-CHILD:"
+            needle = "I" if target == "l" else target
+            positions = [i for i, c in enumerate(kw) if c == needle]
+            for pos in positions:
+                if rv._v11_keyword_end(kw[:pos] + src + kw[pos + 1:] + " none", kw) is None:
+                    problems.append(
+                        f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
+                        f"CONFUSABLE_MAP but UNREACHABLE through _v11_keyword_end "
+                        f"at position {pos}")
+            if target == "l" or target not in keyword:
+                continue
         pos_list = [i for i, c in enumerate(keyword) if c.upper() == target.upper()]
         if pos_list:
-            pos = pos_list[0]
-            line = keyword[:pos] + src + keyword[pos + 1:] + " 21a1b2c3d4e5"
+            for pos in pos_list:
+                line = keyword[:pos] + src + keyword[pos + 1:] + " 21a1b2c3d4e5"
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{line}\n"
+                if rv._legacy_supersedes_claim(text) is None:
+                    problems.append(
+                        f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
+                        f"CONFUSABLE_MAP but UNREACHABLE through "
+                        f"_legacy_supersedes_claim at position {pos}")
+            continue
         elif target.lower() in "0123456789abcdef":
             # round-10 quality-gate SIGNIFICANT 2: substitute src (the
             # actual vendored confusable), not target (plain ASCII) -- the
@@ -350,16 +368,10 @@ def sanity_check_reachability(mapping) -> list:
             line = keyword + " " + src + "one"
         elif target.lower() == "o":
             line = keyword + " n" + src + "ne"
-        elif target.upper() in "TRIPWIRE-CHILD:" or target == "l":
-            # PR #714 review (High 2): T/I/W/H/L exist for the v1.1
-            # TRIPWIRE-CHILD: keyword, matched by rcpt_verify._v11_keyword_end
-            # (UTS #39 maps capital I to 'l', so 'l' stands for I).
-            kw = "TRIPWIRE-CHILD:"
-            pos = kw.index("I" if target == "l" else target.upper())
-            if rv._v11_keyword_end(kw[:pos] + src + kw[pos + 1:] + " none", kw) is None:
-                problems.append(
-                    f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
-                    f"CONFUSABLE_MAP but UNREACHABLE through _v11_keyword_end")
+        elif target.lower() in "tripwire-child":
+            continue
+        elif target == ":":
+            # Also pin the punctuation at each position in TRIPWIRE-CHILD:.
             continue
         else:
             problems.append(
@@ -515,7 +527,25 @@ def selftest() -> int:
         "def _legacy_supersedes_claim(text):\n    return None\n"
     )
 
+    # The reachability sweep must exercise every matching keyword position;
+    # pin the old first-position-only mutant so this cannot regress silently.
+    position_probe = {"X": "S"}
+    class Probe:
+        CONFUSABLE_MAP = position_probe
+        @staticmethod
+        def _v11_keyword_end(line, keyword): return 1
+        @staticmethod
+        def _legacy_supersedes_claim(text):
+            return None if text.splitlines()[3][5] == "X" else "ok"
+    real_loader = globals()["_load_rcpt_verify"]
+    globals()["_load_rcpt_verify"] = lambda: Probe
+    try:
+        position_errors = sanity_check_reachability(position_probe)
+    finally:
+        globals()["_load_rcpt_verify"] = real_loader
     failures = []
+    if not any("position 5" in error for error in position_errors):
+        failures.append("case-E: non-first repeated-keyword position not exercised")
 
     problems = check(rcpt_clean, fake_source, gen)
     if problems:
@@ -553,8 +583,8 @@ def selftest() -> int:
             print(" ", f)
         return 1
     print("SELFTEST OK -- catches a flipped mapped value, missing markers, "
-          "a duplicated marker pair, and a missing composition-guard "
-          "helper; tolerates a clean regeneration.")
+          "a duplicated marker pair, a missing composition-guard helper, "
+          "and first-position-only reachability; tolerates a clean regeneration.")
     return 0
 
 
