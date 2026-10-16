@@ -257,6 +257,8 @@ run python3 scripts/test_qg_fix_pin.py
 
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
+# Implementation-level compass regression corpus stays with scripts/compass.py.
+run python3 -m pytest eval/compass/ -q
 
 # --- orchestrator fleet-file CRUD (skills/orchestrator step 2) ---
 run python3 scripts/test_orchestrator_fleet.py
