@@ -8,7 +8,7 @@
 
 ## Mock Dispatch Mode (eval-gate)
 
-This mode exists for the `skills/build/evals/` eval-gate harness. It is enabled **iff** `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set in the environment. Production runs MUST leave this variable unset, in which case this mode is a no-op and the orchestrator behaves exactly as if this section were not present.
+This mode exists for the private `raddue/crucible-eval` `skills/build/evals/` eval-gate harness. It is enabled **iff** `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set in the environment. Production runs MUST leave this variable unset, in which case this mode is a no-op and the orchestrator behaves exactly as if this section were not present.
 
 **Env-var contract.** Three variables, all consumed only when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set:
 
@@ -22,7 +22,7 @@ This mode exists for the `skills/build/evals/` eval-gate harness. It is enabled 
 
 **Pointer reminders.** Sections that reference these env vars (Mode Detection, Phase 1 Step 2 / 3, Phase 2 Step 1 / 2, Phase 3 Step 3) contain short inline pointers back to this section. The substitution rule is defined here only; the pointers exist so a reader scanning a dispatch site doesn't need to re-derive the contract.
 
-**See also:** `skills/build/evals/README.md` for harness usage; `skills/shared/dispatch-convention.md` for the dispatch-file protocol the substitution rule preserves.
+**See also:** `raddue/crucible-eval/skills/build/evals/README.md` for harness usage; `skills/shared/dispatch-convention.md` for the dispatch-file protocol the substitution rule preserves.
 
 ## Cairn (Layer 3)
 

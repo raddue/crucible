@@ -36,7 +36,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "[build-evals reminder] About to push changes to:"
         echo "$files" | sed 's/^/  - /'
         echo "  Reminder: did you re-run the build-evals fixtures since these changes?"
-        echo "  Run: bash scripts/build-evals.sh stage --fixture <id>  (per fixture)"
+        echo "  Run in private raddue/crucible-eval: bash scripts/build-evals.sh stage --fixture <id>"
         echo "  This hook is a reminder, not a gate — push proceeds."
     fi
 done

@@ -141,7 +141,7 @@ class TestAKeptTreeSurvivesTheHarnessThatRunsIt(_SweepCase):
     sweep is added to the harness, which is what this build did.
 
     Fixed in `dec31_sweep.py`, not in `run_tests.sh`: the TMPDIR scoping there is
-    load-bearing for other suites (`skills/inquisitor/evals/test_fixtures.py` globs
+    load-bearing for private eval suites (`crucible-eval/skills/inquisitor/evals/test_fixtures.py` globs
     the temp NAMESPACE). The sweep moves a kept tree into `<repo>/.dec31-keep/`
     instead."""
 

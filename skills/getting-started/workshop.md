@@ -1,6 +1,6 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 30 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 27 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 ## Contents
 
@@ -81,7 +81,7 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has 30 skills; this list curates ~15. Skills omitted here are either:
+Crucible has 27 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `inquisitor`, `checkpoint`, `verify`, plus quality-gate's red-team mode) — invoked indirectly, not part of the user-facing menu.
 - **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
@@ -91,5 +91,5 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 30-skill catalog with eval deltas
-- `docs/skills.md` — full 30-skill catalog with eval deltas
+- `docs/skills.md` — full 27-skill catalog with eval deltas
+- `docs/skills.md` — full 27-skill catalog with eval deltas
