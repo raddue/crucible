@@ -21,6 +21,12 @@ def main() -> None:
             "machine.md:4: machine-specific absolute path"]
         machine.write_text("/home/user/work\n")
         assert not check_machine_paths.offenders(root, ["machine.md"])
+        example = root / "skills" / "worktree" / "SKILL.md"
+        example.parent.mkdir(parents=True)
+        example.write_text("filler\n" * 188 + "Worktree ready at /Users" + "/jesse/myproject/.worktrees/auth\n")
+        assert not check_machine_paths.offenders(root, ["skills/worktree/SKILL.md"])
+        example.write_text("filler\n" * 188 + "Worktree ready at /Users" + "/actual/private\n")
+        assert check_machine_paths.offenders(root, ["skills/worktree/SKILL.md"])
         (root / "notes.md").write_text("clean\n" + "<" * 7 + " HEAD\n" + "=" * 7 + "\n" + ">" * 7 + " branch\n")
         (root / "binary.png").write_text("<" * 7 + " HEAD\n")
         assert check_conflict_markers.offenders(root, ["notes.md", "binary.png"]) == [
