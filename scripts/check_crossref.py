@@ -56,7 +56,7 @@ def is_exempt(name: str) -> bool:
     resolved against `agents/<token>.md` in resolves(). Merged getting-started
     references use child reference filenames in prose; legacy crucible:<name>
     spellings for those absorbed workflows are accepted as aliases."""
-    return name in PLACEHOLDERS or name in {"forge", "compass", "handoff", "recall", "workshop"}
+    return name in PLACEHOLDERS
 
 
 def resolves(name: str) -> bool:
@@ -111,7 +111,7 @@ def selftest() -> int:
     cases = [
         # (token, exempt-or-resolves-expected, reason)
         ("cartographer", False, "the #365 bug: no skills/cartographer/ dir"),
-        ("forge", True, "legacy alias for getting-started/forge.md after #727"),
+        ("forge", False, "absorbed into getting-started/forge.md; no crucible:forge skill remains"),
         ("crucible-red-team", True, "agent type resolves via agents/<token>.md"),
         ("crucible-red-tea", False, "typo'd agent ref: no agents/<token>.md"),
         ("skill-name", True, "documented template placeholder"),

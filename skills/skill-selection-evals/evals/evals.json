@@ -482,10 +482,11 @@
       "prompt": "I'm new to Crucible. What skills are available and which should I use for what?",
       "expected_skill": "getting-started",
       "common_mistakes": [
-        "recon"
+        "recon",
+        "temper"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
-      "reasoning": "Workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. Getting-started is silent conversation bootstrap, not a user-facing catalog. Recon whole-repo onboarding handles codebase onboarding, not skill-suite onboarding.",
+      "reasoning": "Getting-started now owns the on-demand workshop tour reference as well as conversation bootstrap. Recon whole-repo onboarding handles codebase onboarding, not skill-suite onboarding.",
       "difficulty": "easy"
     },
     {
@@ -509,10 +510,11 @@
       "prompt": "Where do I start with these tools? Give me a tour.",
       "expected_skill": "getting-started",
       "common_mistakes": [
-        "recon"
+        "recon",
+        "temper"
       ],
       "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
-      "reasoning": "\"Give me a tour\" of the tools routes to getting-started’s workshop tour reference, not recon whole-repo onboarding.",
+      "reasoning": "The user asks for a tour of the skill suite, not a new codebase onboarding scan or PR review; getting-started serves the workshop reference.",
       "difficulty": "hard"
     },
     {
