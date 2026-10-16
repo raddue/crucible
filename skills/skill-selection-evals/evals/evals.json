@@ -42,11 +42,7 @@
         "quality-gate red-team mode"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
-<<<<<<< HEAD
       "reasoning": "Implementation is done — this is not TDD or test-coverage. Inquisitor's per-task mode absorbs adversarial-tester and writes tests designed to make this implementation break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
-=======
-      "reasoning": "Implementation is done — this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Inquisitor per-task mode reads implementation diffs and writes tests designed to make them break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
->>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -504,11 +500,7 @@
         "workshop"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
-<<<<<<< HEAD
       "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository and optional cross-repo topology before a task. Getting-started is conversation bootstrap, not codebase onboarding.",
-=======
-      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
->>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -535,11 +527,7 @@
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
-<<<<<<< HEAD
       "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap.",
-=======
-      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). getting-started's workshop reference tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
->>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -553,11 +541,7 @@
         "audit"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
-<<<<<<< HEAD
       "reasoning": "Select task-scoped investigation to map the auth surface for a specific upcoming change. Whole-repo onboarding is not task-scoped; improvement discovery searches for architectural friction, not how auth works.",
-=======
-      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. project-init is first-time whole-repo onboarding (not scoped to a task). prospector hunts architectural friction/improvements, not how-it-works investigation.",
->>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -571,11 +555,7 @@
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-<<<<<<< HEAD
       "reasoning": "Select improvement discovery to find architectural friction and propose redesigns. Task investigation answers how-it-works questions; audit reviews a specified subsystem, not an open-ended improvement hunt.",
-=======
-      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
->>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -583,22 +563,13 @@
       "dimension": "negative",
       "boundary": "explore-vs-improve",
       "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
-<<<<<<< HEAD
       "expected_skill": "recon",
-=======
-      "expected_skill": "project-init",
->>>>>>> origin/dev
       "common_mistakes": [
         "workshop",
         "getting-started"
       ],
-<<<<<<< HEAD
       "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for recon whole-repo-onboarding mode over recon.",
       "reasoning": "Select whole-repo onboarding for first-time mapping and sibling-repo topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
-=======
-      "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for project-init over recon.",
-      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
->>>>>>> origin/dev
       "difficulty": "hard"
     },
     {
@@ -612,11 +583,7 @@
         "audit"
       ],
       "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
-<<<<<<< HEAD
       "reasoning": "Select task-scoped investigation: this is one module in service of a specific upcoming change. Whole-repo onboarding is unnecessary; improvement discovery is for architectural friction, not understanding the current refund flow.",
-=======
-      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. project-init would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. prospector hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
->>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -764,11 +731,7 @@
         "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-<<<<<<< HEAD
       "reasoning": "Grudge stores bug regression memory; design decision records store decisions with alternatives, not bugs.",
-=======
-      "reasoning": "grudge is the book of grudges — bug regression memory. design’s decision-record subflow records decisions with alternatives, not bugs.",
->>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -821,11 +784,7 @@
         "design"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
-<<<<<<< HEAD
       "reasoning": "Recall and recon mine existing decisions. Design's decision-record subflow writes eligible decisions and refuses on a settled decision as a way to answer past-decision questions.",
-=======
-      "reasoning": "getting-started's recall reference queries session history and recon mines docs/decisions/ — both read sides. design’s decision-record subflow writes and refuses on a settled decision — it has no answer output.",
->>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
