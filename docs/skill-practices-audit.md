@@ -14,11 +14,10 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | dependency-audit | PASS | PASS | PASS | PASS | PASS | PASS |
 | design | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
 | distill | PASS | PASS | PASS | PASS | PASS | PASS |
-| finish | PASS | PASS | PASS | FAIL | FAIL | FAIL |
+| finish | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
 | grudge | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| merge-pr | PASS | PASS | PASS | PASS | FAIL | FAIL |
 | migrate | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
@@ -38,9 +37,9 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 24/34 | 16/34 | 34/34 | 24/34 | 25/34 | 8/34 |
+| TOTAL | 23/33 | 14/33 | 33/33 | 24/33 | 25/33 | 8/33 |
 
-## Violations (97)
+## Violations (95)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
@@ -56,10 +55,9 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `design` Contents (3): skills/design/approach-evaluation.md: >100 lines, no contents list in first 20; skills/design/decision-records.md: >100 lines, no contents list in first 20; skills/design/innovation.md: >100 lines, no contents list in first 20
 - `design` Frontmatter (1): description should use third-person, not first/second-person voice
 - `design` Scripts (1): SKILL.md:40: script step lacks nearby dependency/setup note (heuristic)
-- `finish` Frontmatter (1): description should use third-person, not first/second-person voice
-- `finish` Scripts (5): SKILL.md:160: script step lacks nearby dependency/setup note (heuristic); SKILL.md:197: script step lacks nearby dependency/setup note (heuristic); SKILL.md:204: script step lacks nearby dependency/setup note (heuristic); … and 2 more
+- `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
+- `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
 - `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `merge-pr` Scripts (3): SKILL.md:224: script step lacks nearby dependency/setup note (heuristic); SKILL.md:229: script step lacks nearby dependency/setup note (heuristic); SKILL.md:279: script step lacks nearby dependency/setup note (heuristic)
 - `migrate` Body (1): 549 body lines (max 500)
 - `orchestrator` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
