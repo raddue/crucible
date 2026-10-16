@@ -4,7 +4,7 @@
 Executable transcription of the shared `## Pipeline Status` protocol (file
 path, header fields, one-directional health state machine, last-5 Recent Events
 buffer, Started persistence, atomic overwrite) currently duplicated in prose
-across 6 orchestrator skills (build, debugging, audit, siege, migrate, spec)
+across 5 orchestrator skills (build — incl. migration mode — debugging, audit, siege, spec)
 and hand-composed on ~375-1000 writes/wk fleet-wide.
 
 Invocation (from repo root; cwd determines the project hash):

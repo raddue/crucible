@@ -45,7 +45,7 @@ Starting with convention **v1.1**, every siege subagent (6 attackers, synthesis,
 <rcpt-sha256-prefix-12>  <skill>/<dispatch-id>  <verdict>  TRIPWIRE: <predicates>  [SUPERSEDED_BY=<prefix>]  [keys=siege:<k>:<v>,…]  [files=<path>:<h6>,…]
 ```
 
-**Sweep:** Same 7-step clause as `/build` (Tripwire Manifest Sweep section in `skills/build/SKILL.md`). Siege-specific notes:
+**Sweep:** Same 7-step clause as `/build` (Tripwire Manifest Sweep section in `skills/build/references/runtime-protocols.md`). Siege-specific notes:
 
 - **Attacker tripwires** typically declare `TRIPWIRE: verdict=FAIL | wrote(<affected-files>) | claims-touch(<affected-files>)`. Any future dispatch that touches those files MUST re-Read the attacker's receipt before proceeding — so the live threat is not forgotten mid-run.
 - **Blocked attackers** (`VERDICT BLOCKED`, `ran=UNRUNNABLE:tooling-absent`) SHOULD declare `TRIPWIRE: always` — the concern is live and unverified; every subsequent dispatch must reconsult.

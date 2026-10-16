@@ -204,7 +204,7 @@ Per T1's payload-capture finding, the canonical JSON paths are:
 
 The current-worktree build marker at `$PROJECT_MEMORY/builds/<sha256-worktree-root>/.pipeline-active` suppresses the advisory when ALL of the following hold. A legacy `$PROJECT_MEMORY/.pipeline-active` marker is considered only for non-build pipeline types or when a build marker's `worktree_root` matches the current repo root; an ownerless legacy build marker cannot suppress another worktree's advisory.
 
-- `.skill` ∈ `{build, spec, debugging, migrate}`
+- `.skill` ∈ `{build, spec, debugging, migrate}` (`migrate` = build migration-mode marker)
 - `.start_time` parses as ISO-8601 (`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}`) AND is within 24h of now. Unparseable or non-ISO-8601 values are treated as **stale**, not silently honored (plan line 275) — a numeric literal like `"0"` would parse via GNU `date -d` as today's midnight and spuriously suppress the advisory; the regex prefilter prevents this.
 - Branch match:
   - Both `.branch` and `git branch --show-current` non-empty and equal → active.

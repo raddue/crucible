@@ -339,7 +339,7 @@ frozen HEAD) and inquisitor runs **once** at its step-1 HEAD — accepted cost t
 
 Because the code-mutating legs edit the shared artifact the other legs already
 judged, warden runs them in a **deliberate order** that mirrors build Phase 4
-(temper → inquisitor → siege → quality-gate last, `build/SKILL.md:1212-1263`),
+(temper → inquisitor → siege → quality-gate last, `build/SKILL.md` § Phase 4: Completion),
 committing **each leg's residual working-tree changes as it completes** so the frozen
 HEAD provably contains every leg's fixes (see Fix behavior — Universal per-leg residual
 commit):
@@ -511,7 +511,7 @@ marker even as a sub-skill (`quality-gate/verdict.md`) and *never* deletes it
 red-team leg with **build's** PipelineID, both the leg and warden would write a
 `gate-verdict-*.md` carrying build's PipelineID with potentially divergent
 verdicts, and build's most-recent-by-Timestamp verification
-(`skills/build/SKILL.md:231-243`) would resolve the ambiguity only by timing luck.
+(`skills/build/references/gate-ledger.md` § Verdict Marker Verification) would resolve the ambiguity only by timing luck.
 So:
 
 - warden invokes the quality-gate red-team leg with **`mode: full`** and **warden's own run-id** as the
@@ -523,14 +523,14 @@ So:
 - warden writes the **one** `gate-verdict-*.md` that carries **build's** PipelineID
   (and `Phase: code`), stamped with warden's **aggregate** verdict.
 - build's Verdict Marker Verification **read** logic — glob → PipelineID-filter →
-  PASS-check (`skills/build/SKILL.md:231-243`) — is **unchanged** and now resolves
+  PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** and now resolves
   **deterministically**: its filter surfaces exactly one marker (warden's
   aggregate), because the leg's marker is tagged with a different (warden)
   PipelineID.
 
 What **does** change is deferred to **Phase E**: the two build sites that hard-name
 `quality-gate` — the recovery re-invoke on a missing/mismatched marker
-(`build/SKILL.md:241`) and the Step-6 gate invocation (`build/SKILL.md:1263`) —
+(`build/references/gate-ledger.md` § Verdict Marker Verification) and the Step-6 gate invocation (`build/SKILL.md` § Phase 4: Completion) —
 must **repoint to `warden`** (Tasks 12/16). If the recovery re-invoke were left
 naming `quality-gate`, a crashed/orphaned warden run would recover as a **bare
 red-team-only** gate (no temper/delve/inquisitor/siege) — a coverage fail-open in
