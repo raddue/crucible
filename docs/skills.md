@@ -1,13 +1,13 @@
 # Skills
 
-The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how the orchestrator skills (build, debugging, spec, migrate) chain these together.
+The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how the orchestrator skills (build — including migration mode — debugging, spec) chain these together.
 
 <!-- CATALOG:START -->
 ## Core Pipeline
 
 | Skill | Description |
 |---|---|
-| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. Pipeline-active markers enable automatic crash detection and resume via `/replay`. Token efficiency tracking enriches dispatch manifests for cost visibility. Implementers record out-of-scope observations in a "Noticed But Not Touching" section that the orchestrator reconciles into a per-pipeline `docs/plans/*-noticed.md` file, preserving scope discipline without losing signal. One command, idea to completion. |
+| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. Pipeline-active markers enable automatic crash detection and resume via `/replay`. Token efficiency tracking enriches dispatch manifests for cost visibility. Implementers record out-of-scope observations in a "Noticed But Not Touching" section that the orchestrator reconciles into a per-pipeline `docs/plans/*-noticed.md` file, preserving scope discipline without losing signal. One command, idea to completion. Migration mode (absorbed `migrate`, #720) plans and executes framework upgrades, API version bumps, dependency major versions and deprecation removals as a phased migration plan with compatibility verification, consumer waves and rollback points, running each phase through the pipeline. |
 | **spec** | Autonomous epic-to-spec pipeline. Takes a GitHub epic with child tickets and produces design docs, implementation plans, and machine-readable contracts (API surface, checkable/testable invariants) for each ticket without human interaction. Dispatches /recon per ticket for investigation context and design's approach-evaluation subflow for architectural decisions with confidence-based autonomous routing. Contract-based handoff to build. |
 | **design** | Interactive design refinement with quality gate on completed designs. Dispatches /recon at Phase 2 start for structural context, then explores dimensions via Domain Researcher + Impact Analyst. Deep Dive dimensions use its approach-evaluation subflow for constraint_fit scoring, kill criteria, and confidence grounded by recon's Open Questions. Its innovation pass proposes one addition before review; decision-record workflow drafts durable ADRs. Produces a design doc. |
 | **planning** | Implementation plan writing with quality gate on completed plans. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
@@ -24,7 +24,6 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 | **worktree** | Create isolated git worktrees for feature work with smart directory selection and safety verification. |
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
 | **inquisitor** | Writes up to 5 adversarial tests for one task's runtime failure modes, or runs 5 parallel dimensions (wiring, integration, edge cases, state/lifecycle, regression) against a full-feature diff. Triggers on 'break it', 'adversarial test', 'stress test implementation', 'find weaknesses', and cross-component bug-hunting. |
-| **migrate** | Autonomous migration planning and execution. Takes a migration target (framework upgrade, API version bump, dependency major version, deprecation removal) and produces a phased migration plan with compatibility verification. Optionally executes via build's refactor mode. |
 
 ## Quality & Audit
 

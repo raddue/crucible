@@ -3,7 +3,7 @@
 
 # Consumer Mapper Prompt Template
 
-Use this template when dispatching the Consumer Mapper depth agent. Primary consumer: `/migrate`. Produces a structured registry of all consumers of a target symbol, module, or API for the `## Consumer Registry` section.
+Use this template when dispatching the Consumer Mapper depth agent. Primary consumer: `/build` migration mode. Produces a structured registry of all consumers of a target symbol, module, or API for the `## Consumer Registry` section.
 
 Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
 
@@ -55,8 +55,8 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     ## What You Must NOT Do
 
-    - Do NOT plan the migration — the migrate skill does that
-    - Do NOT suggest migration order — the migrate skill does that
+    - Do NOT plan the migration — build's migration mode does that
+    - Do NOT suggest migration order — build's migration mode does that
     - Do NOT assess code quality
     - Do NOT skip consumers — completeness is critical for migration planning
 

@@ -47,7 +47,7 @@ Compass, forge, handoff, recall, and the workshop tour live here as flat referen
 | Session history: "recall", "what did I edit", "recall errors" | [recall.md](recall.md) | Activity-index discovery, summary / keyword / type / time-range views, 20-entry cap |
 | Catalog tour: "skills available", "where do I start?", "tour" | [workshop.md](workshop.md) | Headline orchestrators by task, trigger-phrase table, pipelines |
 
-Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that recommend forge (e.g. `build`, `finish`, `debugging`, `design`, `spec`, `migrate`, `prospector`) name `crucible:getting-started` plus `forge.md`; `build` and `finish` keep emitting compass updates via `scripts/compass.py` directly. Forge stays RECOMMENDED, handoff runs on request — behavior is identical to the former standalone skills.
+Forge dispatches follow [dispatch-convention.md](../shared/dispatch-convention.md); long forge runs keep a cairn per [cairn-convention.md](../shared/cairn-convention.md). Callers that recommend forge (e.g. `build`, `finish`, `debugging`, `design`, `spec`, `prospector`) name `crucible:getting-started` plus `forge.md`; `build` and `finish` keep emitting compass updates via `scripts/compass.py` directly. Forge stays RECOMMENDED, handoff runs on request — behavior is identical to the former standalone skills.
 
 ## The Rule
 

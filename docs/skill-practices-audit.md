@@ -16,7 +16,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
 | grudge | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| migrate | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
@@ -41,7 +40,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `build` Body (1): 1424 body lines (max 500)
 - `build` Contents (2): skills/shared/return-convention.md: >100 lines, no contents list in first 20; skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `build` Scripts (4): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic); SKILL.md:337: script step lacks nearby dependency/setup note (heuristic); SKILL.md:592: script step lacks nearby dependency/setup note (heuristic); … and 1 more
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
@@ -54,7 +52,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
 - `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
 - `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `migrate` Body (1): 549 body lines (max 500)
 - `orchestrator` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
 - `planning` Frontmatter (1): description should use third-person, not first/second-person voice

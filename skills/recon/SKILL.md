@@ -83,7 +83,7 @@ Distinct from `task:` which describes *what* to investigate; `context:` describe
 **Recognized context keys:**
 - `decisions` — list of prior design/implementation decisions
 - `constraints` — list of constraints affecting investigation
-- `target` — specific symbol/module for `consumer-registry` depth module (used by `/migrate`). Falls back to the `task:` string if absent.
+- `target` — specific symbol/module for `consumer-registry` depth module (used by `/build` migration mode). Falls back to the `task:` string if absent.
 
 **`session_id`** (optional)
 Enables cross-invocation caching within a session. When provided, the Structure Scout report is cached and reused on subsequent invocations with the same session_id. Pattern Scout always runs fresh (its output varies with cascading context). Parent skills generate the session_id (e.g., `/design` uses its run timestamp). Without a session_id, no caching occurs.
@@ -307,7 +307,7 @@ See [`guardrails.md`](guardrails.md) for operating principles and red flags.
 
 **Records to:** `/recon` persistent-map mode (recorder dispatch after investigation, using `cartographer/recorder-prompt.md`)
 
-**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
+**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/build` migration mode (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
 
 **Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design). Improvement discovery and whole-repo onboarding are modes of this skill, not callers. See #147 for the remaining rationale.
 

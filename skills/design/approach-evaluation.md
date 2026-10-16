@@ -36,7 +36,7 @@ Evaluate competing approaches against codebase constraints. Returns a structured
 |---|---|---|
 | `/design` | Recon brief + agent findings | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
 | `/spec` | Recon brief + agent findings (autonomous) | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
-| `/migrate` | Recon brief + migration analysis | `project_structure`, `migration_target`, `breaking_changes`, `blast_radius` |
+| `/build` migration mode | Recon brief + migration analysis | `project_structure`, `migration_target`, `breaking_changes`, `blast_radius` |
 | Generic caller | Freeform evidence | `description` (string) — unstructured context, lower confidence |
 
 When context contains unrecognized keys, the evaluator treats them as additional evidence. When context is a bare string, treat as `{ "description": context }`.
@@ -178,7 +178,7 @@ These make decisions revisitable without re-running the full analysis.
 |---|---|---|---|
 | `/design` | `architecture` | Recon brief + cascading decisions | Evaluator generates |
 | `/spec` | `architecture` | Recon brief + cascading decisions (autonomous — confidence routing) | Evaluator generates |
-| `/migrate` | `strategy` | Recon brief + migration analysis | Evaluator generates |
+| `/build` migration mode | `strategy` | Recon brief + migration analysis | Evaluator generates |
 
 **Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not design approach evaluation), `/recon` improvement-discovery mode (competing redesign exploration is more specialized than this subflow). See #147 for rationale.
 
@@ -203,7 +203,7 @@ These make decisions revisitable without re-running the full analysis.
 ```
 Spec consumes approach-evaluation output autonomously: high confidence = accept, medium = terminal alert, low = block alert.
 
-**From `/migrate`:**
+**From `/build` migration mode:**
 ```
 /design approach-evaluation
   question: "What migration strategy minimizes risk for the React 18→19 upgrade?"
