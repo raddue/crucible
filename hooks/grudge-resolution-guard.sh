@@ -897,7 +897,9 @@ _overlap() {
     # historical list. Verify exact equality: git's literal directory pathspec
     # also selects descendants. No persisted artifact scan before every Stop.
     local specs=() tmp
-    tmp="$(mktemp)" || { unset -n _aa; return 2; }
+    tmp="$(mktemp)" || { echo "grudge-resolution-guard: could not create temporary file for historical overlap; allowing Stop without advancing checkpoint, grudge compliance NOT enforced" >&2; unset -n _aa; return 2; }
+    trap 'rm -f -- "$tmp"' EXIT
+
     for a in "${_aa[@]}"; do
       [ -n "$a" ] || continue
       specs+=(":(literal)$a")
@@ -905,11 +907,12 @@ _overlap() {
         _budget_ok || _budget_out
         if ! _GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}" > "$tmp"; then
           rm -f "$tmp"
+          trap - EXIT
           unset -n _aa
           return 2
         fi
         while IFS= read -r -d '' b; do
-          if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; unset -n _aa; return 0; fi
+          if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; trap - EXIT; unset -n _aa; return 0; fi
         done < "$tmp"
         specs=()
       fi
@@ -918,14 +921,16 @@ _overlap() {
       _budget_ok || _budget_out
       if ! _GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}" > "$tmp"; then
         rm -f "$tmp"
+        trap - EXIT
         unset -n _aa
         return 2
       fi
       while IFS= read -r -d '' b; do
-        if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; unset -n _aa; return 0; fi
+        if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; trap - EXIT; unset -n _aa; return 0; fi
       done < "$tmp"
     fi
     rm -f "$tmp"
+    trap - EXIT
     _budget_ok || _budget_out
   fi
   unset -n _aa

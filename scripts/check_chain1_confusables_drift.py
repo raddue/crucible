@@ -331,18 +331,15 @@ def sanity_check_reachability(mapping) -> list:
             f"is nothing to fail)")
         return problems
     for src, target in mapping.items():
-        if target in "TRIPWIRE-CHILD:" or target == "l":
-            kw = "TRIPWIRE-CHILD:"
-            needle = "I" if target == "l" else target
-            positions = [i for i, c in enumerate(kw) if c == needle]
-            for pos in positions:
-                if rv._v11_keyword_end(kw[:pos] + src + kw[pos + 1:] + " none", kw) is None:
-                    problems.append(
-                        f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
-                        f"CONFUSABLE_MAP but UNREACHABLE through _v11_keyword_end "
-                        f"at position {pos}")
-            if target == "l" or target not in keyword:
-                continue
+        v11_keyword = "TRIPWIRE-CHILD:"
+        needle = "I" if target.lower() == "l" else target.upper()
+        v11_positions = [i for i, c in enumerate(v11_keyword) if c == needle]
+        for pos in v11_positions:
+            if rv._v11_keyword_end(v11_keyword[:pos] + src + v11_keyword[pos + 1:] + " none", v11_keyword) is None:
+                problems.append(
+                    f"U+{ord(src):04X} ({src!r} -> {target!r}) is in "
+                    f"CONFUSABLE_MAP but UNREACHABLE through _v11_keyword_end "
+                    f"at position {pos}")
         pos_list = [i for i, c in enumerate(keyword) if c.upper() == target.upper()]
         if pos_list:
             for pos in pos_list:
@@ -370,7 +367,7 @@ def sanity_check_reachability(mapping) -> list:
             line = keyword + " n" + src + "ne"
         elif target.lower() in "tripwire-child":
             continue
-        elif target == ":":
+        elif target == "-" or target == ":":
             # Also pin the punctuation at each position in TRIPWIRE-CHILD:.
             continue
         else:
