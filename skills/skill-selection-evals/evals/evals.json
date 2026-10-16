@@ -721,7 +721,6 @@
         "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
-      "reasoning": "Grudge stores bug regression memory; design decision records store decisions with alternatives, not bugs.",
       "reasoning": "debugging owns grudge read/write mechanics, including recording a fixed bug; design records architectural decisions with alternatives.",
       "difficulty": "easy"
     },
@@ -1029,10 +1028,10 @@
       "expected_skill": "build",
       "common_mistakes": [
         "test-driven-development",
-        "prospector"
+        "recon"
       ],
       "context": "Explicit 'upgrade X from Y to Z' request.",
-      "reasoning": "Upgrade-from-to phrasing routes to build migration mode (phased plan, then per-phase build execution). Prospector discovers modernization targets but does not plan or execute them.",
+      "reasoning": "Upgrade-from-to phrasing routes to build migration mode (phased plan, then per-phase build execution). Recon improvement discovery finds modernization targets but does not plan or execute them.",
       "difficulty": "easy"
     },
     {
@@ -1042,7 +1041,7 @@
       "prompt": "Remove deprecated APIs from the payments module now that every caller should be on the new interface.",
       "expected_skill": "build",
       "common_mistakes": [
-        "prospector",
+        "recon",
         "temper"
       ],
       "context": "Deprecation removal with possible remaining consumers.",

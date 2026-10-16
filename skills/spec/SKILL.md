@@ -275,7 +275,7 @@ Before any dispatch work, check for a crashed prior spec session:
 
 ### Step-by-Step Detail
 
-**[1] Consult cartographer + forge:** Use `/recon` persistent-map mode (consult mode) to review the codebase map and `crucible:getting-started (`forge.md`)` (feed-forward mode) to consult past lessons. Run once at the start of the run.
+**[1] Consult cartographer + forge:** Use `/recon` persistent-map mode (consult mode) to review the codebase map and `crucible:getting-started` (`forge.md`) (feed-forward mode) to consult past lessons. Run once at the start of the run.
 
 **[2] Fetch epic, extract child tickets:** Use the extraction fallback chain (sub-issues, task list checkboxes, body references, manual identification). See Epic Extraction section.
 
