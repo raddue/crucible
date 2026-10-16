@@ -510,7 +510,7 @@
       "prompt": "Where do I start with these tools? Give me a tour.",
       "expected_skill": "getting-started",
       "common_mistakes": [
-        "project-init"
+        "recon"
       ],
       "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
       "reasoning": "\"Give me a tour\" of the tools routes to getting-started’s workshop tour reference, not codebase onboarding (project-init).",
@@ -945,7 +945,7 @@
       "expected_skill": "getting-started",
       "common_mistakes": [
         "temper",
-        "project-init"
+        "recon"
       ],
       "context": "Catalog question before choosing a tool; the user has not asked for a review yet.",
       "reasoning": "The workshop catalog tour (getting-started/workshop.md) answers which skill fits and names /temper; invoking temper now would start a review nobody asked for.",
