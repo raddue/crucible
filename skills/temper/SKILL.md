@@ -1,6 +1,6 @@
 ---
 name: temper
-description: Review code diffs for production readiness and process received review feedback with technical rigor. Use for "review this PR", "review my changes", "code review", "check the diff", "is this ready to ship", "review feedback", "address comments", or "respond to review". Verify feedback against code before implementing; no blind agreement. Works on PRs from any forge or raw git SHA ranges.
+description: Review code diffs for production readiness and process received code review comments with technical rigor. Use for "review this PR", "review my changes", "code review", "check the diff", "is this ready to ship", "review feedback", "code review comments", "address comments", "address feedback", "respond to review", or "reviewer suggestions". Before implementing suggestions, verify claims against code, especially unclear or technically questionable feedback; no blind agreement. Works on PRs from any forge or raw git SHA ranges.
 ---
 
 # Temper
@@ -19,6 +19,7 @@ description: Review code diffs for production readiness and process received rev
 - [Severity / Verdict Vocabulary](#severity--verdict-vocabulary)
 - [External Model Review](#external-model-review-optional)
 - [Cross-Reference to Deep Cloud Review](#cross-reference-to-deep-cloud-review)
+- [Round example](#round-example)
 - [Test Alignment](#test-alignment)
 - [Integration with Workflows](#integration-with-workflows)
 - [Red Flags](#red-flags)
@@ -43,7 +44,7 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 
 ## Review feedback (inbound mode)
 
-When the user has **received** review feedback ("review feedback", "address comments", "respond to review"), read [`references/review-feedback.md`](references/review-feedback.md) **in full before acting**. That reference preserves the technical-rigor protocol, including clarify-first, verification against actual code, reasoned pushback, no performative agreement, one-at-a-time testing, thread replies, and feedback-only Tier B ledger behavior. In this mode, do **not** start the diff-review engine just to evaluate inbound comments. Run the diff-review loop separately only when a fresh review of the resulting changes is requested or required by a caller; its Tier A emit remains separate.
+When the user has **received** review feedback ("review feedback", "code review comments", "address comments", "address feedback", "respond to review", "reviewer suggestions"), read [`references/review-feedback.md`](references/review-feedback.md) **in full before acting**. That reference preserves the technical-rigor protocol, including clarify-first, verification against actual code, reasoned pushback, no performative agreement, one-at-a-time testing, thread replies, and feedback-only Tier B ledger behavior. In this mode, do **not** start the diff-review engine just to evaluate inbound comments. Run the diff-review loop separately only when a fresh review of the resulting changes is requested or required by a caller; its Tier A emit remains separate.
 
 ## Non-Goals
 
@@ -443,6 +444,10 @@ For GitHub PRs only, Claude Code's built-in `/ultrareview <PR>` runs a deeper mu
 "Distinct angles" means the engine's finder angles, not severity tiers — the trigger is breadth of issue surface, not depth of any single issue.
 
 `/ultrareview` is GitHub-specific; **do not suggest** it for GitLab / Bitbucket / other-forge PRs.
+
+## Round example
+
+Read [`references/round-example.md`](references/round-example.md) when tracing the R1→R3 finding lifecycle, especially why a new-admit round cannot be Clean.
 
 ## Test Alignment
 

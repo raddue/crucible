@@ -170,6 +170,39 @@
       "difficulty": "hard"
     },
     {
+      "id": "review-feedback-code-review-comments",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "These code review comments say the fallback is dead code. Verify that claim before changing it.",
+      "expected_skill": "temper",
+      "common_mistakes": ["delve", "quality-gate"],
+      "context": "Received comments need verification against actual callers, not a fresh review.",
+      "reasoning": "Temper's feedback mode checks reviewer claims against code before acting.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-address-feedback",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Address feedback on my PR; one request seems incompatible with our minimum supported version.",
+      "expected_skill": "temper",
+      "common_mistakes": ["build", "audit"],
+      "context": "Inbound review feedback with a compatibility concern.",
+      "reasoning": "Temper's feedback mode verifies compatibility and pushes back with evidence if needed.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-reviewer-suggestions",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Evaluate these reviewer suggestions before implementing suggestions that sound technically questionable.",
+      "expected_skill": "temper",
+      "common_mistakes": ["quality-gate", "delve"],
+      "context": "Received suggestions must be checked before any change.",
+      "reasoning": "Temper's feedback mode requires technical verification before implementation.",
+      "difficulty": "medium"
+    },
+    {
       "id": "adversarial-scope-direct-01",
       "dimension": "direct",
       "boundary": "adversarial-scope",
