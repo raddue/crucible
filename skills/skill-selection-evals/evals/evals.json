@@ -731,10 +731,11 @@
       "prompt": "Check grudges for these files before we investigate",
       "expected_skill": "debugging",
       "common_mistakes": [
+        "getting-started",
         "recall"
       ],
       "context": "The user asks for regression-oracle pre-flight against files in scope, not conversation history.",
-      "reasoning": "debugging performs pre-flight grudge queries and carries matching DO NOT REPEAT context; recall searches session history.",
+      "reasoning": "debugging owns grudge pre-flight against files in scope; getting-started covers session and project onboarding, not regression memory.",
       "difficulty": "easy"
     },
     {
