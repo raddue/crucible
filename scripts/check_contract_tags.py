@@ -157,7 +157,7 @@ COVERAGE_MAP: dict[str, dict] = {
     # issue #608: by-files clearance must not spend the persisted block counter
     "contract:group:inv-t29": {"kind": "bash", "carriers": [_G], "checks": 23},
     # issue #718 follow-up to #717: historical overlap diff-tree failures must fail open without checkpoint advance
-    "contract:hook:inv-t30": {"kind": "bash", "carriers": [_G], "checks": 5},
+    "contract:hook:inv-t30": {"kind": "bash", "carriers": [_G], "checks": 7},
 }
 del _G
 
