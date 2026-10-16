@@ -1,6 +1,6 @@
 # Skills
 
-The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how the orchestrator skills (build, debugging, spec, migrate) chain these together.
+The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how the orchestrator skills (build — including migration mode — debugging, spec) chain these together.
 
 <!-- CATALOG:START -->
 ## Core Pipeline

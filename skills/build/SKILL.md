@@ -107,7 +107,7 @@ Before dispatching the design skill, determine whether this build is:
 
 - **Feature mode** (default) — adding new capability. Success = new acceptance tests pass.
 - **Refactor mode** — restructuring existing code. Success = existing behavior preserved + structural goals met.
-- **Migration mode** — planning and executing a migration (framework upgrade, API version bump, dependency major version, deprecation removal; `/build --migrate`, "migration plan", "upgrade X from Y to Z", "remove deprecated", "major version bump"). Success = every migration phase reaches its safe stopping point and the old version is removed. Migration mode is an invocable subflow that wraps this pipeline: follow [references/migration.md](references/migration.md) end to end; it dispatches this pipeline once per migration phase in feature or refactor mode. Build's own phase flow (Phases 1–4) is unchanged.
+- **Migration mode** — planning and executing a migration (framework upgrade, API version bump, dependency major version, deprecation removal; entered as `/build <migration request>`, e.g. "migration plan", "upgrade X from Y to Z", "remove deprecated", "major version bump"). Success = every migration phase reaches its safe stopping point and the old version is removed. Migration mode is an invocable subflow that wraps this pipeline: follow [references/migration.md](references/migration.md) end to end; it dispatches this pipeline once per migration phase in feature or refactor mode. Build's own phase flow (Phases 1–4) is unchanged.
 
 **Detection:** If the user's intent is ambiguous, ask directly before proceeding:
 
@@ -127,14 +127,14 @@ Propagate refactor mode to subagents through:
 
 ### Compaction Recovery
 
-Build's existing compaction step must read the Compression State FIRST (step 0 from Pipeline Status Compaction Recovery), then the mode file, before re-reading the task list or any other state. On resumption after compaction:
+Build's existing compaction step must read the Compression State FIRST (step 0 from Pipeline Status Compaction Recovery in `references/pipeline-status.md`), then the mode file, before re-reading the task list or any other state. On resumption after compaction:
 
 0. **Read `## Compression State` from `<build-scratch>/pipeline-status.md`** — recover goal, decisions, constraints, next steps.
-0.5. **Check for handoff manifests** (`handoff-*-to-*.md`) in `<build-scratch>`. If the most recent manifest exists, use its Inputs and Mode to bootstrap recovery — this supersedes the mode file for phase-boundary state.
+0.5. **Check for handoff manifests** (`handoff-*-to-*.md`, format in `references/pipeline-status.md` § Phase Handoff Manifest) in `<build-scratch>`. If the most recent manifest exists, use its Inputs and Mode to bootstrap recovery — this supersedes the mode file for phase-boundary state.
 1. **Read `<build-scratch>/build-mode.md`** — recover mode and baseline commit SHA.
 2. **If file is missing:** Default to feature mode and warn.
 3. **If mode is `refactor`:** Verify baseline commit SHA exists.
-4. **Read `<build-scratch>/build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery subsection under Gate Ledger Protocol). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
+4. **Read `<build-scratch>/build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery (Ledger) in `references/gate-ledger.md`). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
 5. **After mode and ledger are recovered:** Proceed with general state reconstruction (task list, phase, health).
 
 ## Phase 4: Completion

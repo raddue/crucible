@@ -50,11 +50,13 @@ Autonomous migration planning and execution: analyzes a migration target, maps b
 
 ## Invocation
 
+There is no `--migrate` flag: `/build` with a migration request (framework upgrade, API version bump, dependency major version, deprecation removal) enters migration mode through build's Mode Detection. `--plan-only`, `--execute <plan>` and `--orgs` are migration-mode options.
+
 ```
-/build --migrate "upgrade lodash from v3 to v4"                    # plan + execute
-/build --migrate --plan-only "upgrade React Router v5 to v6"       # plan only, no execution
-/build --migrate --execute docs/plans/2026-03-23-lodash-migration-plan.md  # execute existing plan
-/build --migrate --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo
+/build "upgrade lodash from v3 to v4"                    # plan + execute
+/build --plan-only "upgrade React Router v5 to v6"       # plan only, no execution
+/build --execute docs/plans/2026-03-23-lodash-migration-plan.md  # execute existing plan
+/build --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo
 ```
 
 ## Communication Requirement (Non-Negotiable)

@@ -74,6 +74,9 @@ class BuildSplit(unittest.TestCase):
         self.assertFalse((ROOT / "skills/migrate").exists())
         tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,
                                  check=True).stdout.split()
+        # ponytail: catches path/slash/namespace forms only. Bare-word "migrate" in prose (e.g. a
+        # "(build, debugging, spec, migrate)" skill list) is NOT caught; matching it would false-positive
+        # on intentional prose ("migrate script", "nothing to migrate"). Add an allowlist if it recurs.
         stale = re.compile(r"crucible:migrate|skills/migrate/|(?<![-\w./])/migrate(?![-\w./])")
         skip = ("docs/plans/", "docs/research/", "CHANGELOG.md", "docs/evals.md", "scripts/test_build_split.py")
         hits = [f for f in tracked if not f.startswith(skip) and (ROOT / f).is_file()
