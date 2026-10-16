@@ -13,7 +13,6 @@ These skills contain methodology instructions only. No platform-specific tool re
 | planning | Structured implementation planning with task decomposition |
 | test-driven-development | Red-green-refactor discipline with rationalization counters |
 | verify | Evidence-before-claims verification discipline |
-| review-feedback | Technical rigor when processing code review feedback |
 | getting-started | Skill discovery and invocation discipline |
 | handoff | Session-handoff doc capturing arc state and the next pickup |
 | workshop | Guided tour of the headline orchestrator skills |
@@ -26,7 +25,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 |-------|----------------------|-------------------|
 | quality-gate (including red-team mode) | Subagent dispatch for fresh Devil's Advocate reviewers each round | Agent reviews iteratively in-context (anchoring risk) |
 | inquisitor | 5 parallel adversarial dimensions | Dimensions run sequentially |
-| temper | Subagent dispatch for review | Agent reviews in-context |
+| temper (diff-review mode) | Subagent dispatch for review | Agent reviews in-context; feedback-only mode needs no subagent |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
 | anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
