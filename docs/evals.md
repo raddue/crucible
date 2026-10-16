@@ -63,7 +63,7 @@ A matched full-feature run of eval 1 in `skills/inquisitor/evals/evals.json` sco
 
 ## Debugging/grudge absorption A/B (#720, 2026-10-15)
 
-`/anvil` matched the old debugging description against the merged description on four trigger queries: two grudge intents, one ordinary debugging intent, and one adjacent ADR-history negative. Both descriptions scored **1/4, Δ 0 pp** (one run/query). The harness failed to detect activation in both arms, including ordinary debugging; it therefore provides no evidence that the merged description harmed or improved routing. This is a bounded harness limitation, not a behavioral non-regression claim. The merged description explicitly carries all six grudge triggers, and the skill-selection evals route record/pre-flight cases to `debugging`. Workspace/results: `/tmp/debugging-grudge-trigger-evals.json`, `/tmp/debugging-grudge-with.json`, `/tmp/debugging-grudge-old.json` (machine-local).
+`/anvil` matched the old debugging description against the merged description on four trigger queries: two grudge intents, one ordinary debugging intent, and one adjacent ADR-history negative. Both descriptions scored **1/4, Δ 0 pp** (one run/query). The harness failed to detect activation in both arms, including ordinary debugging; it therefore provides no evidence that the merged description harmed or improved routing. This is a bounded harness limitation, not a behavioral non-regression claim. The merged description explicitly carries all six grudge triggers, and the skill-selection evals route record/pre-flight cases to `debugging`. Workspace/results retained locally; not committed.
 
 ## Design consolidation A/B (#720, 2026-10-15)
 

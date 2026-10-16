@@ -177,7 +177,7 @@ approach is rejected.
 
 - **Pre-flight (read):** `build` (Phase 2, post-design/pre-implementation),
   `quality-gate` (round-1 dispatch), `debugging` (opening phase).
-- **Write:** `debugging` (resolution phase), `merge-pr` (on `fix(*)` PRs).
+- **Write:** `debugging` (resolution phase), `finish/merge` (on `fix(*)` PRs).
 
 ### Non-goals (v1)
 
