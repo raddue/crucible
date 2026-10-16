@@ -43,7 +43,11 @@ for shape in inject/shape-*.jsonl; do
 done
 
 echo
-echo "=== Check 4: Layer 2 tripwire scenarios must all pass ==="
+echo "=== Check 4: Layer 2 tripwire parser selftest ==="
+python3 tripwire/sweep.py --selftest
+echo
+
+echo "=== Check 5: Layer 2 tripwire scenarios must all pass ==="
 for s in tripwire/scenario-*.jsonl; do
   echo "-- $s --"
   python3 tripwire/sweep.py "$s" | tee /tmp/sweep-result.out

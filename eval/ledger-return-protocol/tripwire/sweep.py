@@ -46,7 +46,9 @@ class LintError(layer1.LintError):
 
 def parse_receipt_v11(text):
     if text.startswith("RCPT v1.1 "):
-        return layer1.parse_v11_sections(text)
+        parsed = layer1.parse_v11_sections(text)
+        parsed["version"] = "1.1"
+        return parsed
     """Parse v1.1 receipt: Layer 1 sections + TRIPWIRE + SUPERSEDES [+ TRIPWIRE-CHILD]."""
     version_m = re.match(r"^RCPT v(1|1\.1) ", text)
     if not version_m:
@@ -89,6 +91,21 @@ def parse_receipt_v11(text):
         "supersedes": supersedes,
         "trip_child": trip_child,
     }
+
+
+def selftest():
+    """Exercise v1.1 parse, delegated lint, and sweep without scenario files."""
+    rv = layer1
+    base = next(Path(__file__).resolve().parent.glob("scenario-*.jsonl"))
+    receipt = json.loads(base.read_text(encoding="utf-8").splitlines()[0])["receipt"]
+    parsed = parse_receipt_v11(receipt)
+    if parsed.get("version") != "1.1":
+        raise AssertionError(f"sweep parser lost v1.1 version: {parsed!r}")
+    rv.lint_receipt(receipt)
+    lint_v11(parsed, [])
+    if sweep([], parsed):
+        raise AssertionError("empty manifest unexpectedly fired tripwire")
+    print("tripwire sweep selftest OK")
 
 
 def compute_hash_prefix(receipt_text):
@@ -279,6 +296,9 @@ def sweep(manifest, new_parsed):
 
 
 def main():
+    if sys.argv[1:] == ["--selftest"]:
+        selftest()
+        return
     if len(sys.argv) != 2:
         print(__doc__)
         sys.exit(1)
