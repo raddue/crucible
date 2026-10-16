@@ -94,7 +94,7 @@ List of depth modules to produce after core synthesis. Valid values:
 | Module | Agent | Model | Primary Consumer |
 |---|---|---|---|
 | `impact-analysis` | Impact Analyst | high | `/design`, `/build` |
-| `consumer-registry` | Consumer Mapper | standard | `/migrate` |
+| `consumer-registry` | Consumer Mapper | standard | `/build` migration mode |
 | `friction-scan` | Friction Scanner | high | `/recon` improvement-discovery mode |
 | `subsystem-manifest` | Manifest Builder | standard | `/audit` |
 | `diagnostic-context` | Diagnostic Gatherer | high | `/debugging` |
