@@ -29,6 +29,7 @@ Crucible's 52 execution evals measure quality once a skill is invoked. Selection
 7. **onboarding-entry** — getting-started's on-demand workshop tour vs recon's whole-repository codebase onboarding.
 8. **explore-vs-improve** — recon vs other skills for task investigation, whole-repo onboarding, or improvement discovery. This selection suite checks which skill is routed; it does not grade recon's internal mode selection.
 9. **session-hub** — getting-started reference modes (compass, forge, handoff, recall, workshop) vs recon, finish, verify, anvil, checkpoint, replay, debugging, and temper.
+10. **anvil-skill-audit** — anvil's suite-wide health and efficiency audit vs single-artifact audit or single-skill edit/eval.
 
 ## Difficulty Ratings
 

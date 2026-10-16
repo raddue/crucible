@@ -90,7 +90,7 @@ runtime dispatch gate and must not be used to stop a live dispatch.
   introduced in Opus 4.7, so the ~1.3× token overhead applies against
   **pre-4.7** tokenizers, and there is **no** tokenizer premium against the
   current Opus line.
-- `scripts/check_model_pins.py` (CI + `/stocktake`) fails any fable-family pin
+- `scripts/check_model_pins.py` (CI + `/anvil audit`) fails any fable-family pin
   on a `<!-- MODEL-TIER: security-hard-out -->`-marked file and any
   security-surface file missing that marker.
 

@@ -28,13 +28,12 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | temper (diff-review mode) | Subagent dispatch for review | Agent reviews in-context; feedback-only mode needs no subagent |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
-| anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
+| anvil | Subagent dispatch for blind A/B skill evals and read-only skill-suite auditing | Eval runs sequentially in-context; quantitative benchmarking skipped; suite audit runs sequentially |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
 | design | Subagent dispatch for parallel investigation, Challenger, approach evaluation, and innovation | Investigation, evaluation, challenge, and proposal run in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |
 | worktree | Git worktree creation | Standard branch-based isolation |
-| stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
 | audit | Subagent dispatch for parallel analytical lenses | Lenses run sequentially in-context |
 | delve | Subagent dispatch for finder fan-out + verify gate | Finders run sequentially |
 | recon | Subagent dispatch for parallel task scouts, partition scans, and friction analysis | Scouts, explorers, or analysts run sequentially |
