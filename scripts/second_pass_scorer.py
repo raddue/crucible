@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Executable oracle for the Second-Pass-Findings scoring rule (#561 fresh round 12 F1).
 
-Faithful executable transcription of the scoring rule described in
-`skills/quality-gate/red-team-prompt.md`.
+Faithful executable transcription of the scoring rule in
+`skills/quality-gate/loop.md`'s Score source block (step 7).
 That prose describes ONE parsing/scoring rule; this module is
 that rule's single executable implementation, so a round-11-style in-place
 prose inversion that keeps every checker-pinned phrase intact but flips the
@@ -72,7 +72,7 @@ _DECLARED_RE = re.compile(
 _BOUNDARY_PUNCT_RE = re.compile(r"^\s*[(\[,.:;]")
 # ...or by a dash, REQUIRING at least one whitespace char before it — this is
 # NOT the same optional-whitespace convention as the punctuation set above.
-# The `### Second Pass Findings` rule in red-team-prompt.md states this
+# The Score source block in `skills/quality-gate/loop.md` states this
 # asymmetry explicitly and deliberately: "whitespace followed by a dash
 # (-, –, or — — a spaced dash counts, an unspaced one does not)". SIEGE-FA-2
 # (PR #583 warden gate): the #583 Edge Cases AV4 change widened this to `\s*`
