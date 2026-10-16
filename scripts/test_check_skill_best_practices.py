@@ -36,6 +36,14 @@ def main() -> None:
                                   + "line\n" * 100 + "## Usage\n## Notes\nSee [b](b.md).\n")
         assert not checker.audit(root)["one"]["Contents"]
         assert not checker.audit(root)["one"]["Nesting"]  # b is linked directly
+        path = skill(root, "one", "# Skill\n[valid](#skill) [missing](#not-there)\nSee [a](references/a.md).\n")
+        (refs / "a.md").write_text("# A\n[valid](#a) [missing](#gone)\n")
+        anchors = checker.audit(root)["one"]["Contents"]
+        assert len(anchors) == 2 and any("SKILL.md" in x and "not-there" in x for x in anchors)
+        assert any("a.md" in x and "gone" in x for x in anchors)
+        assert "not-there" in checker.render(checker.audit(root))
+        path = skill(root, "one", "# Skill\nSee [a](references/a.md).\n")
+        (refs / "a.md").write_text("# A\n" + "line\n" * 100 + "## Contents\n- Usage\n## Usage\nSee [b](b.md).\n")
         path.write_text(path.read_text().replace(" and [b](references/b.md)", ""))
         assert checker.audit(root)["one"]["Nesting"]
         path.write_text(path.read_text().replace("[a](references/a.md)", "`references/a.md`"))
