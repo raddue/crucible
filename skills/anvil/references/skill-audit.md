@@ -1,18 +1,26 @@
----
-name: stocktake
-description: Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan or full evaluation modes.
-origin: crucible
----
+# Skill-suite audit
 
-# Skill Stocktake
+Absorbed from `stocktake` (#720); original audit mechanics retained, with routing/cache retargeting and compatibility notes.
+
+## Contents
+
+- [When to Activate](#when-to-activate)
+- [Modes](#modes)
+- [Quick Scan Flow](#quick-scan-flow)
+- [Full Stocktake Flow](#full-stocktake-flow)
+- [Efficiency Report Flow](#efficiency-report-flow)
+- [Results File Schema](#results-file-schema)
+- [Safety](#safety)
+- [Integration](#integration)
+- [Red Flags](#red-flags)
 
 Audits all crucible skills for overlap, staleness, broken references, and quality.
 
-**Announce at start:** "I'm using the stocktake skill to audit skill health."
+**Announce at start:** "I'm using anvil to audit skill health."
 
 ## When to Activate
 
-- User invokes `/stocktake` or asks to audit skills
+- User invokes `/anvil audit` or asks to audit skills
 - Forge feed-forward nudges when results are 30+ days stale
 - After adding, removing, or significantly modifying multiple skills
 
@@ -21,20 +29,20 @@ Audits all crucible skills for overlap, staleness, broken references, and qualit
 | Mode | Trigger | Duration |
 |------|---------|----------|
 | Quick scan | `results.json` exists (default) | ~5 min |
-| Full stocktake | `results.json` absent, or `/stocktake full` | ~20 min |
-| Efficiency report | `/stocktake efficiency` | ~5 min |
+| Full stocktake | `results.json` absent, or `/anvil audit full` | ~20 min |
+| Efficiency report | `/anvil audit efficiency` | ~5 min |
 
-**Results cache:** `skills/stocktake/results.json`
+**Results cache:** `skills/anvil/results.json`. If it is absent and `skills/stocktake/results.json` exists from an earlier installation, copy that cache to the new path once before choosing a mode; leave the old file untouched. The existing `evaluated_at`, verdicts, and efficiency data remain intact.
 
 ## Quick Scan Flow
 
-1. Read `skills/stocktake/results.json`
+1. Read `skills/anvil/results.json`
 2. Identify skills that have changed since `evaluated_at` timestamp (compare file mtimes)
 3. If no changes: report "No changes since last run." and stop
 4. Re-evaluate only changed skills using the same evaluation criteria
 5. Carry forward unchanged skills from previous results
 6. Output only the diff
-7. Save updated results to `skills/stocktake/results.json`
+7. Save updated results to `skills/anvil/results.json`
 
 ## Full Stocktake Flow
 
@@ -50,19 +58,19 @@ Present inventory table:
 | Skill | Files | Lines | Last Modified | Description |
 |-------|-------|-------|---------------|-------------|
 
-**Structural invariants (repo-level).** Run the tracked invariant checker from the repo root and treat a non-zero exit as a stocktake failure to surface:
+**Structural invariants (repo-level).** Run the tracked invariant checker from the repo root and treat a non-zero exit as a skill-audit failure to surface:
 - `python3 scripts/check_i2_marker.py` — the I2 engine-dispatch marker allowlist: the set of files carrying a column-0 `` `dispatch: delve-engine` `` body line must equal exactly `{delve, temper}` (a stray third dispatcher or a missing one fails). Added #336.
 - `python3 scripts/check_qg_stagnation_minor.py` — the Minor-aware stagnation judge contract: asserts `quality-gate/stagnation-judge-prompt.md` carries the Step-3 Mixed-branch Minor-accumulation rule + the `Consecutive recurring-Minor rounds` counter + the `DR-Cause` enum; that `quality-gate/SKILL.md`'s Minor prose is reconciled (the bare "do not count toward stagnation" claim is gone; path-pinned, literal match); and that the convergence-log `dr_cause` value set (`minor-accumulation | structural-saturation | consensus | null`) is documented. Added #260.
 - `python3 scripts/check_crossref.py` — the cross-reference invariant: every live `crucible:<token>` in a git-tracked `*.md` resolves to a real `skills/<token>/` dir. Plugin-namespaced agent types (the `crucible-*` namespace, e.g. `crucible-red-team`) are resolved against `agents/<token>.md` (so a typo'd agent ref is still caught); documented template placeholders (`skill-name`/`old-name`/`new-name`) are blanket-exempt. `docs/plans/`, `docs/prds/`, and `docs/handoffs/` are gitignored and thus naturally excluded since `git ls-files` lists tracked files only (so new files under those paths are not scanned — **except** `docs/plans/2026-08-21-488-c1-name-space-reduced.md`, the #488 c1 name-space ruling, which `.gitignore` negates and which IS scanned); tracked surfaces — `skills/**`, top-level `docs/*.md`, `docs/research/`, etc. — ARE scanned. `--selftest` runs the resolution-logic regression cases. Added #365.
 - `python3 scripts/catalog.py check` — the generated skill-catalog contract: asserts `docs/skills.md`'s `<!-- CATALOG:START/END -->` rows are in bijection with `skills/*/SKILL.md` frontmatter names (no omission, no bogus entry, no naming mismatch), every on-disk skill is in `CATEGORIES` (and vice-versa, no dangling category), and every registered count token (README, workshop, plugin.json) equals the runtime skill count `n`. Added #364.
 <!-- CANONICAL: shared/model-tier-policy.md -->
-- `python3 scripts/check_model_pins.py` — the model-tier guardrail: no fable-family pin (`fable`/`claude-fable-5`, case-insensitive, across frontmatter `model:` + inline `Task tool`/`Agent tool` forms) on any `<!-- MODEL-TIER: security-hard-out -->`-marked file, AND every file in the security-surface set (`skills/siege/**`, `skills/quality-gate/dependency-audit.md`, `agents/crucible-red-team.md`, plus narrow offensive/CVE name-stems gated match-then-check-for-pin; `audit`/`test-coverage`/`stocktake` carved out) carries the marker (default-deny). Static tracked-`*.md` pins only — `inherit`/session-model roles and untracked consensus config are disclosed residuals (see `skills/shared/model-tier-policy.md`). `--selftest` runs the detection-logic cases. Added #392.
+- `python3 scripts/check_model_pins.py` — the model-tier guardrail: no fable-family pin (`fable`/`claude-fable-5`, case-insensitive, across frontmatter `model:` + inline `Task tool`/`Agent tool` forms) on any `<!-- MODEL-TIER: security-hard-out -->`-marked file, AND every file in the security-surface set (`skills/siege/**`, `skills/quality-gate/dependency-audit.md`, `agents/crucible-red-team.md`, plus narrow offensive/CVE name-stems gated match-then-check-for-pin; `audit`/`test-coverage` directories and `skills/anvil/references/skill-audit.md` carved out) carries the marker (default-deny). Static tracked-`*.md` pins only — `inherit`/session-model roles and untracked consensus config are disclosed residuals (see `skills/shared/model-tier-policy.md`). `--selftest` runs the detection-logic cases. Added #392.
 
 (Other tracked checkers under `scripts/check_*.py` may be run here too as they are brought into alignment.)
 
 ### Phase 2 — Quality Evaluation
 
-Dispatch an Opus Explore agent with all skill contents and the evaluation checklist.
+Dispatch an Opus Explore agent with all skill contents and the evaluation checklist. If the platform has no subagent dispatch, evaluate skills sequentially in-context with the same checklist and report the reduced independence.
 
 Each skill is evaluated against:
 
@@ -97,11 +105,11 @@ Each skill gets a verdict:
 
 1. **Retire / Merge**: present detailed justification per skill before confirming with user
 2. **Improve**: present specific improvement suggestions with rationale
-3. Save results to `skills/stocktake/results.json`
+3. Save results to `skills/anvil/results.json`
 
 ## Efficiency Report Flow
 
-Triggered by `/stocktake efficiency` or by forge feed-forward when 10+ chronicle signals with efficiency data exist.
+Triggered by `/anvil audit efficiency` or by forge feed-forward when 10+ chronicle signals with efficiency data exist.
 
 ### Step 1: Load Chronicle Data
 
@@ -192,7 +200,7 @@ a monolithic alternative would cost.
 
 ### Step 6: Cache Results
 
-Save efficiency report data to `skills/stocktake/results.json` under a new `efficiency` key (separate from the skill verdict cache):
+Save efficiency report data to `skills/anvil/results.json` under a new `efficiency` key (separate from the skill verdict cache):
 
 ```json
 {
@@ -210,7 +218,7 @@ Save efficiency report data to `skills/stocktake/results.json` under a new `effi
 
 ## Results File Schema
 
-`skills/stocktake/results.json`:
+`skills/anvil/results.json`:
 
 ```json
 {
@@ -235,7 +243,7 @@ Save efficiency report data to `skills/stocktake/results.json` under a new `effi
 
 ## Integration
 
-- **crucible:getting-started** (`forge.md`) — Feed-forward checks stocktake results timestamp; nudges when 30+ days stale
+- **crucible:getting-started** (`forge.md`) — Feed-forward checks skill-audit results timestamp; nudges when 30+ days stale
 - Evaluation is blind: same checklist applies regardless of skill origin
 
 ## Red Flags

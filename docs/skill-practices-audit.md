@@ -4,7 +4,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 
 | Skill | Body | Contents | Nesting | Frontmatter | Scripts | Overall |
 | --- | --- | --- | --- | --- | --- | --- |
-| anvil | FAIL | PASS | PASS | PASS | PASS | FAIL |
+| anvil | PASS | PASS | PASS | PASS | PASS | PASS |
 | audit | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | build | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | checkpoint | PASS | PASS | PASS | FAIL | PASS | FAIL |
@@ -24,18 +24,16 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | siege | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
 | source-driven-development | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
-| stocktake | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
 | temper | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-coverage | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-driven-development | PASS | PASS | PASS | PASS | PASS | PASS |
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 21/27 | 11/27 | 26/27 | 21/27 | 20/27 | 7/27 |
+| TOTAL | 21/26 | 11/26 | 25/26 | 21/26 | 20/26 | 8/26 |
 
-## Violations (79)
+## Violations (71)
 
-- `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `build` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20
@@ -62,9 +60,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `spec` Body (1): 631 body lines (max 500)
 - `spec` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `spec` Frontmatter (1): description should use third-person, not first/second-person voice
-- `stocktake` Contents (1): skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20
-- `stocktake` Frontmatter (1): description lacks when-to-use signal
-- `stocktake` Scripts (5): SKILL.md:54: script step lacks nearby dependency/setup note (heuristic); SKILL.md:55: script step lacks nearby dependency/setup note (heuristic); SKILL.md:56: script step lacks nearby dependency/setup note (heuristic); … and 2 more
 - `temper` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
 - `test-coverage` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
