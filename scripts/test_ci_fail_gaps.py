@@ -6,12 +6,21 @@ from tempfile import TemporaryDirectory
 
 import check_conflict_markers
 import check_evals_consistency
+import check_machine_paths
 import check_scorecard_freshness
 
 
 def main() -> None:
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
+        machine = root / "machine.md"
+        machine.write_text("safe\n" + "/home/" + "rickr/private\n" + "/Users" + "/person/work\n" + "C:" + "\\" + "person\\work\n")
+        assert check_machine_paths.offenders(root, ["machine.md"]) == [
+            "machine.md:2: machine-specific absolute path",
+            "machine.md:3: machine-specific absolute path",
+            "machine.md:4: machine-specific absolute path"]
+        machine.write_text("/home/user/work\n")
+        assert not check_machine_paths.offenders(root, ["machine.md"])
         (root / "notes.md").write_text("clean\n" + "<" * 7 + " HEAD\n" + "=" * 7 + "\n" + ">" * 7 + " branch\n")
         (root / "binary.png").write_text("<" * 7 + " HEAD\n")
         assert check_conflict_markers.offenders(root, ["notes.md", "binary.png"]) == [
