@@ -32,8 +32,8 @@ Every significant design question is backed by parallel investigation agents tha
 
 ### Phase 1: Context Gathering
 
-- **RECOMMENDED:** Use crucible:getting-started (`forge.md`, feed-forward mode) — consult past lessons
-- **RECOMMENDED:** Use crucible:cartographer-skill (consult mode) — review codebase map
+- **RECOMMENDED:** Use crucible:getting-started (`forge.md`) (feed-forward mode) — consult past lessons
+- **RECOMMENDED:** Use `/recon` (persistent-map mode) (consult mode) — review codebase map
 - Check current project state (files, docs, recent commits)
 - Read committed repo decisions and rules after compass state, before exploring:
   ```bash
@@ -294,7 +294,7 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 ## Integration
 
-**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:getting-started (`forge.md`), crucible:cartographer-skill, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context); approach evaluation, innovation, and decision records are local design subflows
+**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:getting-started (`forge.md`), `/recon` persistent-map mode, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context); approach evaluation, innovation, and decision records are local design subflows
 
 **Recon/approach evaluation:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Approach evaluation runs per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to manual investigation or synthesis on failure.
 

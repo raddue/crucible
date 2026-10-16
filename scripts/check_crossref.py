@@ -12,8 +12,8 @@ Stdlib only. The invariant covers TRACKED references only — a brand-new
 untracked/not-yet-staged `.md` is invisible to `git ls-files` and is checked
 once it is staged or committed.
 
-Why: `cartographer-skill/SKILL.md` referenced `crucible:cartographer` (no such
-skill) in its own feed-forward instructions, self-misrouting (#365 / A40). This
+Why: `cartographer-skill/SKILL.md` formerly referenced `crucible:cartographer`
+(no such skill) in its own feed-forward instructions, self-misrouting (#365 / A40). This
 checker covers the `crucible:<token>` reference *form* (the namespaced-invocation
 syntax). It does NOT cover the `skills/<token>/` path form or
 `<!-- CANONICAL: shared/x.md -->` links — those are out of its scope.
@@ -53,7 +53,8 @@ PLACEHOLDERS = {"skill-name", "old-name", "new-name"}
 def is_exempt(name: str) -> bool:
     """True only for documented template placeholders — literal fill-ins that
     are not references to real skills. Agent types are NOT exempt here; they are
-    resolved against `agents/<token>.md` in resolves()."""
+    resolved against `agents/<token>.md` in resolves(). Merged getting-started references use child filenames in prose; only explicit
+    template placeholders are exempt."""
     return name in PLACEHOLDERS
 
 
@@ -109,6 +110,7 @@ def selftest() -> int:
     cases = [
         # (token, exempt-or-resolves-expected, reason)
         ("cartographer", False, "the #365 bug: no skills/cartographer/ dir"),
+        ("forge", False, "absorbed into getting-started/forge.md; no crucible:forge skill remains"),
         ("crucible-red-team", True, "agent type resolves via agents/<token>.md"),
         ("crucible-red-tea", False, "typo'd agent ref: no agents/<token>.md"),
         ("skill-name", True, "documented template placeholder"),

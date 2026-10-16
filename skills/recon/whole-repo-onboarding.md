@@ -1,32 +1,39 @@
----
-name: project-init
-description: Use when onboarding to an unfamiliar codebase and want full structural context before the first real task. Deep-scans the repo and discovers cross-repo topology — whole-repo first-time bootstrap, not task-scoped investigation (use recon when you already have a specific task; project-init bootstraps the cartographer data recon consults).
----
+# Whole-Repo Onboarding Mode
 
-# Project Init
+## Contents
+
+- [Overview](#overview)
+- [Scope estimation](#pre-flight-scope-estimation)
+- [Tier 1: Single repo](#tier-1-single-repo-deep-scan)
+- [Tier 2: Cross-repo topology](#tier-2-cross-repo-discovery)
+- [Completion and proposal](#completion-claude-md-proposal)
+- [Re-invocation merge](#re-invocation-merge)
+- [Prompt templates](#prompt-templates)
+
+
 
 ## Overview
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
-Eliminate cold-start penalty by proactively mapping the current repo and its neighborhood. Instead of re-discovering the codebase during every first task, project-init builds structural context upfront so that build, design, and debugging skills start informed.
+Eliminate cold-start penalty by proactively mapping the current repo and its neighborhood. Instead of re-discovering the codebase during every first task, this mode builds structural context upfront so build, design, and debugging start informed.
 
-**Invocation:** User runs `/project-init`. Not auto-triggered.
+**Invocation:** User runs `/recon` with whole-repo onboarding intent. Not auto-triggered.
 
 **Two tiers:**
 - **Tier 1** — Single repo deep scan. Fan-out partition explorers, fan-in to cartographer format.
 - **Tier 2** — Cross-repo discovery. Scan sibling repos for topology and dependency relationships.
 
 **Output:**
-- Tier 1 writes to cartographer's existing data structures (`memory/cartographer/`)
+- Tier 1 writes to the existing persistent-map data structures (`memory/cartographer/`)
 - Tier 2 writes to `memory/topology/`
 
 **Coverage distinction:** All output is tagged `<!-- project-init:structural -->`, marking it as breadth-first structural mapping. This is distinct from task-verified content produced by cartographer record mode during real work. Task-verified content is always preserved over structural content.
 
 **Models:** Scanners, explorers, and recorders request `standard`. The Claude Code examples use the current reference alias `model: sonnet`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
-**Announce at start:** "I'm using the project-init skill to map this codebase and its neighborhood."
+**Announce at start:** "Running recon whole-repo-onboarding mode to map this codebase and its neighborhood."
 
 ---
 
@@ -98,7 +105,7 @@ Dispatch parallel Explore subagents, one per partition:
 Agent tool (subagent_type: Explore, model: sonnet)
 ```
 
-Use the prompt template at `./partition-explorer-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/partition-explorer-prompt.md`. Fill in the template variables:
 - `[partition name]` — the partition directory name
 - `[Partition root directory path]` — absolute path to the partition
 - `[Source file extensions detected in this partition]` — which extensions were found
@@ -114,7 +121,7 @@ Dispatch the Init Recorder to merge all partition reports into cartographer form
 Task tool (general-purpose, model: sonnet)
 ```
 
-Use the prompt template at `./init-recorder-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/init-recorder-prompt.md`. Fill in the template variables:
 - `[N]` — number of partition reports
 - `[File paths to partition exploration reports]` — paths to temp files from Step 3
 - `[Existing cartographer data]` — read and paste existing `memory/cartographer/map.md`, `conventions.md`, `landmines.md` if they exist, or say "No prior cartographer data."
@@ -243,7 +250,7 @@ Dispatch parallel Explore subagents, one per confirmed neighbor:
 Agent tool (subagent_type: Explore, model: sonnet)
 ```
 
-Use the prompt template at `./neighbor-scanner-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/neighbor-scanner-prompt.md`. Fill in the template variables:
 - `[repo name]` — the neighbor repository name
 - `[Neighbor repo path]` — path to the neighbor
 - `[Connection context]` — how it was discovered (manifest reference details)
@@ -269,7 +276,7 @@ Dispatch the Topology Recorder to synthesize neighbor scans:
 Task tool (general-purpose, model: sonnet)
 ```
 
-Use the prompt template at `./topology-recorder-prompt.md`. Fill in the template variables:
+Use the prompt template at `./project-init/topology-recorder-prompt.md`. Fill in the template variables:
 - `[N]` — number of neighbor scans
 - `[File paths to neighbor scan results]` — paths to temp files from Step 4
 - `[Current repo name, ecosystem, purpose]` — from Tier 1
@@ -317,10 +324,10 @@ The orchestrator appends accepted content to the project's CLAUDE.md (creating t
 
 | Agent | Model | Dispatch | Prompt Template |
 |-------|-------|----------|-----------------|
-| Partition Explorer | Sonnet | Agent tool (Explore) | `./partition-explorer-prompt.md` |
-| Init Recorder | Sonnet | Task tool (general-purpose) | `./init-recorder-prompt.md` |
-| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./neighbor-scanner-prompt.md` |
-| Topology Recorder | Sonnet | Task tool (general-purpose) | `./topology-recorder-prompt.md` |
+| Partition Explorer | Sonnet | Agent tool (Explore) | `./project-init/partition-explorer-prompt.md` |
+| Init Recorder | Sonnet | Task tool (general-purpose) | `./project-init/init-recorder-prompt.md` |
+| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./project-init/neighbor-scanner-prompt.md` |
+| Topology Recorder | Sonnet | Task tool (general-purpose) | `./project-init/topology-recorder-prompt.md` |
 
 Explorers are dispatched via the Agent tool with the specified `subagent_type`. Recorders are dispatched via the Task tool (general-purpose). Use the prompt templates verbatim, filling in only the bracketed template variables.
 
@@ -397,8 +404,8 @@ Skills that benefit from project-init output:
 
 | Skill | How It Uses project-init Data |
 |-------|-------------------------------|
-| `crucible:cartographer-skill` (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
-| `crucible:cartographer-skill` (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
+| `/recon` persistent-map mode (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
+| `/recon` persistent-map mode (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
 | `crucible:build` | Gets structural awareness from cartographer consult at task start |
 | `crucible:design` | Knows module boundaries and dependencies before proposing architecture |
 | `crucible:debugging` | Loads module context and landmines for investigators |
@@ -412,18 +419,18 @@ Skills that benefit from project-init output:
 
 ### Related Skills
 
-- `crucible:cartographer-skill` — ongoing codebase mapping (project-init bootstraps, cartographer maintains)
+- `/recon` persistent-map mode — ongoing codebase mapping (whole-repo onboarding bootstraps, persistent-map mode maintains)
 - `crucible:build` — implementation workflow (consumes cartographer data)
 - `crucible:design` — architecture planning (consumes map and topology)
 - `crucible:debugging` — investigation workflow (consumes modules and landmines)
 
-**Does not dispatch /recon** -- bootstraps the cartographer data that /recon consults. Complementary, not overlapping. See #147 for rationale.
+Whole-repo onboarding is itself a `/recon` mode and bootstraps the persistent map that task investigations consult.
 
 ---
 
 ## Prompt Templates
 
-- `./partition-explorer-prompt.md` — Structured exploration per partition for Tier 1
-- `./init-recorder-prompt.md` — Multi-source fan-in recorder for Tier 1
-- `./neighbor-scanner-prompt.md` — Lightweight neighbor exploration for Tier 2
-- `./topology-recorder-prompt.md` — Topology file writer for Tier 2
+- `./project-init/partition-explorer-prompt.md` — Structured exploration per partition for Tier 1
+- `./project-init/init-recorder-prompt.md` — Multi-source fan-in recorder for Tier 1
+- `./project-init/neighbor-scanner-prompt.md` — Lightweight neighbor exploration for Tier 2
+- `./project-init/topology-recorder-prompt.md` — Topology file writer for Tier 2

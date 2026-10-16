@@ -165,7 +165,7 @@ After all tasks complete:
      `metrics={mode, tasks count, tasks_passed count from task list, stagnation=false}`
    - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
    - If forge retrospective DID run, skip this step (forge Step 8.5 already emitted the signal)
-8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (record mode) — persist any new codebase knowledge discovered during build
+8. **RECOMMENDED SUB-SKILL:** Use crucible:recon (persistent-map mode) (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
 10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
@@ -340,7 +340,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 
 **Recommended sub-skills:**
 - **crucible:getting-started** (`forge.md`) — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
-- **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
+- **crucible:recon (persistent-map mode)** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 
 **Recon/approach-evaluation context:** Inherits recon/approach-evaluation context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.

@@ -79,7 +79,7 @@ After compaction, the post-compaction orchestrator reads `active-run.md` if pres
 
 **Stale marker handling:** If a stale marker exists from a prior crashed run (the scratch directory it points to has no `proposal.md` and no `alternatives.md`), the orchestrator **deletes only the marker file** and leaves the scratch `<run-id>/` directory intact. The orphaned `invocation.md` remains on disk as a historical record of the failed invocation — this preserves the append-only retention guarantee even for crashed runs. A paused sweep run whose orchestrator returns after a long delay (e.g., human-in-the-loop gap >1 hour) can still locate its in-flight directory and either resume (if the marker is still present) or treat the directory as orphaned (if a fresh invocation has since cleared the marker) — in the latter case, the next invocation in the sweep writes a new `<run-id>/` and the orphaned one remains for /recall consumers.
 
-**No general stale-scratch cleanup.** Unlike prospector's 24-hour scratch cleanup, innovate has NO general cleanup of `scratch/<run-id>/` directories. All scratch persists indefinitely per the append-only retention rule. Only the `active-run.md` marker is ever deleted.
+**No general stale-scratch cleanup.** Unlike improvement discovery's 24-hour scratch cleanup, innovate has NO general cleanup of `scratch/<run-id>/` directories. All scratch persists indefinitely per the append-only retention rule. Only the `active-run.md` marker is ever deleted.
 
 ### Retention (Append-Only)
 
@@ -89,7 +89,7 @@ Rationale: today's #2 proposal is often tomorrow's #1 when context shifts. Ranki
 
 **No file inside `scratch/` is ever rewritten.** A sweep's `ranked.md` (see Sweep Mode below) is rewritten between runs, but it lives in a sibling `sweeps/<sweep-id>/` tree — not under `scratch/` — and is explicitly a view layer over persistent scratch, not authoritative content.
 
-**Note on prospector parity:** Prospector uses second-precision run-ids (`2026-03-18T14-30-00`). Innovate uses millisecond precision because sweep mode can invoke multiple times per second; prospector's multi-phase, multi-gate structure inherently spaces invocations further apart. This is a justified divergence, not an inconsistency.
+**Note on improvement-discovery parity:** Improvement discovery uses second-precision run-ids (`2026-03-18T14-30-00`). Innovate uses millisecond precision because sweep mode can invoke multiple times per second; improvement discovery's multi-phase, multi-gate structure inherently spaces invocations further apart. This is a justified divergence, not an inconsistency.
 
 ## Sweep Mode (Optional)
 

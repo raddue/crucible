@@ -1,34 +1,36 @@
----
-name: prospector
-description: "Explore a codebase for architectural friction and propose competing redesigns. Triggers on 'prospector', 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or any task requesting discovery of codebase improvement opportunities."
----
+# Improvement Discovery Mode
 
-# Prospector
+## Contents
+
+- [Invocation](#invocation)
+- [Communication](#communication-requirement-non-negotiable)
+- [Friction discovery](#phase-0-5-framework-detection)
+- [Organic exploration](#phase-1-explore-organic-discovery)
+- [Genealogy](#phase-15-friction-genealogy)
+- [Root cause](#phase-2-root-cause-analysis)
+- [Structured analysis](#phase-3-structured-analysis-enhanced)
+- [Competing redesigns](#phase-5-frame-the-problem-space)
+- [Output and proposal handoff](#phase-8-output)
+- [Integration](#integration)
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
 Explores a codebase organically, surfaces architectural friction, and proposes competing redesigns for the user to choose from.
 
-**Announce at start:** "Running prospector on [codebase/directory name]."
+**Announce at start:** "Running recon improvement-discovery mode on [codebase/directory name]."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Purpose:** Discover structural improvement opportunities in a codebase. Distinct from audit (which finds bugs in a specific subsystem) -- prospector finds what could be better across the entire codebase. Audit finds what's broken. Prospector finds what could be better.
+**Purpose:** Discover structural improvement opportunities across a codebase. Distinct from audit, which adversarially reviews a specified subsystem: improvement discovery finds what could be better beyond a preselected subsystem.
 
-**Models:** Orchestrator, organic explorer, and competing design agents request `high`; genealogists and structured analysis request `standard`. The Claude Code examples use current reference aliases for those profiles; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for exploration and design, or the harness can observe that the active orchestrator is not running one, warn: "Prospector requests high-profile reasoning for exploration and design phases. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before exploration and design. These warnings are advisory and must not terminate the pipeline.
+**Models:** Orchestrator, organic explorer, and competing-design analysts request `high`; genealogists and structured analysis request `standard`. The examples use current reference aliases; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`. If no permitted `high`-profile model is available for exploration and proposal analysis, or the harness can observe that the active orchestrator is not running one, warn: "Recon improvement-discovery mode requests high-profile reasoning for exploration and proposal analysis. Results may be degraded." If active-model compliance cannot be observed, state that high-profile compliance is unverified before exploration and design. These warnings are advisory and must not terminate the pipeline.
 
 ## Invocation
 
-```
-crucible:prospector                        # default — explore for all friction types
-crucible:prospector --focus testability     # narrow: where is testing painful?
-crucible:prospector --focus coupling        # narrow: where does change ripple?
-crucible:prospector --focus complexity      # narrow: where are things over-engineered?
-crucible:prospector --focus depth           # narrow: Ousterhout deep modules lens
-```
+Select improvement-discovery mode from user intent. If user narrows discovery, use `focus: testability|coupling|complexity|depth` as internal guidance; the default explores all friction types.
 
-Default mode uses the full friction example set. A `--focus` flag swaps in a targeted subset of guiding questions. The explorer is still organic — it can report friction outside its focus — but the focus tells it where to start looking.
+Default improvement discovery uses the full friction example set. A requested focus swaps in a targeted subset of guiding questions. The explorer is still organic — it can report friction outside its focus — but the focus tells it where to start looking.
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -139,7 +141,7 @@ This block is passed to the explorer agent, all root cause agents, all analysis 
 
 ### Pre-Exploration Context
 
-- **RECOMMENDED:** Consult `crucible:cartographer-skill` (consult mode) — load known module boundaries, conventions, landmines
+- **RECOMMENDED:** Consult `/recon` persistent-map mode — load known module boundaries, conventions, landmines
 - **RECOMMENDED:** Consult `crucible:getting-started` (`forge.md`) (feed-forward mode) — check past retrospectives for known pain points
 
 ### Write Invocation State
@@ -150,7 +152,7 @@ At run start, write `scratch/<run-id>/invocation.md` containing:
 
 ### The Organic Explorer
 
-Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./explorer-prompt.md`
+Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./prospector/explorer-prompt.md`
 
 The explorer receives:
 - Cartographer data (if available) — module map, conventions, landmines
@@ -222,7 +224,7 @@ After user approves exploration results, trace the causal origin of each approve
 
 ### Genealogist Agents
 
-Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
+Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./prospector/genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
 
 ### Enhanced Output: Change Metrics
 
@@ -269,7 +271,7 @@ Root cause agents are dispatched only for **High-severity** friction points. In 
 
 ### Agent Spec
 
-Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./root-cause-prompt.md`.
+Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./prospector/root-cause-prompt.md`.
 
 Each agent receives:
 - Friction point description and file locations
@@ -332,7 +334,7 @@ Before writing the draft, the orchestrator also checks whether any Medium/Low-se
 
 ## Phase 3: Structured Analysis (Enhanced)
 
-The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
+The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./prospector/analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
 
 ### Trajectory Context Loading
 
@@ -475,7 +477,7 @@ Write to `scratch/<run-id>/problem-frame.md`.
 
 ### Constraint Selection
 
-The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
+The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](prospector/REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
 
 **Friction-type-to-constraint mapping (canonical, in REFERENCE.md):**
 
@@ -521,7 +523,7 @@ The decision journal must log which constraint set was selected and which overri
 
 ### Design Agent Dispatch
 
-Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./design-competitor-prompt.md`.
+Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./prospector/design-competitor-prompt.md`.
 
 Each agent receives (subject to 2000-line hard cap):
 - Technical brief from the analysis output (interface surface, caller patterns, structural summary)
@@ -571,19 +573,20 @@ User selects a design, accepts the recommendation, or requests a hybrid. Orchest
 
 ## Phase 8: Output
 
-### Design Doc
+### Design Proposal → Design Skill
 
-Write a design doc to `docs/plans/YYYY-MM-DD-prospector-<topic>-design.md` where `<topic>` is a kebab-case slug derived from the selected candidate's name, truncated to 40 characters. If the file already exists, append a numeric suffix (`-2`, `-3`). The doc contains:
+The competing redesign proposals are discovery output, not a completed design. Return a concise handoff to `/design` containing:
 
-- **Friction analysis** — what was found and why it matters
-- **Friction genealogy** — causal origin, key commits, how the friction developed (if genealogy data available)
-- **Chosen design** — interface, usage, hidden complexity, dependency strategy, testing strategy
-- **Competing designs summary** — what was considered and why the winner was chosen
-- **Implementation recommendations** — durable architectural guidance not coupled to current file paths
+- **Friction evidence:** affected paths, impact, frequency, and why the issue matters.
+- **Genealogy and root cause:** causal origin, relevant commits, verified root-cause hypothesis, and unresolved uncertainty.
+- **Chosen proposal:** selected approach and rationale, while preserving the alternatives and reasons rejected.
+- **Constraints for design:** interface boundaries, dependencies, hidden complexity, testing considerations, and implementation recommendations.
+
+Do not write a design document here. `/design` owns design decisions and quality-gated design artifacts.
 
 ### Trajectory Snapshot
 
-At the end of every run — regardless of whether the user proceeds to build, files an issue, or keeps the design doc — the orchestrator writes a friction trajectory snapshot to persistent storage.
+At the end of every run — regardless of whether the user proceeds to `/design`, files an issue, or keeps the proposal — the orchestrator writes a friction trajectory snapshot to persistent storage.
 
 **File:** `~/.claude/projects/<project-hash>/memory/prospector/trajectory.jsonl`
 
@@ -605,29 +608,29 @@ The trajectory file is append-only. Each run appends N lines (one per approved f
 
 ### User Choice
 
-After saving the design doc, ask the user:
+After presenting the selected proposal, ask the user:
 
-> "Design doc saved. Would you like to:
-> (a) File this as an issue in your tracker
-> (b) Kick off build in refactor mode to implement it
-> (c) Just keep the design doc for now
+> "Would you like to:
+> (a) Develop this proposal with `/design`
+> (b) File the friction findings as an issue in your tracker
+> (c) Keep the proposal for now
 > (d) Explore another candidate from the list"
 
-**Option (a):** File as an issue using whatever tools are available in the environment. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
+**Option (a):** Invoke `/design` with the selected proposal and supporting friction analysis. `/design` owns creating and quality-gating any design doc. If the user later asks to implement it, `/build` runs its own Phase 1 normally (including blast radius analysis, impact manifest, and contract tests).
 
-**Option (b):** Invoke `crucible:build` in refactor mode. The user provides the prospector design doc as context for build's interactive design phase. Build runs its own Phase 1 normally (including blast radius analysis, impact manifest, contract tests).
+**Option (b):** File the friction findings as an issue using available tracker tools. Tracker-agnostic — no hardcoded assumption about GitHub, Jira, Linear, or anything else. If tracker preference isn't stored, ask the user. Persist preference.
 
-**Option (c):** Done. Design doc is committed and available for future reference.
+**Option (c):** Return the concise proposal and its evidence in this run's output. No design doc is created.
 
-**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). New candidate's design doc saved alongside the first.
+**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). Return the newly selected proposal to `/design` if chosen.
 
 ### End-of-Run Cleanup
 
-Delete `scratch/<run-id>/` after all Phase 8 actions are complete (design doc saved, issue filed if requested, or build handoff initiated).
+Delete `scratch/<run-id>/` after all Phase 8 actions are complete (proposal handed to `/design`, issue filed if requested, or concise proposal returned).
 
 ### Cartographer Recording
 
-After Phase 8, dispatch `crucible:cartographer-skill` (record mode) with the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
+After Phase 8, use `/recon` persistent-map mode to record the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
 
 ## Dependency Categories
 
@@ -668,7 +671,7 @@ After context compaction:
 ## Guardrails
 
 **The explorer must NOT:**
-- Modify any code (prospector is read-only until output phase)
+- Modify any code (recon improvement discovery remains read-only)
 - Follow rigid heuristics — explore organically
 - Report friction without specific file/location evidence
 
@@ -702,29 +705,30 @@ After context compaction:
 
 ## Integration
 
-- **Consults:** `crucible:cartographer-skill` (consult mode), `crucible:getting-started` (`forge.md`) (feed-forward mode)
-- **Records to:** `crucible:cartographer-skill` (record mode) — user-approved friction point locations and classifications only
-- **Hands off to:** `crucible:build` (refactor mode) — design doc becomes context for build's design phase
-- **Complementary to:** `crucible:audit` — audit finds bugs, prospector finds structural improvements. Run prospector before audit when both are planned.
+- **Consults:** `/recon` persistent-map mode, `crucible:getting-started` (`forge.md`) (feed-forward mode)
+- **Records to:** `/recon` persistent-map mode — user-approved friction point locations and classifications only
+- **Hands off to:** `/design` — develops selected redesign proposal into a design doc; `/build` may then implement approved design
+- **Complementary to:** `crucible:audit` — audit finds systemic defects, recon improvement discovery finds structural improvements. Run discovery before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
-- **Does NOT use:** `crucible:quality-gate` (prospector is advisory, not a fix loop), `crucible:quality-gate (red-team mode)`
-- **Does not dispatch /recon** -- organic exploration serves a different purpose than structured investigation. Does not dispatch /design approach evaluation -- competing redesign exploration is more specialized than that subflow for this use case. See #147 for rationale.
+- **Does NOT use:** `crucible:quality-gate` (improvement discovery is advisory, not a fix loop), `crucible:quality-gate` red-team mode.
+- Does not dispatch task investigation; organic exploration serves a different purpose than structured investigation. It does not dispatch design approach evaluation; competing redesign exploration is a distinct discovery output. See #147 for rationale.
+- **Triggered by:** user requests for prospector-style architectural friction discovery, refactor candidates, or “what should I refactor?”
 
 ## Subagent Dispatch Summary
 
 | Agent | Model | Dispatch | Prompt Template |
 |-------|-------|----------|-----------------|
-| Organic Explorer | Opus | Agent tool (Explore) | `./explorer-prompt.md` |
-| Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./genealogist-prompt.md` |
-| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./root-cause-prompt.md` |
-| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./analysis-prompt.md` |
-| Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./design-competitor-prompt.md` |
+| Organic Explorer | Opus | Agent tool (Explore) | `./prospector/explorer-prompt.md` |
+| Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./prospector/genealogist-prompt.md` |
+| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./prospector/root-cause-prompt.md` |
+| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./prospector/analysis-prompt.md` |
+| Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./prospector/design-competitor-prompt.md` |
 
 ## Prompt Templates
 
-- `./explorer-prompt.md` — Phase 1 organic exploration dispatch
-- `./genealogist-prompt.md` — Phase 1.5 git archaeology, causal origin classification, and change metrics
-- `./root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
-- `./analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
-- `./design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
-- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria
+- `./prospector/explorer-prompt.md` — Phase 1 organic exploration dispatch
+- `./prospector/genealogist-prompt.md` — Phase 1.5 git archaeology, causal origin classification, and change metrics
+- `./prospector/root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
+- `./prospector/analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
+- `./prospector/design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
+- `./prospector/REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria

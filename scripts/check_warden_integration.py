@@ -234,7 +234,7 @@ After all tasks complete:
    runs temper + delve + red-team + siege + inquisitor. Do NOT separately invoke
    temper / inquisitor / siege / quality-gate here — warden is the sole gate.
 7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode).
-8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (record mode).
+8. **RECOMMENDED SUB-SKILL:** Use /recon persistent-map mode (record mode).
 11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's warden call**
     (warden already ran in build Phase 4 — the structural double-temper kill).
 
@@ -291,7 +291,7 @@ def selftest() -> int:
 
     # A2 BAD: a residual `Use crucible:temper` dispatch INSIDE the Phase-4 slice.
     a2_bad = _GOOD_BUILD.replace(
-        "8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (record mode).",
+        "8. **RECOMMENDED SUB-SKILL:** Use /recon persistent-map mode (record mode).",
         "8. **REQUIRED SUB-SKILL:** Use crucible:temper on the implementation.")
     assert any(e.startswith("A2") for e in check_build(a2_bad)), (
         f"A2 (residual temper in Phase-4) should fire, got: {check_build(a2_bad)}")

@@ -334,8 +334,8 @@ Append external perspectives per dimension alongside the host subagent's finding
 - **Called by:** `crucible:build` (Phase 3 per-task; Phase 4 full-feature after temper, before quality-gate)
 - **Dispatches:** Per-task subagent using `./break-it-prompt.md`; full-feature mode uses 5 parallel subagents (one per dimension) using `./inquisitor-prompt.md`
 - **May dispatch:** Fixer subagents for FAIL results, lightweight temper if fix touches 3+ files
-- **Uses:** `crucible:cartographer-skill` context (when available) for module-aware attack surface analysis
-- **Per-task dispatch template:** `break-it-prompt.md`
+- **Uses:** `/recon` persistent-map mode context (when available) for module-aware attack surface analysis
+- **Per-task dispatch template:** `break-it-prompt.md` (absorbed from adversarial-tester)
 - **Full-feature prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)
 
 **Multi-model consensus:** Not applicable. Inquisitor dimensions write and run executable tests, requiring local filesystem and test runner access. See `skills/quality-gate/consensus-mechanism.md` for exclusion rationale.
