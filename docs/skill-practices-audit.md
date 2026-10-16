@@ -21,7 +21,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | project-init | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | prospector | FAIL | FAIL | PASS | PASS | PASS | FAIL |
-| quality-gate | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
+| quality-gate | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | recon | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | replay | PASS | PASS | PASS | PASS | PASS | PASS |
 | review-feedback | PASS | FAIL | PASS | PASS | PASS | FAIL |
@@ -35,7 +35,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 23/32 | 13/32 | 32/32 | 24/32 | 25/32 | 7/32 |
+| TOTAL | 22/31 | 12/31 | 31/31 | 23/31 | 24/31 | 6/31 |
 
 ## Violations (82)
 
@@ -61,9 +61,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `project-init` Frontmatter (1): description should use third-person, not first/second-person voice
 - `prospector` Body (1): 726 body lines (max 500)
 - `prospector` Contents (1): skills/prospector/REFERENCE.md: >100 lines, no contents list in first 20
-- `quality-gate` Body (1): 1854 body lines (max 500)
-- `quality-gate` Contents (3): skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
-- `quality-gate` Scripts (1): SKILL.md:907: script step lacks nearby dependency/setup note (heuristic)
+- `quality-gate` Contents (1): skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `recon` Body (1): 893 body lines (max 500)
 - `recon` Contents (1): skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20
 - `review-feedback` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
