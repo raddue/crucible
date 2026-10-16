@@ -1,9 +1,0 @@
-{
-  "_provenance": "Authored BY HAND from skills/warden/SKILL.md against the descriptor (see provenance.md). NOT copied from a live run. The scorer is a pure field comparator and does not derive this from the per-leg vector.",
-  "fixture_id": "tw1-single-gate-trip",
-  "expected": {
-    "reviewer_set": ["temper", "delve", "red-team", "siege", "inquisitor"],
-    "verdict": "BLOCKED",
-    "block_reason": "red-team leg: quality-gate verdict != PASS (Significant>0) after its fix loop terminated — the disjunction of native gates trips on this single leg"
-  }
-}

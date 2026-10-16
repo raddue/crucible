@@ -1,5 +1,9 @@
 # Eval Results
 
+Published evidence stays here. Private harnesses and corpora referenced below
+moved to `raddue/crucible-eval` in #460; historical paths and measurements are
+preserved as recorded, not claims that those files remain in this checkout.
+
 Crucible skills are evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). 12 skills carry **execution evals** (the table below); a separate **sequence-eval** suite covers ordering boundaries (further down). This is the same eval methodology Anthropic built for measuring whether skills actually improve output quality — we use it here to prove that Crucible's skills deliver measurable value, not just vibes.
 
 ## How It Works
@@ -52,7 +56,7 @@ The `/recon` consolidation adds task investigation, whole-repo onboarding, persi
 
 ## Issue #720: skill-suite audit → anvil
 
-A paired old-audit/merged-anvil behavioral A/B was not run. The source audit instructions were copied into `skills/anvil/references/skill-audit.md`, with command and cache paths retargeted; no model outputs were graded and no performance delta is claimed. Four skill-selection cases were added for full-suite health, cached quick scan, efficiency reporting, and anvil's existing single-skill edit/eval workflow; these fixtures have not been run as a live routing eval. Run a matched paired eval before claiming behavioral parity.
+A paired old-audit/merged-anvil behavioral A/B was not run. The source audit instructions were copied into `skills/anvil/references/skill-audit.md`, with command and cache paths retargeted; no model outputs were graded and no performance delta is claimed. Four skill-selection cases live in `skills/anvil/evals/routing.json` for full-suite health, cached quick scan, efficiency reporting, and anvil's existing single-skill edit/eval workflow; these fixtures have not been run as a live routing eval. The selection harness moved to `crucible-eval` in #739. Run a matched paired eval before claiming behavioral parity.
 
 ## Issue #720: review-feedback → temper (2026-10-15)
 

@@ -10,7 +10,7 @@ def test_audit_mode():
     skill = (ROOT / "skills/anvil/SKILL.md").read_text()
     audit = (ROOT / "skills/anvil/references/skill-audit.md").read_text()
     description = skill.split("---", 2)[1]
-    cases = json.loads((ROOT / "skills/skill-selection-evals/evals/evals.json").read_text())["evals"]
+    cases = json.loads((ROOT / "skills/anvil/evals/routing.json").read_text())["evals"]
     assert not (ROOT / "skills/stocktake").exists()
     assert len(skill.splitlines()) <= 500
     assert "## Contents" in skill

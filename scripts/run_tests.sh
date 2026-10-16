@@ -28,15 +28,8 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]
 cd "$REPO_ROOT" || exit 1
 
 # --- One invocation at a time, per checkout (round-1/C3-R1-S5) --------------------
-# Two invocations in flight against the same checkout do NOT produce an independent
-# second reading of the suite; they corrupt each other. Reproduced: three concurrent
-# runs, one of which failed `pytest skills/siege/evals/` with
-# `FileNotFoundError: skills/siege/evals/last_run.json` — that suite save-restores a
-# path INSIDE the checkout (`_EVALS_DIR / "last_run.json"`, mirrored in delve's), so
-# run B's tearDown unlinks the file run A is between writing and reading. Nothing about
-# it is a regression, and per-invocation scratch directories cannot fix it: the shared
-# fixture is a repo path, not a temp one. Serializing here is what makes a concurrent
-# invocation safe, and it is cheap — the second run waits instead of lying.
+# Serialize concurrent invocations against one checkout. Several suites use
+# checkout-local scratch state, so a second run is not independent evidence.
 #
 # The lock is taken on THIS SCRIPT: no new file, no gitignore question, correct in a
 # git worktree, and per-checkout by construction. A fixed lock path under /tmp was
@@ -66,11 +59,8 @@ fi
 # and both resolve against $TMPDIR — by default the SHARED /tmp. Two invocations in
 # flight at once therefore share one temp namespace. Individual scratch DIRECTORIES are
 # already unique (`TemporaryDirectory()` / `mktemp -d`), but the NAMESPACE is not, so any
-# suite that reasons about the namespace rather than about its own directory — e.g.
-# `skills/inquisitor/evals/test_fixtures.py`, which globs `gettempdir()/variant-*` before
-# and after a call to assert the fixture cleaned up after itself — sees the other run's
-# files and goes red for a reason that is not a regression. A spurious RED is the same
-# class of defect as a spurious GREEN: both make the suite unusable as evidence.
+# suite that reasons about the namespace rather than its own directory sees the
+# other run's files and goes red for a reason that is not a regression.
 # Scoping $TMPDIR here removes the class for every suite at once, and costs one mkdir.
 _SUITE_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/crucible-suite-XXXXXXXX")" || exit 1
 export TMPDIR="$_SUITE_TMPDIR"
@@ -184,7 +174,6 @@ run python3 scripts/check_canonical_links.py
 run python3 scripts/test_ci_fail_gaps.py
 run python3 scripts/check_conflict_markers.py
 run python3 scripts/check_machine_paths.py
-run python3 scripts/check_evals_consistency.py
 run python3 scripts/test_anvil_audit_mode.py
 run python3 scripts/catalog.py check
 # Design's decision-record output retains the ADR integrity gate after skill consolidation.
@@ -269,6 +258,8 @@ run python3 scripts/test_qg_fix_pin.py
 
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
+# Implementation-level compass regression corpus stays with scripts/compass.py.
+run python3 -m pytest eval/compass/ -q
 
 # --- orchestrator fleet-file CRUD (skills/orchestrator step 2) ---
 run python3 scripts/test_orchestrator_fleet.py
@@ -309,64 +300,8 @@ run python3 scripts/check_ledger_append_doc_drift.py
 run python3 scripts/check_rt_receipt_contract.py --selftest
 run python3 scripts/check_rt_receipt_contract.py
 
-# --- Inquisitor eval harness (#424) ---
-run python3 scripts/check_inquisitor_helper_drift.py --selftest
-run python3 scripts/check_inquisitor_helper_drift.py
-run python3 scripts/check_judge_prompt_contract.py --selftest
-run python3 scripts/check_judge_prompt_contract.py
-run python3 scripts/check_ground_truth_provenance.py --selftest
-run python3 scripts/check_ground_truth_provenance.py
-run python3 scripts/check_inquisitor_secondary_count.py --selftest
-run python3 scripts/check_inquisitor_secondary_count.py
-run python3 skills/inquisitor/evals/test_run_evals_stage.py
-run python3 skills/inquisitor/evals/test_run_evals_score.py
-run python3 skills/inquisitor/evals/test_runid.py
-# --- Phase 1b: seeded-repo fixtures + variant materialization + oracle (#424) ---
-run python3 skills/inquisitor/evals/test_fixtures.py
-run python3 skills/inquisitor/evals/test_oracle.py
-run python3 skills/inquisitor/evals/test_run_evals_exec.py
-run python3 skills/inquisitor/evals/test_build_collect_args.py
-run python3 scripts/check_fixture_independence.py --selftest
-run python3 scripts/check_fixture_independence.py
-run python3 scripts/check_fixture_gt_provenance.py --selftest
-run python3 scripts/check_fixture_gt_provenance.py
-run python3 scripts/check_fixture_producer_blind.py --selftest
-run python3 scripts/check_fixture_producer_blind.py
-run python3 scripts/check_inquisitor_phase1b_invariants.py --selftest
-run python3 scripts/check_inquisitor_phase1b_invariants.py
-
-# --- Minimalism-ladder eval harness (#425) ---
-# REQUIRES pytest (uses parametrize/fixtures); CI provisions pytest==9.0.3. The
-# suite has two -m pytest lines (this and skills/temper/evals/ below) — bare
-# `python3 file.py` would silently skip the pytest-collected tests.
-run python3 -m pytest skills/build/evals/minimalism-ladder/ -q
-
-# --- Temper eval harness (#290/#297/#424) — pytest-collected ---
-# Gated here (#404): previously UNRUN. The temper/evals tests are pytest-collected
-# (bare `python3 file.py` silently skips them), and no -m pytest line covered them,
-# so CI never exercised temper/evals at all — the 162 tests behind temper's
-# run_evals stage/score, convergence_runner, _dispatch_paths, _runid, legacy modes,
-# global expectations, and the #297 inquisitor-dimension suites.
-run python3 -m pytest skills/temper/evals/ -q
-
-# --- Delve eval harness (#373) ---
-run python3 -m pytest skills/delve/evals/ -q
-run python3 scripts/check_delve_helper_drift.py --selftest
-run python3 scripts/check_delve_helper_drift.py
-run python3 scripts/check_delve_gt_provenance.py --selftest
-run python3 scripts/check_delve_gt_provenance.py
-
-# --- Siege eval harness (#373) ---
-run python3 -m pytest skills/siege/evals/ -q
-run python3 scripts/check_siege_helper_drift.py --selftest
-run python3 scripts/check_siege_helper_drift.py
-run python3 scripts/check_siege_gt_provenance.py --selftest
-run python3 scripts/check_siege_gt_provenance.py
-
-# --- warden eval harness (#464) ---
-run python3 -m pytest skills/warden/evals/ -q
-run python3 scripts/check_warden_helper_drift.py --selftest
-run python3 scripts/check_warden_helper_drift.py
+# Eval-only harnesses and corpora run in private raddue/crucible-eval CI (#460).
+# Crucible keeps implementation and protocol regression checks below.
 
 # --- AACR-Bench review-gate measurement core (#631) ---
 run python3 scripts/test_aacr_bench_measure.py

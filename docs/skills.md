@@ -64,12 +64,4 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. Includes the five-level trust hierarchy (L1 Trusted → L5 Untrusted) framework for resolving conflicts between loaded content from different sources. Also the session-continuity hub: bundled flat references for compass arc state (`docs/compass.md` read/update/doctor/compress), forge retrospectives / feed-forward / 10+-retro mutation proposals, handoff docs, recall session-history queries, and the workshop catalog tour. |
 | **orchestrator** | Use when the user wants a Claude Code session inside Herdr (a terminal multiplexer for coding agents) to act as the "team boss" driving multiple parallel Crucible worker sessions — spinning workers up, checking on them, retiring them, and reporting consolidated status. Trigger on "orchestrator", "team boss", "coordinate sessions", "spin up workers", "Herdr orchestrator", or any request to fan Crucible work out across several live Herdr sessions rather than do it all in this one session. Requires HERDR_ENV=1 — if this session isn't inside Herdr, say so and stop rather than trying to substitute a different fan-out mechanism (that's `batch`/`convoy`'s job, not this skill's). |
 
-## Eval & Maintenance (internal)
-
-| Skill | Description |
-|---|---|
-| **temper-eval-collect** | Live-dispatch phase of temper eval harness. Reads stage-manifest.json from a pre-staged dispatch dir; fans Task-tool reviewer dispatches in parallel (max 6); writes per-seq result files; exits. Single bounded session. Pairs with `python -m skills.temper.evals.run_evals stage` and `score`. |
-| **temper-eval-calibrate** | Wrapper skill that runs k iterations of (stage → collect-behavior → score) for #290 calibration sweeps. Replaces bash for-loops that cannot invoke session skills. Default k=3. Inlines collect-dispatch behavior per iteration. Idempotent resume via per-iteration sentinels under skills/temper/evals/.calibrate-state/. |
-| **skill-selection-evals** | Eval-only skill for measuring skill routing accuracy. Not invoked directly — contains selection evals that test whether the agent picks the correct skill for a given prompt. |
-
 <!-- CATALOG:END -->

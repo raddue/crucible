@@ -40,7 +40,7 @@ Cool? Cool.
 
 ## Skill-suite audit mode
 
-For skill-set overlap, staleness, broken-reference, quality, or efficiency audits, read and follow `references/skill-audit.md` in full. This mode audits the suite; it does not create or edit skills without explicit confirmation. For new/modified skills and A/B evals, use the creation workflow below.
+For skill-set overlap, staleness, broken-reference, quality, or efficiency audits, read and follow `references/skill-audit.md` in full. This mode audits the suite; it does not create or edit skills without explicit confirmation. Routing cases for this mode live in `evals/routing.json`. For new/modified skills and A/B evals, use the creation workflow below.
 
 ## Communicating with the user
 
