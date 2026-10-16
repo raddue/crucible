@@ -63,9 +63,6 @@ These skills require features specific to Claude Code. They will not work on oth
 | getting-started (recall reference) | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
 | quality-gate consensus mechanism | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
-| temper-eval-calibrate | Session-dispatch eval harness (Claude Code) | Wraps live session invocations; no portable equivalent |
-| temper-eval-collect | Task-tool parallel reviewer dispatch (Claude Code) | Live reviewer dispatch is harness-specific |
-| skill-selection-evals | Anthropic skill-creator eval harness (anvil's ancestor) | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |
 
 ## Platform-Specific References
 
