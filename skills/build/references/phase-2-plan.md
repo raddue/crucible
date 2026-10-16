@@ -10,7 +10,7 @@
 
 ## Phase 2: Plan (Autonomous)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, design innovation pass, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, design innovation pass, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. The substitution does not change Phase 2's structure or the gate-ledger writes.
 
 ### Step 1: Write the Plan
 
@@ -55,7 +55,7 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 1. **Write Phase 2 IN_PROGRESS** to the gate ledger.
 2. **Innovation:** Run `crucible:design` in innovation-pass mode (`design/innovation.md`) on the approved plan. Plan Writer incorporates the proposal into the plan.
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: plan`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
-4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
+4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification in `references/gate-ledger.md`). Delete the verdict marker after writing the ledger entry.
 
 The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.
 

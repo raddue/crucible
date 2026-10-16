@@ -14,7 +14,7 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 All subagent returns use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (Tier 1 structural + Tier 2 witness verification — full grammar in the shared convention) to every Task return before acting on the declared VERDICT. The linter is a deterministic runtime tool: orchestrators MUST run the installed write-boundary wrapper `/usr/local/libexec/crucible/rcpt-verify` (never a bare PATH lookup) when it is present — identical flags, and the wrapper's absence is never a failure (opt-in hardening, AC-25) — else the direct `python3 scripts/rcpt_verify.py --tier2 --strict --root <dispatch-root> --ledger <dispatch-root>/receipt-ledger.jsonl <receipt>` on every received receipt before acting on its VERDICT, and apply the shared convention's in-context pseudocode ONLY as the fallback when the tool is unavailable (`--root` is repeatable, but build passes exactly one — the dispatch root; a sha256 mismatch on any resolved artifact hard-FAILs with or without `--strict`, `--strict` additionally hard-FAILs a path-shaped name that neither the dispatch root nor its git toplevel holds, and under a single root the cross-root ambiguity hard-FAIL cannot arise at all — an unresolvable bare basename is UNVERIFIABLE, never a false FAIL). A lint failure is treated as structurally `BLOCKED`.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
-The orchestrator maintains a per-run Invariant Cairn at `~/.claude/projects/<project-hash>/memory/cairn/cairn-<run-id>.md` per `shared/cairn-convention.md`. See the `## Cairn (Layer 3)` section below for build-specific phase definitions, terminal condition, and mandatory-invariant categories.
+The orchestrator maintains a per-run Invariant Cairn at `~/.claude/projects/<project-hash>/memory/cairn/cairn-<run-id>.md` per `shared/cairn-convention.md`. See the `## Cairn (Layer 3)` section in `references/runtime-protocols.md` for build-specific phase definitions, terminal condition, and mandatory-invariant categories.
 
 End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
@@ -111,7 +111,7 @@ Before dispatching the design skill, determine whether this build is:
 
 **Detection:** If the user's intent is ambiguous, ask directly before proceeding:
 
-> "Is this adding new behavior, or restructuring existing code without changing what it does?"
+> "Is this adding new behavior, or restructuring existing code without changing what it does, or migrating a framework/dependency/API version?"
 
 The user's answer sets the mode for the entire pipeline. No special syntax needed.
 
@@ -139,7 +139,7 @@ Build's existing compaction step must read the Compression State FIRST (step 0 f
 
 ## Phase 4: Completion
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the temper, inquisitor, optional siege, quality-gate, forge, cartographer, and finish dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. Local test-suite execution (`pytest`, etc.) runs normally — substitution applies only to subagent dispatches.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the temper, inquisitor, optional siege, quality-gate, forge, cartographer, and finish dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. Local test-suite execution (`pytest`, etc.) runs normally — substitution applies only to subagent dispatches.
 
 After all tasks complete:
 
@@ -155,7 +155,7 @@ After all tasks complete:
    - There is **NO bare "assert-clean" branch.** An assert-clean would spuriously halt a *healthy* build whenever a passing test regenerates a golden file, and untracked test residue would make the review gate REFUSE inside a healthy build. build must **produce** the clean tree, not merely check for one.
    - A tree that is **still** dirty or untracked *after* the commit/gitignore step is a **surfaced build/test defect** — surface it (error out) and stop; do NOT silently sweep it into the gate's first commit. End state: `git status --porcelain` empty (tracked **and** untracked), identical to the review gate's entry precondition.
 3. **REQUIRED REVIEW AND SUPPLY-CHAIN SIGNALS:** Use crucible:warden on the full implementation and dispatch `crucible:quality-gate` **dependency-audit mode** (`dependency-audit.md`, `scope_root` = project root) in parallel. They consume the same code artifact but not each other's findings. Pass warden `reviewer-set: full`, `Phase: code`, and `PipelineID: <current PipelineID>`; warden runs temper + delve + red-team[quality-gate leg] + siege[conditional] + inquisitor[unconditional in full], drives and commits its fixes, and emits the aggregate review marker. The dependency-audit mode writes its separate `audit-results.md` signal; it does not enter the red-team loop and is not part of warden's weighted score. Await both. On either warden `BLOCKED` or audit `Result: BLOCKED`, halt Phase 4 (fail-closed); surface audit FINDINGS/INCONCLUSIVE/FAILED separately, never as a clean audit. Do NOT separately invoke other reviewer legs or another full quality-gate; warden remains the sole code-review gate-driver (I-W4).
-6b. **Verify warden's aggregate verdict marker and integrate the independent dependency-audit result before writing Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
+6b. **Verify warden's aggregate verdict marker and integrate the independent dependency-audit result before writing Phase 4 PASS** to the gate ledger (see Verdict Marker Verification in `references/gate-ledger.md`). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
 7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:

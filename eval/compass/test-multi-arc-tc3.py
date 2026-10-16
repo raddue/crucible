@@ -238,6 +238,7 @@ def test_tc3_11_integration_sites_never_update_open_loops_directly(tmp_path):
         repo_root / "skills" / "getting-started" / "SKILL.md",
         repo_root / "skills" / "getting-started" / "compass.md",
         repo_root / "skills" / "build" / "SKILL.md",
+        repo_root / "skills" / "build" / "references" / "phase-1-design.md",
         repo_root / "skills" / "finish" / "merge.md",
         repo_root / "skills" / "finish" / "SKILL.md",
     ]

@@ -39,7 +39,7 @@ The **siege** skill performs security audits — 6 parallel attacker-perspective
 
 ## Crash recovery and A/B experimentation
 
-The **replay** skill provides crash recovery and A/B experimentation for any pipeline. When a build crashes at Phase 4, replay reads the dispatch manifest, verifies completed artifacts, restores the checkpoint, and resumes from the first incomplete entry — 10 minutes instead of 90. For A/B testing, `--mutate` swaps dispatch templates and replays historical pipelines to measure skill changes. Build, debugging, spec, and migrate all write pipeline-active markers for automatic crash detection.
+The **replay** skill provides crash recovery and A/B experimentation for any pipeline. When a build crashes at Phase 4, replay reads the dispatch manifest, verifies completed artifacts, restores the checkpoint, and resumes from the first incomplete entry — 10 minutes instead of 90. For A/B testing, `--mutate` swaps dispatch templates and replays historical pipelines to measure skill changes. Build, debugging, spec, and build's migration mode (marker skill `migrate`) all write pipeline-active markers for automatic crash detection.
 
 ## Session continuity
 

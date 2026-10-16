@@ -74,8 +74,8 @@ class BuildSplit(unittest.TestCase):
         self.assertFalse((ROOT / "skills/migrate").exists())
         tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,
                                  check=True).stdout.split()
-        stale = re.compile(r"crucible:migrate|skills/migrate/|`/migrate`|\(/migrate\b")
-        skip = ("docs/plans/", "docs/research/", "CHANGELOG.md", "scripts/test_build_split.py")
+        stale = re.compile(r"crucible:migrate|skills/migrate/|(?<![-\w./])/migrate(?![-\w./])")
+        skip = ("docs/plans/", "docs/research/", "CHANGELOG.md", "docs/evals.md", "scripts/test_build_split.py")
         hits = [f for f in tracked if not f.startswith(skip) and (ROOT / f).is_file()
                 and stale.search((ROOT / f).read_text(encoding="utf-8", errors="ignore"))]
         self.assertEqual(hits, [])

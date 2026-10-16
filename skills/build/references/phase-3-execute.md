@@ -14,7 +14,7 @@
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
 
 ### Step 0: Load Module Context for Subagents
 

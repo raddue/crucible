@@ -1,6 +1,6 @@
 # Build — Migration Mode
 
-Migration mode is the absorbed `migrate` skill (#720), invoked from build's Mode Detection. Everything below is the original migrate runbook, preserved verbatim apart from invocation naming. "Dispatch build" means: run build's own Phase 1–4 pipeline (SKILL.md) for that migration phase in the named feature or refactor mode — build's phase flow itself is unchanged. Prompt template paths (`./*-prompt.md`) are relative to `skills/build/`. The `migrate` value in the pipeline-active marker, status file `Skill:` field and scratch path is kept so existing hooks and recovery state keep working.
+Migration mode is the absorbed `migrate` skill (#720), invoked from build's Mode Detection. Everything below is the original migrate runbook, preserved verbatim apart from invocation, announce and purpose naming. "Dispatch build" means: run build's own Phase 1–4 pipeline (SKILL.md) for that migration phase in the named feature or refactor mode — build's phase flow itself is unchanged. Prompt template paths (`./*-prompt.md`) are relative to `skills/build/`. The `migrate` value in the pipeline-active marker, status file `Skill:` field and scratch path is kept so existing hooks and recovery state keep working.
 
 ## Contents
 

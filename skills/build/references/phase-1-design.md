@@ -92,7 +92,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, design's innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, design's innovation pass, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
 ### Step 2: Innovate and Red-Team the Design
 
@@ -104,7 +104,7 @@ After the user approves the design and before starting Phase 2:
 2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
 3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: design`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
-5. **Verify verdict marker and write Phase 1 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
+5. **Verify verdict marker and write Phase 1 PASS** to the gate ledger (see Verdict Marker Verification in `references/gate-ledger.md`). Delete the verdict marker after writing the ledger entry.
 6. Design doc is now finalized — proceed to acceptance tests.
 
 ### Step 3: Generate Acceptance Tests (RED)
