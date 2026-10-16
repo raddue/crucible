@@ -482,7 +482,6 @@
       "prompt": "I'm new to Crucible. What skills are available and which should I use for what?",
       "expected_skill": "getting-started",
       "common_mistakes": [
-        "getting-started",
         "recon"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",

@@ -59,6 +59,7 @@ A `/anvil` A/B has not been run for this merge. The merge preserves the source `
 
 ## Getting-started bundle A/B (#720, 2026-10-15)
 
+`/anvil` paired the six pre-merge skills against the merged getting-started hub on six dry-run cases. Baseline scored 24/25 expectations; merged scored 25/25, a +4 percentage-point swing (one assertion). This is effectively no change and no regression on the sampled simulations, not evidence from live runs. The result record is `/tmp/720pr.md`; simulation workspace is `skills/getting-started-workspace/iteration-1/` (ignored).
 
 ## Issue #720: Adversarial-Tester Absorption into Inquisitor (matched single-eval A/B, `cx/gpt-6-luna[1m]`)
 
