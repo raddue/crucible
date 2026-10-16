@@ -513,7 +513,7 @@
         "recon"
       ],
       "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
-      "reasoning": "\"Give me a tour\" of the tools routes to getting-started’s workshop tour reference, not codebase onboarding (project-init).",
+      "reasoning": "\"Give me a tour\" of the tools routes to getting-started’s workshop tour reference, not recon whole-repo onboarding.",
       "difficulty": "hard"
     },
     {
