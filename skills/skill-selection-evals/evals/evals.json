@@ -288,7 +288,6 @@
         "build"
       ],
       "common_mistakes": [
-        "build",
         "planning"
       ],
       "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline. Tests design-before-build ordering discipline.",
@@ -305,7 +304,6 @@
         "verify"
       ],
       "common_mistakes": [
-        "debugging",
         "finish"
       ],
       "context": "Active bug requiring investigation, fix, and verified confirmation before deployment.",
@@ -322,10 +320,7 @@
         "planning",
         "build"
       ],
-      "common_mistakes": [
-        "build",
-        "design"
-      ],
+      "common_mistakes": [],
       "context": "User explicitly requests the full pipeline: design exploration, task planning, then implementation.",
       "reasoning": "The user spells out the three-phase cascade: design (explore options, investigate questions), planning (break into tasks with ordering), build (implement). Skipping to build alone misses design exploration. Design alone misses the planning phase that produces the task breakdown. The full sequence ensures each phase informs the next.",
       "difficulty": "hard"
