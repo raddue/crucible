@@ -53,7 +53,6 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 | Skill | Description |
 |---|---|
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
-| **compass** | Read or update the per-repo arc-state file (docs/compass.md). Tracks current arc, last meaningful commit, open loops, next move, and don't-forget items. Auto-maintained by build, merge-pr, finish; read by getting-started. Use "compass read" to inspect project state, "compass update" to set a field, "compass doctor" to validate, "compass compress" when at cap. Triggers on "compass", "current arc", "project state", "what am I working on", "arc state", "where was I". |
 
 ## Utilities
 

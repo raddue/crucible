@@ -868,6 +868,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
 def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     root = Path(tempfile.mkdtemp(dir=tmp))
     skill = root / MERGE_PR_SKILL
+    skill.parent.mkdir(parents=True, exist_ok=True)
     # The `---` frontmatter fences are load-bearing fixture, not decoration: a
     # REMOVED line whose own text starts with `--` renders as `---…` in a diff,
     # which a header filter anchored on a bare `---` prefix silently eats.

@@ -12,20 +12,17 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | debugging | FAIL | PASS | PASS | PASS | FAIL | FAIL |
 | delve | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | design | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
-| distill | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| finish | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
-| forge | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
-| getting-started | PASS | FAIL | PASS | PASS | FAIL | FAIL |
-| handoff | PASS | PASS | PASS | FAIL | FAIL | FAIL |
+| distill | PASS | PASS | PASS | PASS | PASS | PASS |
+| finish | PASS | FAIL | PASS | PASS | FAIL | FAIL |
+| getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| merge-pr | PASS | PASS | PASS | PASS | FAIL | FAIL |
-| migrate | FAIL | FAIL | PASS | PASS | PASS | FAIL |
+| migrate | FAIL | PASS | PASS | PASS | PASS | FAIL |
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | project-init | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | prospector | FAIL | FAIL | PASS | PASS | PASS | FAIL |
-| quality-gate | PASS | FAIL | PASS | PASS | PASS | FAIL |
+| quality-gate | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
 | recon | FAIL | FAIL | PASS | PASS | PASS | FAIL |
 | replay | PASS | PASS | PASS | PASS | PASS | PASS |
 | review-feedback | PASS | FAIL | PASS | PASS | PASS | FAIL |
@@ -39,9 +36,9 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 28/41 | 10/41 | 41/41 | 26/41 | 29/41 | 4/41 |
+| TOTAL | 20/32 | 13/32 | 32/32 | 24/32 | 24/32 | 6/32 |
 
-## Violations (145)
+## Violations (91)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
@@ -51,30 +48,15 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `build` Scripts (4): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic); SKILL.md:337: script step lacks nearby dependency/setup note (heuristic); SKILL.md:592: script step lacks nearby dependency/setup note (heuristic); … and 1 more
 - `cartographer-skill` Frontmatter (1): description should use third-person, not first/second-person voice
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
-- `compass` Contents (1): skills/shared/compass-protocol.md: >100 lines, no contents list in first 20
-- `compass` Scripts (1): SKILL.md:57: script step lacks nearby dependency/setup note (heuristic)
-- `consensus` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `consensus` Frontmatter (1): description lacks when-to-use signal
-- `debugging` Body (1): 1454 body lines (max 500)
-- `debugging` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `debugging` Scripts (2): SKILL.md:517: script step lacks nearby dependency/setup note (heuristic); SKILL.md:1143: script step lacks nearby dependency/setup note (heuristic)
-- `delve` Contents (4): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; … and 1 more
-- `design` Contents (6): skills/design/approach-evaluation.md: >100 lines, no contents list in first 20; skills/design/decision-records.md: >100 lines, no contents list in first 20; skills/design/innovation.md: >100 lines, no contents list in first 20; … and 3 more
+- `debugging` Body (1): 1453 body lines (max 500)
+- `debugging` Scripts (2): SKILL.md:516: script step lacks nearby dependency/setup note (heuristic); SKILL.md:1142: script step lacks nearby dependency/setup note (heuristic)
+- `delve` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
+- `design` Contents (3): skills/design/approach-evaluation.md: >100 lines, no contents list in first 20; skills/design/decision-records.md: >100 lines, no contents list in first 20; skills/design/innovation.md: >100 lines, no contents list in first 20
 - `design` Frontmatter (1): description should use third-person, not first/second-person voice
 - `design` Scripts (1): SKILL.md:40: script step lacks nearby dependency/setup note (heuristic)
-- `distill` Contents (1): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `finish` Contents (2): skills/shared/compass-protocol.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `finish` Frontmatter (1): description should use third-person, not first/second-person voice
-- `finish` Scripts (5): SKILL.md:160: script step lacks nearby dependency/setup note (heuristic); SKILL.md:197: script step lacks nearby dependency/setup note (heuristic); SKILL.md:204: script step lacks nearby dependency/setup note (heuristic); … and 2 more
-- `forge` Body (1): 605 body lines (max 500)
-- `forge` Contents (2): skills/shared/cairn-convention.md: >100 lines, no contents list in first 20; skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20
-- `forge` Frontmatter (1): description should use third-person, not first/second-person voice
-- `getting-started` Contents (2): skills/getting-started/trust-hierarchy.md: >100 lines, no contents list in first 20; skills/shared/compass-protocol.md: >100 lines, no contents list in first 20
-- `getting-started` Scripts (2): SKILL.md:15: script step lacks nearby dependency/setup note (heuristic); SKILL.md:26: script step lacks nearby dependency/setup note (heuristic)
-- `handoff` Frontmatter (1): description lacks when-to-use signal
-- `handoff` Scripts (1): SKILL.md:93: script step lacks nearby dependency/setup note (heuristic)
-- `inquisitor` Contents (2): skills/shared/dispatch-convention.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `merge-pr` Scripts (3): SKILL.md:224: script step lacks nearby dependency/setup note (heuristic); SKILL.md:229: script step lacks nearby dependency/setup note (heuristic); SKILL.md:279: script step lacks nearby dependency/setup note (heuristic)
+- `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
+- `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
+- `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `migrate` Body (1): 549 body lines (max 500)
 - `orchestrator` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
@@ -82,7 +64,9 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `project-init` Frontmatter (1): description should use third-person, not first/second-person voice
 - `prospector` Body (1): 726 body lines (max 500)
 - `prospector` Contents (1): skills/prospector/REFERENCE.md: >100 lines, no contents list in first 20
-- `quality-gate` Contents (1): skills/shared/return-convention.md: >100 lines, no contents list in first 20
+- `quality-gate` Body (1): 1854 body lines (max 500)
+- `quality-gate` Contents (3): skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
+- `quality-gate` Scripts (1): SKILL.md:907: script step lacks nearby dependency/setup note (heuristic)
 - `recon` Body (1): 893 body lines (max 500)
 - `recon` Contents (1): skills/shared/model-tier-policy.md: >100 lines, no contents list in first 20
 - `review-feedback` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
