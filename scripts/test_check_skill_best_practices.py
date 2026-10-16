@@ -113,7 +113,7 @@ def main() -> None:
         skill(root, "one", "# Skill\nSee [broken](references/broken.md).\n")
         assert checker.audit(root)["one"]["Contents"]
         assert checker.main(root) == 0
-        for excluded in ("shared", "skill-selection-evals", "temper-eval-collect", "temper-eval-calibrate"):
+        for excluded in ("shared",):
             skill(root, excluded, "# Skill\n" * 501)
         result = checker.audit(root)
         assert set(result) == {"one", "bad", "bom"}

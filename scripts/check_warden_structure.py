@@ -33,7 +33,7 @@ forbidden construct is found, 1 with a per-clause diff summary otherwise.
 Task 6 adds the marker-ownership (I-W7) / Option-C no-emit / I-W8 / double-run
 (M4) required clauses, plus two scoped command-form negatives: the no-emit guard
 (an imperative `emit`/`ledger_append` call — matched over warden's emission
-surface, SKILL.md PLUS `scripts/check_warden_*.py`, excluding `skills/warden/evals/`
+surface, SKILL.md PLUS `scripts/check_warden_*.py` (eval harness lives in private crucible-eval)
 by construction — while a descriptive `runs.jsonl`/emit prose token does NOT trip)
 and the T-W13 siege-suppression guard (`skip_siege:`/`force_siege:`/`--skip-siege`
 in param/flag form, not a bare substring).
@@ -465,7 +465,7 @@ def check_emission_surface_files() -> list[str]:
     `scripts/check_warden_*.py` — for an imperative ledger emit, on top of
     `skills/warden/SKILL.md` (already scanned by `check_negatives` via
     `check_text`). Together those two are warden's whole emission surface. It does
-    NOT grep the entire `skills/warden/` tree: `skills/warden/evals/` (authored by
+    NOT grep the entire `skills/warden/` tree: private `crucible-eval/skills/warden/evals/` (authored by
     Task 10) legitimately MENTIONS `runs.jsonl` in fixtures/docstrings when
     describing the per-leg self-emit, and is excluded by construction — this scan
     reads only SKILL.md (via `check_text`) + `scripts/check_warden_*.py` here."""

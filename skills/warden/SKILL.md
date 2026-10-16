@@ -641,7 +641,7 @@ red-teaming a typed design/plan stays with quality-gate, and a report-only bug-h
 on a diff stays with delve. warden owns only the *whole-set gate* — the discriminator
 is *whole-set gate* (warden) vs *single reviewer* (temper / quality-gate / delve).
 
-The boundary is asserted by selection-eval prompts in `skills/skill-selection-evals/`.
+The boundary is asserted by selection-eval prompts in the private `raddue/crucible-eval` repo (`skills/skill-selection-evals/`).
 
 ## API Surface
 
@@ -821,15 +821,15 @@ numbers are added.
 
 ## Testing strategy
 
-- **Skill behavior evals** (`skills/warden/evals/`): reviewer-set selection by diff shape,
+- **Skill behavior evals** (private `raddue/crucible-eval`, `skills/warden/evals/`): reviewer-set selection by diff shape,
   disjunctive gate outcomes (per-native-gate trip → BLOCKED), clean-pass, verdict-marker
   emission. Mirror the delve/siege eval-harness pattern (deterministic scorer, CI-gated)
   where the gate logic is mechanical.
-- **Selection-evals** (`skills/skill-selection-evals/`): warden-vs-{temper, quality-gate,
+- **Selection-evals** (private `raddue/crucible-eval`, `skills/skill-selection-evals/`): warden-vs-{temper, quality-gate,
   delve} routing boundary.
 - **Integration**: build Phase 4 + finish mock-dispatch fixtures updated to assert a single
   warden call site and the killed double-temper.
-- Add the new suites to `scripts/run_tests.sh` (single source of truth).
+- Eval-harness suites run in `raddue/crucible-eval` CI; implementation regressions remain in Crucible's `scripts/run_tests.sh`.
 
 ## Failure modes / edge cases
 

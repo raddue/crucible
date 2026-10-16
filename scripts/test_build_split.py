@@ -2,7 +2,6 @@
 """#720/#719: build absorbs migrate as migration mode; build body split into flat references."""
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -82,14 +81,6 @@ class BuildSplit(unittest.TestCase):
         hits = [f for f in tracked if not f.startswith(skip) and (ROOT / f).is_file()
                 and stale.search((ROOT / f).read_text(encoding="utf-8", errors="ignore"))]
         self.assertEqual(hits, [])
-
-    def test_selection_evals_route_migration_to_build(self):
-        evals = json.loads((ROOT / "skills/skill-selection-evals/evals/evals.json").read_text())["evals"]
-        migration = [e for e in evals if e["id"].startswith("build-migration-")]
-        self.assertGreaterEqual(len(migration), 4)
-        for case in evals:
-            if case["expected_skill"] == "build":
-                self.assertNotIn("build", case["common_mistakes"], case["id"])
 
 
 if __name__ == "__main__":
