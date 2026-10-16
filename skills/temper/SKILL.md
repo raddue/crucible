@@ -1,9 +1,28 @@
 ---
 name: temper
-description: Iteratively review code changes for production readiness through fresh-eyes review loops. Use when completing tasks, implementing major features, or reviewing a change for production readiness — including when the user says "review this PR", "review my changes", "code review", "check the diff", or "is this ready to ship". Works on PRs from any forge (GitHub, GitLab, Bitbucket, self-hosted) or on raw git SHA ranges.
+description: Review code diffs for production readiness and process received code review comments with technical rigor. Use for "review this PR", "review my changes", "code review", "check the diff", "is this ready to ship", "review feedback", "code review comments", "address comments", "address feedback", "respond to review", or "reviewer suggestions". Before implementing suggestions, verify claims against code, especially unclear or technically questionable feedback; no blind agreement. Works on PRs from any forge or raw git SHA ranges.
 ---
 
 # Temper
+
+## Contents
+
+- [Review feedback (inbound mode)](#review-feedback-inbound-mode)
+- [Non-Goals](#non-goals)
+- [Relationship to quality-gate](#relationship-to-quality-gate)
+- [When to Request Review](#when-to-request-review)
+- [Dependencies](#dependencies)
+- [Invocation](#invocation)
+- [How to Request](#how-to-request)
+- [Terminal Verdict Emit](#terminal-verdict-emit)
+- [Dispatch](#dispatch)
+- [Severity / Verdict Vocabulary](#severity--verdict-vocabulary)
+- [External Model Review](#external-model-review-optional)
+- [Cross-Reference to Deep Cloud Review](#cross-reference-to-deep-cloud-review)
+- [Round example](#round-example)
+- [Test Alignment](#test-alignment)
+- [Integration with Workflows](#integration-with-workflows)
+- [Red Flags](#red-flags)
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -23,9 +42,13 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 
 **Renamed from `/code-review` (2026-05-17)** to avoid collision with Claude Code's built-in `/review` command. Same iteration behavior; the argument shape and platform-agnostic PR support are new.
 
+## Review feedback (inbound mode)
+
+When the user has **received** review feedback ("review feedback", "code review comments", "address comments", "address feedback", "respond to review", "reviewer suggestions"), read [`references/review-feedback.md`](references/review-feedback.md) **in full before acting**. That reference preserves the technical-rigor protocol, including clarify-first, verification against actual code, reasoned pushback, no performative agreement, one-at-a-time testing, thread replies, and feedback-only Tier B ledger behavior. In this mode, do **not** start the diff-review engine just to evaluate inbound comments. Run the diff-review loop separately only when a fresh review of the resulting changes is requested or required by a caller; its Tier A emit remains separate.
+
 ## Non-Goals
 
-Temper reviews **code diffs only**. Use a different skill for:
+Temper's fresh-eyes review loop reviews **code diffs only**. Its inbound feedback mode processes received comments. Use a different skill for:
 
 - **Design docs / plans / concepts** — use `/audit` or `/quality-gate` red-team mode.
 - **Systemic multi-site pattern review** — subsystem-wide patterns, absences, or structural drift with **no single reproduction** — use `/audit`. (temper itself drives delve-engine's parallel fan-out for *instance-bug* enumeration — one-reproduction defects; it does not defer that wholesale to `/audit`. The boundary is the reproduction discriminator: one concrete reproduction is temper/delve's; a no-single-repro pattern is `/audit`'s.)
@@ -422,53 +445,9 @@ For GitHub PRs only, Claude Code's built-in `/ultrareview <PR>` runs a deeper mu
 
 `/ultrareview` is GitHub-specific; **do not suggest** it for GitLab / Bitbucket / other-forge PRs.
 
-## Example
+## Round example
 
-```
-[Just completed Task 2: Add verification function]
-
-You: Let me request review before proceeding.
-
-[Step 1: Resolve scope]
-- No argument given; HEAD is on branch `feat/verify`
-- gh pr view (current branch) → no PR yet
-- origin/HEAD → main; resolved range: origin/main..HEAD
-- BASE_SHA=$(git rev-parse origin/main)
-- HEAD_SHA=$(git rev-parse HEAD)
-
-[Step 1.5: Preflight]
-- numstat: 4 files changed, 87 added, 12 deleted — text diff, in-cap, proceed
-
-[Step 2: Round 1 — drive delve-engine (bug-angle subset, effort=high, cap=20), dispatch-id temper-20260603T150500-a7f3c2]
-  Engine ran non-error; C/I kept-count (2) < cap → T genuine, not truncated.
-  Enumerate T (2 members):
-    t1  verify.py:40  CONFIRMED / Important  — no error handling for empty input
-    t2  verify.py:55  PLAUSIBLE / Important  — progress callback may fire after cancellation (no runnable repro)
-  Minor: 1 (magic number) — non-gating, not in T.
-  Each member: readjudicated=false.
-
-You: [Fix both members of T — t2 (PLAUSIBLE@Important) gets the same fix priority as t1 (CONFIRMED)]
-
-[Step 4: Round 2 — Track A (delve-engine over fix delta + cheap full-diff sweep, cap=20) + Track B (one temper-reviewer per member, against the WHOLE fixed tree)]
-  Track B — re-verify carried members:
-    t1 → RESOLVED (empty-input guard now present)
-    t2 → REFUTED-after-fix (DISCHARGE: the post-cancellation callback path is provably gone) — leaves T
-  Track A — NEW gating finding admitted to T (readjudicated=false):
-    t3  verify.py:48  CONFIRMED / Important  — the new guard swallows a real I/O error
-  All carried members resolved/discharged, BUT a new gating finding entered this round.
-  → Verdict: Issues-Found (NOT Clean — a new-admit round is never Clean). Loop continues.
-
-You: [Fix t3]
-
-[Step 4: Round 3 — Track A + Track B]
-  Track B — re-verify carried member:
-    t3 → RESOLVED (I/O error now re-raised)
-  Track A — no new gating finding admitted; C/I kept-count (0) < cap (un-truncated).
-  Every member of T resolved/discharged AND no new gating finding entered.
-  → Verdict: Clean. Proceed to Task 3.
-```
-
-The Round-2 verdict is **Issues-Found, not Clean**, even though both carried members resolved — Track A admitted a new gating finding (`t3`), and a new-admit round is never Clean. Clean is reached only in Round 3, which resolves the carried member and admits no new gating finding.
+Read [`references/round-example.md`](references/round-example.md) when tracing the R1→R3 finding lifecycle, especially why a new-admit round cannot be Clean.
 
 ## Test Alignment
 

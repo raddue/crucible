@@ -78,11 +78,11 @@
       "prompt": "I'm done with the feature branch. Can you review my changes before I create a PR?",
       "expected_skill": "temper",
       "common_mistakes": [
-        "review-feedback",
-        "quality-gate"
+        "quality-gate",
+        "delve"
       ],
       "context": "User is requesting a review of their own work before submission. No external feedback has been received.",
-      "reasoning": "Code-review is for when you want your work reviewed \u2014 requesting a review. Review-feedback is for when you have RECEIVED review comments and need to process them. The direction is outbound (requesting review), not inbound (receiving feedback).",
+      "reasoning": "Temper runs its fresh diff-review loop for outbound requests; received comments use temper's inbound feedback mode.",
       "difficulty": "easy"
     },
     {
@@ -90,12 +90,13 @@
       "dimension": "direct",
       "boundary": "review-direction",
       "prompt": "I got 6 comments on my PR from the tech lead. Help me work through them.",
-      "expected_skill": "review-feedback",
+      "expected_skill": "temper",
       "common_mistakes": [
-        "temper"
+        "quality-gate",
+        "delve"
       ],
       "context": "User has received review feedback on a PR and needs to process and respond to the comments.",
-      "reasoning": "Review-feedback handles inbound review comments \u2014 analyzing them for technical merit, identifying unclear or contradictory items, and determining the right response. Code-review would be requesting a new review, which is the wrong direction.",
+      "reasoning": "Temper's inbound feedback mode evaluates received comments without starting a fresh diff review.",
       "difficulty": "easy"
     },
     {
@@ -103,12 +104,13 @@
       "dimension": "negative",
       "boundary": "review-direction",
       "prompt": "The senior dev left some comments on my PR saying 'looks good, just clean up the naming'. Help me with the review.",
-      "expected_skill": "review-feedback",
+      "expected_skill": "temper",
       "common_mistakes": [
-        "temper"
+        "quality-gate",
+        "delve"
       ],
       "context": "Despite using the word 'review', the user has RECEIVED feedback and needs to process it. The feedback is inbound.",
-      "reasoning": "The word 'review' appears but the direction is inbound \u2014 the user received comments and needs to process them. Review-feedback handles this. Code-review would be wrong because the user is not requesting a fresh review of their code.",
+      "reasoning": "Temper's inbound feedback mode handles received comments, not its fresh diff-review loop.",
       "difficulty": "medium"
     },
     {
@@ -118,12 +120,87 @@
       "prompt": "Review this code.",
       "expected_skill": "temper",
       "common_mistakes": [
-        "review-feedback",
+        "quality-gate",
         "audit"
       ],
       "context": "User is presenting their own code and asking for a review. No prior feedback exists \u2014 this is a request for review.",
-      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) \u2014 temper. If the user had said 'I got a review on this code, help me address it', the direction would be inbound \u2014 review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit.",
+      "reasoning": "Temper's outbound diff-review loop applies. Received comments instead use its inbound feedback mode. Audit covers systemic review.",
       "difficulty": "easy"
+    },
+    {
+      "id": "review-feedback-address-comments",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Address the comments on my PR, but first check whether the reviewer is right about the old export being unused.",
+      "expected_skill": "temper",
+      "common_mistakes": [
+        "delve",
+        "quality-gate"
+      ],
+      "context": "Inbound review feedback with a codebase claim to verify before editing.",
+      "reasoning": "Temper's feedback mode verifies claims before implementing and pushes back when code contradicts the reviewer.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-respond-to-review",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Respond to review comments on the PR. Two suggestions conflict with our supported platform versions.",
+      "expected_skill": "temper",
+      "common_mistakes": [
+        "audit",
+        "quality-gate"
+      ],
+      "context": "Inbound comments require technical evaluation, not an outbound fresh-eyes review.",
+      "reasoning": "Temper's feedback mode evaluates platform compatibility and responds with technical pushback when warranted.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-clarify-first",
+      "dimension": "context-dependent",
+      "boundary": "review-direction",
+      "prompt": "Review feedback lists six items; item five says 'handle the edge case' but doesn't identify one. Fix the other five now.",
+      "expected_skill": "temper",
+      "common_mistakes": [
+        "build",
+        "quality-gate"
+      ],
+      "context": "One unclear item can affect the rest of a multi-item fix.",
+      "reasoning": "Temper's feedback mode clarifies all unclear items before implementing any item.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "review-feedback-code-review-comments",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "These code review comments say the fallback is dead code. Verify that claim before changing it.",
+      "expected_skill": "temper",
+      "common_mistakes": ["delve", "quality-gate"],
+      "context": "Received comments need verification against actual callers, not a fresh review.",
+      "reasoning": "Temper's feedback mode checks reviewer claims against code before acting.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-address-feedback",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Address feedback on my PR; one request seems incompatible with our minimum supported version.",
+      "expected_skill": "temper",
+      "common_mistakes": ["build", "audit"],
+      "context": "Inbound review feedback with a compatibility concern.",
+      "reasoning": "Temper's feedback mode verifies compatibility and pushes back with evidence if needed.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "review-feedback-reviewer-suggestions",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "Evaluate these reviewer suggestions before implementing suggestions that sound technically questionable.",
+      "expected_skill": "temper",
+      "common_mistakes": ["quality-gate", "delve"],
+      "context": "Received suggestions must be checked before any change.",
+      "reasoning": "Temper's feedback mode requires technical verification before implementation.",
+      "difficulty": "medium"
     },
     {
       "id": "adversarial-scope-direct-01",

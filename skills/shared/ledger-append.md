@@ -102,7 +102,7 @@ caller-set, so direct callers like the v1 backfill (moved to
 {
   "schema_version": 2,
   "run_id": "<UUIDv7 — sortable, millisecond-precision, unique>",
-  "skill": "<emitting skill name; open set — any skill carrying a CANONICAL shared/ledger-append.md emit block (e.g. quality-gate, siege, temper, red-team, audit, inquisitor, delve, review-feedback, test-coverage, verify)>",
+  "skill": "<emitting skill name; open set — any skill carrying a CANONICAL shared/ledger-append.md emit block (e.g. quality-gate, siege, temper, red-team, audit, inquisitor, delve, test-coverage, verify)>",
   "repo": "<basename of git toplevel; cwd basename fallback; 'unknown' on v1 rows>",
   "model_resolution": null,
   "tier": "A | B",
