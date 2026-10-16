@@ -122,14 +122,14 @@ Task tool (general-purpose, model: sonnet):
     - Keep total output under 30 lines. This goes into an orchestrator's context.
 ```
 
-## Skill Stocktake Staleness
+## Skill Audit Staleness
 
-Also check for skill stocktake staleness:
+Also check for skill audit staleness:
 
-1. Check if `skills/stocktake/results.json` exists
-2. If it exists, read the `evaluated_at` timestamp
+1. Check if `skills/anvil/results.json` exists; if absent, check legacy `skills/stocktake/results.json` before claiming no prior run
+2. If either exists, read its `evaluated_at` timestamp (anvil audit migrates the legacy cache on its next run)
 3. If the last run was 30+ days ago, include this advisory:
-   > "Skill stocktake hasn't run in [N] days. Consider running `crucible:stocktake` to audit skill health."
-4. If the file doesn't exist (stocktake has never been run), include:
-   > "Skill stocktake has never been run. Consider running `crucible:stocktake` to audit skill health."
+   > "Skill audit hasn't run in [N] days. Consider running `crucible:anvil` audit mode to audit skill health."
+4. If neither file exists (skill audit has never been run), include:
+   > "Skill audit has never been run. Consider running `crucible:anvil` audit mode to audit skill health."
 5. If the last run was within 30 days, do not mention it

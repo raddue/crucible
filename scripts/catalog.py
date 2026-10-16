@@ -55,7 +55,7 @@ CATEGORIES: dict[str, list[str]] = {
         "distill",
     ],
     "Maintenance & Meta": [
-        "stocktake", "anvil", "getting-started", "orchestrator",
+        "anvil", "getting-started", "orchestrator",
     ],
 }
 
