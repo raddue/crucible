@@ -70,7 +70,7 @@ class CatalogTestBase(unittest.TestCase):
 
     Helpers write a `skills/<name>/SKILL.md` tree, a `docs/skills.md` with
     CATALOG markers, and the count-token files (README.md,
-    skills/workshop/SKILL.md, .claude-plugin/plugin.json).
+    skills/getting-started/workshop.md, .claude-plugin/plugin.json).
     """
 
     def setUp(self):
@@ -105,16 +105,17 @@ class CatalogTestBase(unittest.TestCase):
         `digit_form` is a dict supplying the token strings, e.g. for the clean
         n=3 baseline: {"space": "3", "tilde": "~3", "hyphen": "3", "agent": "3"}.
         We always write the canonical forms (space/tilde/hyphen on README &
-        workshop, agent on plugin.json).
+        getting-started/workshop.md, agent on plugin.json).
         """
         readme = self.root / "README.md"
         readme.write_text(
             f"# Repo\n\nA toolkit of {digit_form['space']} skills.\n", encoding="utf-8"
         )
-        wsdir = self.root / "skills" / "workshop"
+        wsdir = self.root / "skills" / "getting-started"
         wsdir.mkdir(parents=True, exist_ok=True)
         (wsdir / "SKILL.md").write_text(
-            f"---\nname: workshop\ndescription: tour\n---\n\n"
+            "---\nname: getting-started\ndescription: hub\n---\n\n", encoding="utf-8")
+        (wsdir / "workshop.md").write_text(
             f"About {digit_form['tilde']} skills here. "
             f"The {digit_form['hyphen']}-skill catalog tour.\n",
             encoding="utf-8",
@@ -151,36 +152,36 @@ class CatalogTestBase(unittest.TestCase):
         out.append("<!-- CATALOG:END -->\n")
         return "".join(out)
 
-    # workshop is a real on-disk skill (write_count_files creates it with
-    # `name: workshop`), so it is ALWAYS part of n. Fixtures must treat it as a
+    # getting-started is a real on-disk skill (write_count_files creates it with
+    # `name: getting-started`), so it is ALWAYS part of n. Fixtures must treat it as a
     # first-class member — categorized, given a catalog row, and counted — so the
     # ONLY drift/error in any fixture is the one the test intends to inject.
-    WORKSHOP_DESC = "Tour of the workshop."
+    HUB_DESC = "Bootstrap hub with the workshop tour."
 
     def _count_tokens(self, n):
         """The four canonical count-token strings for a given runtime n."""
         s = str(n)
         return {"space": s, "tilde": f"~{s}", "hyphen": s, "agent": s}
 
-    # -- a complete clean fixture (content skills + workshop) --------------
+    # -- a complete clean fixture (content skills + getting-started) --------------
     def build_clean_fixture(self, content_skills=("alpha", "bravo", "charlie")):
-        """content_skills + workshop, all categorized + rowed, counts == true n.
+        """content_skills + getting-started, all categorized + rowed, counts == true n.
 
-        n = len(content_skills) + 1 (the +1 for the always-present `workshop`
+        n = len(content_skills) + 1 (the +1 for the always-present `getting-started`
         skill that write_count_files plants). The clean baseline must therefore
-        register workshop in CATEGORIES, in the doc rows, and in the count token.
+        register getting-started in CATEGORIES, in the doc rows, and in the count token.
         """
         content = list(content_skills)
         for nm in content:
             self.write_skill(nm)
-        names = content + ["workshop"]
+        names = content + ["getting-started"]
         self._install_categories({"Core": list(names)})
         rows = [("Core",
                  [(nm, f"{nm} does a thing.") for nm in content]
-                 + [("workshop", self.WORKSHOP_DESC)])]
+                 + [("getting-started", self.HUB_DESC)])]
         self.write_skills_doc(self.catalog_block(rows))
-        # write_count_files plants skills/workshop/SKILL.md, so workshop is on
-        # disk and the count tokens read the true n (content + workshop).
+        # write_count_files plants skills/getting-started/SKILL.md, so getting-started is on
+        # disk and the count tokens read the true n (content + getting-started).
         n = len(names)
         self.write_count_files(self._count_tokens(n))
 
@@ -284,7 +285,7 @@ class CatalogChecks(CatalogTestBase):
             f"expected a dangling-category bullet naming 'ghost': {errs}")
 
     # ----- count-drift family (cases 7-10) ------------------------------
-    # The fixture is OTHERWISE-CLEAN at true n (content skills + workshop) — all
+    # The fixture is OTHERWISE-CLEAN at true n (content skills + getting-started) — all
     # tokens read n except the ONE the case drifts. So `check` returning errs
     # proves count-drift detection, not an unrelated dirty-fixture artifact.
     def _build_count_drift_fixture(self, drift_key, drift_value):
@@ -293,7 +294,7 @@ class CatalogChecks(CatalogTestBase):
         `drift_key` in {"space","tilde","hyphen","agent"}; `drift_value` is the
         wrong digit form for that token (e.g. "42" / "~42" / "42" / "23").
         """
-        # Establish the clean n=4 baseline (alpha/bravo/charlie + workshop).
+        # Establish the clean n=4 baseline (alpha/bravo/charlie + getting-started).
         self.build_clean_fixture()
         n = len(catalog.parse_skill_names(self.root))
         self.assertEqual(n, 4, "drift fixture baseline must be a clean n=4 set")
@@ -356,7 +357,7 @@ class CatalogChecks(CatalogTestBase):
             ("alpha", curated),
             ("bravo", "bravo does a thing."),
             ("charlie", "charlie does a thing."),
-            ("workshop", self.WORKSHOP_DESC),
+            ("getting-started", self.HUB_DESC),
         ])]
         self.write_skills_doc(self.catalog_block(rows))
         # Frontmatter has a DIFFERENT description so a re-seed would be detectable.
@@ -386,14 +387,14 @@ class CatalogChecks(CatalogTestBase):
         )
         self.write_skill("quoty", raw_frontmatter=quoted_fm)
         self.write_skill("charlie")  # an existing-row skill
-        # workshop is planted on disk by write_count_files, so it must be a
-        # categorized member too (true n=4: foldy/quoty/charlie/workshop).
-        names = ["foldy", "quoty", "charlie", "workshop"]
+        # getting-started is planted on disk by write_count_files, so it must be a
+        # categorized member too (true n=4: foldy/quoty/charlie/getting-started).
+        names = ["foldy", "quoty", "charlie", "getting-started"]
         self._install_categories({"Core": names})
-        # Existing doc has charlie + workshop rows; foldy & quoty are new -> seeded.
+        # Existing doc has charlie + getting-started rows; foldy & quoty are new -> seeded.
         rows = [("Core", [
             ("charlie", "charlie does a thing."),
-            ("workshop", self.WORKSHOP_DESC),
+            ("getting-started", self.HUB_DESC),
         ])]
         self.write_skills_doc(self.catalog_block(rows))
         self.write_count_files(self._count_tokens(4))
@@ -422,13 +423,13 @@ class CatalogChecks(CatalogTestBase):
     # 14
     def test_embedded_pipe_row(self):
         # A curated description with a code span `a | b` must stay ONE cell.
-        self.build_clean_fixture()  # alpha/bravo/charlie + workshop, clean n=4
+        self.build_clean_fixture()  # alpha/bravo/charlie + getting-started, clean n=4
         piped = "Handles a `a | b` code span inside the description cell."
         rows = [("Core", [
             ("alpha", piped),
             ("bravo", "bravo does a thing."),
             ("charlie", "charlie does a thing."),
-            ("workshop", self.WORKSHOP_DESC),
+            ("getting-started", self.HUB_DESC),
         ])]
         self.write_skills_doc(self.catalog_block(rows))
         # check must NOT see this as a bogus/extra column (the row stays valid).
@@ -442,7 +443,7 @@ class CatalogChecks(CatalogTestBase):
     # 15
     def test_neighbor_digit_non_clobber(self):
         # README:5-analogue line with many numbers; render must touch only the count.
-        self.build_clean_fixture()  # true n=4 (alpha/bravo/charlie + workshop)
+        self.build_clean_fixture()  # true n=4 (alpha/bravo/charlie + getting-started)
         n = len(catalog.parse_skill_names(self.root))
         readme = self.root / "README.md"
         # Drift README's count token (42) while leaving four neighbor numbers.
@@ -474,10 +475,12 @@ class CatalogChecks(CatalogTestBase):
                     (d / "SKILL.md").write_text(
                         f"---\nname: {nm}\ndescription: {nm} thing.\n---\n# {nm}\n",
                         encoding="utf-8")
-                wsdir = root / "skills" / "workshop"
+                wsdir = root / "skills" / "getting-started"
                 wsdir.mkdir(parents=True, exist_ok=True)
                 (wsdir / "SKILL.md").write_text(
-                    "---\nname: workshop\ndescription: tour\n---\n\n"
+                    "---\nname: getting-started\ndescription: hub\n---\n\n",
+                    encoding="utf-8")
+                (wsdir / "workshop.md").write_text(
                     "About ~99 skills here. The 99-skill catalog tour.\n",
                     encoding="utf-8")
                 (root / "README.md").write_text(
@@ -488,7 +491,7 @@ class CatalogChecks(CatalogTestBase):
                     '{\n  "description": "99 agent skills."\n}\n', encoding="utf-8")
                 docdir = root / "docs"
                 docdir.mkdir(parents=True, exist_ok=True)
-                allnames = names + ["workshop"]
+                allnames = names + ["getting-started"]
                 rowtext = "".join(f"| **{nm}** | {nm} thing. |\n" for nm in allnames)
                 (docdir / "skills.md").write_text(
                     "# Cat\n\n<!-- CATALOG:START -->\n## Core\n\n"
@@ -501,10 +504,10 @@ class CatalogChecks(CatalogTestBase):
                     catalog.render(root)
                 finally:
                     catalog.CATEGORIES = original
-                # n today = K skills + workshop = K+1
+                # n today = K skills + getting-started = K+1
                 n_today = K + 1
                 readme_out = (root / "README.md").read_text(encoding="utf-8")
-                ws_out = (wsdir / "SKILL.md").read_text(encoding="utf-8")
+                ws_out = (wsdir / "workshop.md").read_text(encoding="utf-8")
                 plug_out = (plugdir / "plugin.json").read_text(encoding="utf-8")
                 self.assertIn(f"{n_today} skills", readme_out,
                               f"render must write runtime n={n_today}, not a literal")
@@ -548,11 +551,11 @@ class CatalogChecks(CatalogTestBase):
             any("README.md" in e and ("not found" in e or "missing" in e.lower())
                 for e in errs),
             f"expected a path-existence bullet for the missing README.md target: {errs}")
-        # The path-existence bullet is the ONLY error — no spurious workshop
+        # The path-existence bullet is the ONLY error — no spurious getting-started
         # omission/uncategorized (the fixture is otherwise clean at n=4).
         self.assertFalse(
-            any("workshop" in e for e in errs),
-            f"missing-README fixture must not also flag workshop: {errs}")
+            any("getting-started" in e for e in errs),
+            f"missing-README fixture must not also flag getting-started: {errs}")
 
     # 18
     def test_section_intro_prose_preserved(self):
@@ -611,12 +614,11 @@ class CatalogChecks(CatalogTestBase):
         # Pins findall/finditer, not search.
         self.build_clean_fixture()  # true n=4, all tokens correct
         n = len(catalog.parse_skill_names(self.root))
-        # workshop's SKILL.md carries multiple count tokens; keep the FIRST
+        # getting-started's workshop.md carries multiple count tokens; keep the FIRST
         # correct (~4) and drift a LATER one (42-skill). A .search() first-match
         # implementation would false-PASS; only findall/finditer catches it.
-        wsfile = self.root / "skills" / "workshop" / "SKILL.md"
+        wsfile = self.root / "skills" / "getting-started" / "workshop.md"
         wsfile.write_text(
-            "---\nname: workshop\ndescription: tour\n---\n\n"
             f"About ~{n} skills here. The 42-skill catalog tour.\n",
             encoding="utf-8")
         errs = catalog.check(self.root)
@@ -638,8 +640,8 @@ class CatalogChecks(CatalogTestBase):
             f"expected a zero-match bullet for the reworded README count target: {errs}")
         # The zero-match bullet is the ONLY error — fixture otherwise clean at n=4.
         self.assertFalse(
-            any("workshop" in e for e in errs),
-            f"zero-match fixture must not also flag workshop: {errs}")
+            any("getting-started" in e for e in errs),
+            f"zero-match fixture must not also flag getting-started: {errs}")
 
     # 21
     def test_eval_claim_phrase_not_a_count_token(self):
@@ -647,7 +649,7 @@ class CatalogChecks(CatalogTestBase):
         # ALONGSIDE the real count token ("4 skills"). The eval phrase has a
         # non-`skills` word ("core") between the digit and "skills", so the
         # generic grammar must NOT capture it as a second count token.
-        self.build_clean_fixture()  # true n=4 (alpha/bravo/charlie + workshop)
+        self.build_clean_fixture()  # true n=4 (alpha/bravo/charlie + getting-started)
         n = len(catalog.parse_skill_names(self.root))
         readme = self.root / "README.md"
         # The eval phrase uses a DIFFERENT number (13) deliberately; if it were
@@ -678,8 +680,8 @@ class CatalogChecks(CatalogTestBase):
             "<!-- CATALOG:END -->\n"
         )
         self.write_skills_doc(body)
-        # alpha/bravo + workshop -> true n=3; workshop must be categorized + rowed.
-        self._install_categories({"Framed": ["alpha", "bravo"], "Ws": ["workshop"]})
+        # alpha/bravo + getting-started -> true n=3; getting-started must be categorized + rowed.
+        self._install_categories({"Framed": ["alpha", "bravo"], "Ws": ["getting-started"]})
         body = (
             "# Skill Catalog\n\n"
             "<!-- CATALOG:START -->\n"
@@ -690,7 +692,7 @@ class CatalogChecks(CatalogTestBase):
             "| **bravo** | bravo does a thing. |\n\n"
             "## Ws\n\n"
             "| Skill | Description |\n|---|---|\n"
-            f"| **workshop** | {self.WORKSHOP_DESC} |\n\n"
+            f"| **getting-started** | {self.HUB_DESC} |\n\n"
             "<!-- CATALOG:END -->\n"
         )
         self.write_skills_doc(body)
@@ -764,7 +766,7 @@ class CatalogChecks(CatalogTestBase):
             ("alpha", "alpha does a thing."),
             ("bravo", "bravo does a thing."),
             ("charlie", "charlie does a thing."),
-            ("workshop", self.WORKSHOP_DESC),
+            ("getting-started", self.HUB_DESC),
             ("dup", "dup does a thing."),
         ])]
         self.write_skills_doc(self.catalog_block(rows))

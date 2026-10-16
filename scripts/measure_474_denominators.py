@@ -89,7 +89,7 @@ BAND_RULE = f"kind=#L and {BAND_LO} <= (b-a) <= {BAND_HI}  (#B can never differ)
 
 JSONL_GLOB = "eval/ledger-return-protocol/**/*.jsonl"
 RETURN_CONV = "skills/shared/return-convention.md"
-RT_PROMPT = "skills/red-team/red-team-prompt.md"
+RT_PROMPT = "skills/quality-gate/red-team-prompt.md"
 RCPT_TESTS = "scripts/test_rcpt_verify.py"
 # round-5 / MIN-5 — the project slug is DERIVED from this checkout, not pinned to the
 # maintainer's. Claude Code names a project directory after the absolute repo path with

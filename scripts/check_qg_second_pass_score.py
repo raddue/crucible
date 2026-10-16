@@ -159,6 +159,8 @@ Exits 0 when aligned, 1 with a `- <error>` list otherwise. Stdlib only.
 See scripts/CHECKER_CONVENTIONS.md.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -186,7 +188,7 @@ _NEGATION_TOKENS = (
 # FA2-2 (PR #583 warden gate): the pre-existing closed vocabulary (not/never/
 # excluding/except/ignor*) was trivially evaded by "less"/"minus"/"omitting"/
 # "apart from"/"other than" — verified live: replacing "plus any Fatal/
-# Significant..." with "less any..." in red-team/SKILL.md inverts the
+# Significant..." with "less any..." in quality-gate/red-team-mode.md inverts the
 # polarity of #561's entire thesis and every checker relying on this
 # vocabulary still PASSed. Not a full fix for the general "oracle-pattern
 # vocabulary-only pin" class (tracked separately) — a narrower vocabulary
@@ -1861,7 +1863,7 @@ def check_skill(text: str) -> list[str]:
         # (three sinks named, vs. the four the Minor population join clause
         # above actually defines — round 8's M3 fourth sink was never
         # back-ported here), and the census omitted the round-ledger site
-        # (`red-team/SKILL.md`'s `Total findings:` line, #561 fresh round 7
+        # (`quality-gate/red-team-mode.md`'s `Total findings:` line, #561 fresh round 7
         # M6) as a consumer entirely, though it meets INV-561-1's own
         # membership test. Pin the sink list itself, not just the count
         # word, so join/invariant drift trips the suite going forward.
@@ -1878,7 +1880,7 @@ def check_skill(text: str) -> list[str]:
                 "census is stale (#561 fresh round 9 S4): must name all FOUR "
                 "Minor sinks (`round-N-score.md`'s Minor count, "
                 "`MinorTrajectory`/`minor_trajectory`, `m_exit`, and "
-                "`red-team/SKILL.md`'s round-ledger Minor count) and count "
+                "`quality-gate/red-team-mode.md`'s round-ledger Minor count) and count "
                 "TWELVE consumers total, including the round-ledger site "
                 "itself as a consumer"
             )
@@ -2139,7 +2141,7 @@ def check_skill(text: str) -> list[str]:
 
 def _read(path: pathlib.Path, errs: list[str]) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return read_runbook() if path == SKILL else path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError) as err:
         errs.append(f"{path} missing or unreadable: {err}")
         return None
@@ -2214,7 +2216,7 @@ Reason: clean-pass | siege-blocked | severity-counts-discrepancy
 
 | "The Fatal is only in the second-pass section, the real count is zero." | rationalization | Count Fatal/Significant entries from all three sections — parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
 
-| INV-561-1 | Score source population: all consumers — including, for a `Minor`-first-token entry, the round's Minor population (`round-N-score.md`'s Minor count, `MinorTrajectory`/`minor_trajectory`, `m_exit`, and `red-team/SKILL.md`'s round-ledger `Total findings: N (F: x, S: y, M: z)` Minor count) — twelve consumers total — count the population parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
+| INV-561-1 | Score source population: all consumers — including, for a `Minor`-first-token entry, the round's Minor population (`round-N-score.md`'s Minor count, `MinorTrajectory`/`minor_trajectory`, `m_exit`, and `quality-gate/red-team-mode.md`'s round-ledger `Total findings: N (F: x, S: y, M: z)` Minor count) — twelve consumers total — count the population parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
 
 <!-- CONTRACT:qg-score-population:START -->
 - `score_population`: cross-run comparability marker. Value set:
@@ -2619,7 +2621,7 @@ Reason: clean-pass | siege-blocked | severity-counts-discrepancy
 
 | "The Fatal is only in the second-pass section, the real count is zero." | rationalization | Count Fatal/Significant entries from all three sections — parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
 
-| INV-561-1 | Score source population: all consumers — including, for a `Minor`-first-token entry, the round's Minor population (`round-N-score.md`'s Minor count, `MinorTrajectory`/`minor_trajectory`, `m_exit`, and `red-team/SKILL.md`'s round-ledger `Total findings: N (F: x, S: y, M: z)` Minor count) — twelve consumers total — count the population parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
+| INV-561-1 | Score source population: all consumers — including, for a `Minor`-first-token entry, the round's Minor population (`round-N-score.md`'s Minor count, `MinorTrajectory`/`minor_trajectory`, `m_exit`, and `quality-gate/red-team-mode.md`'s round-ledger `Total findings: N (F: x, S: y, M: z)` Minor count) — twelve consumers total — count the population parsed per the `qg-score-second-pass-population` CONTRACT block (Score source, step 7). |
 
 <!-- CONTRACT:qg-score-population:START -->
 - `score_population`: cross-run comparability marker. Value set:

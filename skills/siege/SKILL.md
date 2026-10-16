@@ -840,7 +840,7 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 **Active run marker:** Write `~/.claude/projects/<project-hash>/memory/security-audit/active-run-<run-id>.md` at start. Delete on completion. After compaction, glob for active-run markers to locate the run.
 
-**Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. This is a tooling-discipline convention, **not** an enforced hook — see `quality-gate/SKILL.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry.
+**Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. This is a tooling-discipline convention, **not** an enforced hook — see `quality-gate/recovery.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry.
 
 ### File Inventory
 
@@ -966,7 +966,7 @@ Prompt templates are created during skill implementation. Each template follows 
 - **Persistence:** `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` (read at start, written at end)
 - **Pairs with:** `crucible:build` -- Siege can run after build Phase 4 (implementation) when the activation heuristic triggers
 - **Pairs with:** `crucible:audit` -- audit may recommend Siege; Siege never invokes audit
-- **Does NOT use:** `crucible:quality-gate` (Siege has its own security-specific gate), `crucible:red-team` (Siege's agents ARE the red team, specialized for security)
+- **Does NOT use:** `crucible:quality-gate` (Siege has its own security-specific gate), `crucible:quality-gate (red-team mode)` (Siege's agents ARE the red team, specialized for security)
 
 ### Severity Mapping to Build Pipeline
 

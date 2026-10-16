@@ -1,12 +1,17 @@
----
-name: compass
-description: Read or update the per-repo arc-state file (docs/compass.md). Tracks current arc, last meaningful commit, open loops, next move, and don't-forget items. Auto-maintained by build, merge-pr, finish; read by getting-started. Use "compass read" to inspect project state, "compass update" to set a field, "compass doctor" to validate, "compass compress" when at cap. Triggers on "compass", "current arc", "project state", "what am I working on", "arc state", "where was I".
-origin: crucible
----
-
 <!-- CANONICAL: shared/compass-protocol.md -->
 
 # Compass
+
+## Contents
+
+- [When to use](#when-to-use)
+- [File location](#file-location)
+- [Schema](#schema)
+- [CLI reference](#cli-reference)
+- [Integration points](#integration-points)
+- [Multi-arc collision (D8/D8.5)](#multi-arc-collision-d8d85)
+- [Environment variables](#environment-variables)
+- [Key invariants](#key-invariants)
 
 A single `docs/compass.md` per repo that answers "where am I, what's the next move, what will I forget?" Auto-maintained by the skills that mark meaningful lifecycle events; read by `getting-started` at every session entry.
 
@@ -24,7 +29,7 @@ A single `docs/compass.md` per repo that answers "where am I, what's the next mo
 | File is at the 40-line cap | `compass compress` |
 | Suspect schema drift or parse error | `compass doctor` |
 
-Most users never invoke compass directly — it fires automatically through `build`, `merge-pr`, and `finish`.
+Most users never invoke compass directly — it fires automatically through `build` and `finish`.
 
 ## File location
 
@@ -83,7 +88,7 @@ Compass is auto-maintained at four lifecycle moments. Direct invocation is rarel
 | Skill | Event | Fields written |
 |-------|-------|----------------|
 | `build` | After Gate Ledger Initialization + resume decision, before Phase 1 IN_PROGRESS. Skipped on resume path. | `current_arc` |
-| `merge-pr` | After `gh pr merge` succeeds and post-merge CI passes. | `last_meaningful_commit` |
+| `finish` safe PR merge subflow | After `gh pr merge` succeeds and post-merge CI passes. | `last_meaningful_commit` |
 | `finish` Option 1 | After local merge + tests pass. | `last_meaningful_commit` + arc-closure (`current_arc=''`, `next_move`) |
 | `finish` Option 2 | After `gh pr checks --watch` returns green. | provisional arc-closure only (`current_arc=''`, `next_move`) |
 

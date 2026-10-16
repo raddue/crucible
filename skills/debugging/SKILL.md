@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Includes grudge regression-oracle pre-flight and recording fixed bugs. Triggers on /grudge, check grudges, record a grudge, any past bugs here, regression oracle, bug graveyard.
 ---
 
 # Systematic Debugging
@@ -1120,7 +1120,7 @@ After Phase 4.5 completes (or Phase 4 succeeds if no Phase 4.5 ran), the orchest
 - Assumptions that could break under different conditions
 - Regression risks not covered by the test
 
-Quality-gate handles iteration tracking, stagnation detection, compaction recovery, and user checkpoints. Do NOT invoke `crucible:red-team` directly — always go through quality-gate for iteration management.
+Quality-gate handles iteration tracking, stagnation detection, compaction recovery, and user checkpoints. Do NOT invoke `crucible:quality-gate (red-team mode)` directly — always go through quality-gate for iteration management.
 
 **Step 2: Code review** — After red-teaming passes clean, invoke `crucible:temper` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
@@ -1436,7 +1436,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:verify`** -- Verify fix worked before claiming success
 - **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
 - **`crucible:quality-gate`** -- Adversarial review in Phase 5 (iteration tracking, stagnation detection, compaction recovery)
-- **`crucible:red-team`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
+- **`crucible:quality-gate (red-team mode)`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
 - **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
 **Does not dispatch /recon or /design approach evaluation** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not design approach evaluation. See #147 for rationale.

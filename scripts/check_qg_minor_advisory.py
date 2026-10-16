@@ -10,7 +10,7 @@ NEVER rglobs; the path pinning is what prevents a self-match (a checker that nev
 globs cannot read itself), so the pinned phrases need NOT be obfuscated/split.
 
 Path-pinning to `quality-gate/SKILL.md` is load-bearing (mirrors the sibling
-check_qg_stagnation_minor.py): the checker must NOT scan `red-team/SKILL.md`, whose
+check_qg_stagnation_minor.py): the checker must NOT scan `quality-gate/red-team-mode.md`, whose
 "Only Fatal and Significant count" / Minors-"don't count toward stagnation" lines are
 deliberately retained per the #358 two-vocabulary separation — they would be
 false-positive matches for a Minor-semantics checker. It is therefore intentionally
@@ -36,6 +36,8 @@ Exits 0 when aligned, 1 with a `- <error>` list otherwise. Stdlib only.
 See scripts/CHECKER_CONVENTIONS.md.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -115,7 +117,7 @@ def check_skill(text: str) -> list[str]:
 
 def _read(path: pathlib.Path, errs: list[str]) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return read_runbook() if path == SKILL else path.read_text(encoding="utf-8")
     except (FileNotFoundError, UnicodeDecodeError, OSError) as err:
         errs.append(f"{path} missing or unreadable: {err}")
         return None

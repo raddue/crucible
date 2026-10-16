@@ -1,8 +1,3 @@
----
-name: workshop
-description: Tour of the Crucible workshop — the headline orchestrators users invoke directly. Use when the user asks "what skills are available?", "where do I start?", "what should I use for X?", "give me a tour of Crucible", "what are the main commands?", or any onboarding-style question. Also use after onboarding a new user or when someone needs to pick the right tool for a specific task. This is the on-demand catalog tour; the silent conversation-start activation protocol itself is getting-started.
----
-
 # Workshop
 
 A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~44 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
@@ -46,8 +41,8 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | Skill | When to reach for it |
 |---|---|
 | `/finish` | Implementation is complete, tests pass, and you need to decide how to integrate — merge, PR, cleanup. Guides the completion decision. |
-| `/forge` | A significant task just completed. Writes a retrospective; proposes skill mutations after 10+ retrospectives accumulate. Compounding knowledge accelerator. |
-| `/handoff` | End-of-session. Writes a handoff doc for the next session — continuation of current arc, or proposed next pickup if the current arc is wrapping. |
+| `/getting-started` → [forge.md](forge.md) | A significant task just completed. Writes a retrospective; proposes skill mutations after 10+ retrospectives accumulate. Compounding knowledge accelerator. |
+| `/getting-started` → [handoff.md](handoff.md) | End-of-session. Writes a handoff doc for the next session — continuation of current arc, or proposed next pickup if the current arc is wrapping. |
 
 ## Quick reference by trigger phrase
 
@@ -65,8 +60,8 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 | "Run quality gate on this" | `/quality-gate` |
 | "Upgrade React to 19" / "Remove deprecated APIs" | `/migrate` |
 | "I'm done, what's next?" | `/finish` |
-| "Write a retrospective" | `/forge` |
-| "End of session, write a handoff" | `/handoff` |
+| "Write a retrospective" | `/getting-started` → `forge.md` |
+| "End of session, write a handoff" | `/getting-started` → `handoff.md` |
 
 ## Pipelines (composition)
 
@@ -74,7 +69,7 @@ The big skills compose. The most common pipelines:
 
 - **Full feature:** `/build` is the canonical one. Internally runs `/design` → `/planning` → execute → `/temper` per task → `/inquisitor` → `/quality-gate` → `/finish`.
 - **Standalone design + plan:** `/design` produces a doc → user reviews → `/planning` produces a plan → execute manually or feed to `/build`.
-- **Post-merge reflection:** `/forge` after a significant arc; `/handoff` at session boundary.
+- **Post-merge reflection:** forge retrospective (`getting-started` → `forge.md`) after a significant arc; handoff (`getting-started` → `handoff.md`) at session boundary.
 - **Recon-first:** `/recon` before `/build` or `/design` when the codebase is unfamiliar.
 
 ## What's not in this list (intentionally)

@@ -6,8 +6,8 @@ Invocation (from repo root):
     python3 scripts/check_handoff_stop_contract.py --selftest # in-memory logic test
 
 Sessions were observed writing the handoff doc and then continuing to work the
-arc instead of ending the turn — defeating the point of `/handoff` (stopping now
-to save tokens/context). This asserts `skills/handoff/SKILL.md`'s Output Contract
+arc instead of ending the turn — defeating the point of a handoff (stopping now
+to save tokens/context). This asserts `skills/getting-started/handoff.md`'s Output Contract
 section carries an explicit, unambiguous stop directive strong enough to override
 auto-mode's "bias toward continuing" — not an implicit or suggestion-shaped one.
 
@@ -27,7 +27,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-HANDOFF = ROOT / "skills/handoff/SKILL.md"
+HANDOFF = ROOT / "skills/getting-started/handoff.md"
 
 # label -> literal substring that MUST appear within the Output Contract section.
 REQUIRED_SUBSTRINGS: dict[str, str] = {

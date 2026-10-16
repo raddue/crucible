@@ -465,7 +465,7 @@ Cleanup is a distinct phase because premature shim removal is the most common mi
 
 **Post-cleanup:**
 - Dispatch `crucible:cartographer-skill` (record mode) -- record migration discoveries
-- Dispatch `crucible:forge` (retrospective) -- capture migration outcome and lessons
+- Dispatch `crucible:getting-started` (`forge.md`) (retrospective) -- capture migration outcome and lessons
 - Delete `.pipeline-active` marker from the scratch directory
 
 ---
@@ -500,8 +500,8 @@ Escalate to the user when:
 | `crucible:design` approach evaluation | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without scoring. |
 | `crucible:cartographer-skill` | Consult mode | Phase 0 (module boundaries for blast radius) |
 | `crucible:cartographer-skill` | Record mode | Phase 8 (record migration discoveries) |
-| `crucible:forge` | Feed-forward | Phase 0 (past migration lessons) |
-| `crucible:forge` | Retrospective | Phase 8 (capture migration outcome) |
+| `crucible:getting-started` (`forge.md`) | Feed-forward | Phase 0 (past migration lessons) |
+| `crucible:getting-started` (`forge.md`) | Retrospective | Phase 8 (capture migration outcome) |
 | `crucible:build` | Refactor mode | Phase 7 (per-phase execution for restructuring phases) |
 | `crucible:build` | Feature mode | Phase 7 (per-phase execution for additive phases) |
 | `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase; explicit immutable mode) |

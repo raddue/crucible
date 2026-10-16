@@ -4,6 +4,24 @@ version: 1
 
 # Dispatch Convention
 
+## Contents
+
+- [Harness bindings](#harness-bindings)
+- [When to Use](#when-to-use)
+- [Dispatch Directory](#dispatch-directory)
+- [File Naming](#file-naming)
+- [Dispatch File Header](#dispatch-file-header)
+- [Pointer Prompt Format](#pointer-prompt-format)
+- [Scope Anchoring (opt-in)](#scope-anchoring-opt-in)
+- [Graphify Consult](#graphify-consult)
+- [Pipeline-Active Marker](#pipeline-active-marker)
+- [Compaction Recovery](#compaction-recovery)
+- [Dispatch Manifest](#dispatch-manifest)
+- [Receipt Ledger](#receipt-ledger)
+- [Cleanup](#cleanup)
+- [Failure Handling](#failure-handling)
+- [Template Comment Header](#template-comment-header)
+
 > Canonical reference for disk-mediated subagent dispatch across all orchestrator skills.
 > Each orchestrator SKILL.md references this file via `<!-- CANONICAL: shared/dispatch-convention.md -->`.
 >
@@ -33,7 +51,7 @@ version: 1
 **Sub-skill inheritance:** Sub-skills (quality-gate, red-team, design's innovation pass, etc.) use the **parent orchestrator's dispatch directory and seq counter**. Two passing mechanisms:
 
 1. **Subagent dispatches** (Agent/Task tool): The `Dispatch-Dir:` header field in the dispatch file carries the path. Subagents extract it and use it for their own dispatches.
-2. **Skill invocations** (crucible:quality-gate, crucible:red-team, etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
+2. **Skill invocations** (crucible:quality-gate, crucible:quality-gate (red-team mode), etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
 
 Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup. The seq counter MUST be recovered from the manifest (last `seq` + 1) immediately before each dispatch — do not cache across dispatches. Nested sub-skills (e.g., quality-gate calling red-team) append entries to the shared manifest, so a cached counter goes stale.
 
@@ -97,7 +115,7 @@ Begin by reading that file.
 > reference implementation, retained deliberately; de-duplicating it is tracked
 > separately).
 >
-> Prior art and reference implementation of tier 1: `skills/quality-gate/SKILL.md`
+> Prior art and reference implementation of tier 1: `skills/quality-gate/cost-fix.md`
 > ("Scope Anchoring for Fix Agents"). Measured evidence for tier 2: `#562` spike,
 > `docs/research/2026-09-06-scope-judge-spike.md`.
 
@@ -327,6 +345,7 @@ Graphify" note for the division of labor. Do not fold one into the other.
   "scratch_dir": "<scratch directory path>",
   "dispatch_dir": "/tmp/crucible-dispatch-<session-id>/",
   "branch": "<git branch at pipeline start>",
+  "worktree_root": "<git rev-parse --show-toplevel; build markers only, optional for other skills>",
   "baseline_sha": "<HEAD SHA at pipeline start>"
 }
 ```
@@ -339,13 +358,13 @@ Graphify" note for the division of labor. Do not fold one into the other.
 
 **Detection (at pipeline start):**
 1. Check `<scratch>/.pipeline-active`
-2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`), proceed normally
+2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`; build markers also include `worktree_root`), proceed normally
 3. Found, same `pipeline_id` as current session -> compaction recovery (within-session, existing behavior)
 4. Found, different `pipeline_id` -> previous pipeline crashed. Check `branch` field against current `git branch --show-current`:
    - **Branch matches:** offer resume per the skill's resume logic (see `crucible:replay` for full orchestration, or per-skill detection-only for secondary skills)
    - **Branch mismatch:** warn the user: *"Previous [skill] on branch [marker.branch] crashed at Phase [phase]. You are currently on [current-branch]. Switch to [marker.branch] before resuming? [switch+resume / start fresh / abort]"*. Do NOT proceed with resume on the wrong branch — checkpoint restore would contaminate the current branch.
 
-**Where `<scratch>` is:** The pipeline's persistent scratch directory (`~/.claude/projects/<hash>/memory/`).
+**Where `<scratch>` is:** The pipeline's persistent scratch directory. Most pipelines use `~/.claude/projects/<hash>/memory/`; `/build` uses `~/.claude/projects/<project-hash>/memory/builds/<sha256(git rev-parse --show-toplevel)>/` so concurrent worktrees have independent markers and recovery state. Build markers include `worktree_root`; older markers without it remain readable but do not prove worktree ownership.
 
 ## Compaction Recovery
 
@@ -465,7 +484,7 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 - `est_rework_tokens = (rework_input_chars + rework_output_chars) / 4`
 - `rework_pct = est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`
 
-These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge/SKILL.md Step 8.5).
+These aggregates feed into the chronicle signal's `efficiency` sub-object (see getting-started/forge.md Step 8.5).
 
 ## Receipt Ledger
 

@@ -338,4 +338,4 @@ Append external perspectives per dimension alongside the host subagent's finding
 - **Per-task dispatch template:** `break-it-prompt.md`
 - **Full-feature prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)
 
-**Multi-model consensus:** Not applicable. Inquisitor dimensions write and run executable tests, requiring local filesystem and test runner access. See `skills/consensus/SKILL.md` for exclusion rationale.
+**Multi-model consensus:** Not applicable. Inquisitor dimensions write and run executable tests, requiring local filesystem and test runner access. See `skills/quality-gate/consensus-mechanism.md` for exclusion rationale.

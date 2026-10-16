@@ -34,6 +34,7 @@ See [docs/architecture.md](docs/architecture.md) for how the orchestrator skills
 
 ```bash
 git clone git@github.com:raddue/crucible.git ~/repos/crucible
+mkdir -p ~/.claude/skills
 ln -sf ~/repos/crucible/skills/* ~/.claude/skills/
 mkdir -p ~/.claude/agents
 ln -sf ~/repos/crucible/agents/* ~/.claude/agents/
@@ -59,7 +60,7 @@ These root instruction files apply to agents working *in this repo*. Installing 
 
 **Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`** for build's parallel team execution. Without it, independent tasks fall back to sequential dispatch — everything still works, just slower.
 
-**Recommended but optional:** enable the `forge` (retrospectives) and `cartographer` (codebase map) knowledge accelerators — they compound skill quality over time. See [docs/architecture.md](docs/architecture.md).
+**Recommended but optional:** enable the forge retrospectives (`getting-started/forge.md`) and `cartographer` (codebase map) knowledge accelerators — they compound skill quality over time. See [docs/architecture.md](docs/architecture.md).
 
 For hooks (session activity index, build routing advisor), MCP-based external model review, autocompact tuning, and other Claude Code specifics, see [docs/configuration.md](docs/configuration.md).
 

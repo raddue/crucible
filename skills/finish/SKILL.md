@@ -1,9 +1,15 @@
 ---
 name: finish
-description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup
+description: The finish skill guides completed development work through test and review gates, then presents merge, pull-request, keep, or discard choices. Use when implementation is complete, tests pass, the user asks to finish or integrate a branch, or a pull request needs safe merging; it verifies CI, repository safety, local tests, post-merge health, and cleanup.
 ---
 
 # Finishing a Development Branch
+
+## Contents
+
+- [Completion workflow](#the-process)
+- [Safe PR merge](merge.md) — mandatory procedure for existing PR merges: CI, working-tree, repository safety, local tests, merge mechanics, post-merge monitoring, and cleanup
+- [Branch-protection rules](../../CLAUDE.md#merging-prs-branch-protection) — canonical rules; read from PR base branch before any bypass
 
 ## Overview
 
@@ -81,7 +87,7 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 ### Step 2.75: Forge Retrospective
 
-**RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
+**RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
 
 ### Step 3.5: Noticed But Not Touching — Optional Issue Conversion
 
@@ -165,6 +171,8 @@ For ecosystems not in this matrix, extend it: manifest → type-check → lint �
 
 ### Step 6: Execute Choice
 
+For PR merge requests (including explicit requests to merge a PR), follow the [safe PR merge procedure](merge.md) as a finish subflow. It owns CI verification, working-tree and repository-safety checks, local `bash scripts/run_tests.sh` validation for Crucible, merge execution, post-merge health monitoring, and cleanup. The same procedure applies whether entered from Option 2 after PR creation or directly for an existing PR.
+
 #### Option 1: Merge Locally
 
 ```bash
@@ -209,6 +217,8 @@ python scripts/compass.py update \
 Then: If using a worktree, clean it up (Step 7)
 
 #### Option 2: Push and Create PR
+
+When the user requests a PR merge after creation, continue into the [safe PR merge procedure](merge.md); it is mandatory, not a separate skill invocation.
 
 **Repository Safety Check (before push):**
 ```bash
@@ -298,7 +308,7 @@ If the block exits with the "No CI checks configured" message, record that in th
 <!-- CANONICAL: shared/compass-protocol.md -->
 **Compass emit (after `gh pr checks --watch` returns green):**
 
-Run `compass update` (provisional arc-closure only). Do NOT emit `last_meaningful_commit` — CI green does not mean merged; the subsequent `/merge-pr` invocation writes the SHA. The `next_move` value comes from the caller's `--value` argument if provided, otherwise preserve the existing `next_move` (omit `--set next_move` entirely), or pass an empty string if neither.
+Run `compass update` (provisional arc-closure only). Do NOT emit `last_meaningful_commit` — CI green does not mean merged; the safe PR merge subflow writes the SHA after merge and post-merge CI. The `next_move` value comes from the caller's `--value` argument if provided, otherwise preserve the existing `next_move` (omit `--set next_move` entirely), or pass an empty string if neither.
 
 ```bash
 # If caller provided a next_move value:
@@ -432,7 +442,7 @@ git worktree remove <worktree-path>
 
 ## Defer-Ledger Corpus Seeding (#303)
 
-After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see the **Defer-ledger handoff (#303)** paragraph in `skills/quality-gate/SKILL.md` for the producer side and its `## Cost-Cap and Diminishing-Return Signals` section for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
+After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see the **Defer-ledger handoff (#303)** paragraph in `skills/quality-gate/recovery.md` for the producer side and `skills/quality-gate/cost-fix.md` › Cost-Cap and Diminishing-Return Signals for ledger format for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
 
 For each ledger file found, **create-or-append** the `## Accepted` section to `docs/retrospectives/defer-ledger/<issue-number>.md` (where `<issue-number>` is the GitHub issue number associated with this run; derive from branch name `<prefix>/<NNN>-...` or from the PR's linked issue). If the target file does not exist, create it (creating the `docs/retrospectives/defer-ledger/` directory first if absent) with a top-level `# Defer ledger — issue #<N>` header.
 
@@ -461,16 +471,16 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
 
 **Pairs with:**
 - **worktree** - Cleans up worktree (if applicable)
-- **crucible:red-team** — Adversarial review before presenting options. Note: finish uses `crucible:red-team` directly rather than `crucible:quality-gate` because it doesn't produce a typed artifact — it's a pre-completion sanity check, not an iterative gate.
+- **crucible:quality-gate (standalone red-team mode)** — Adversarial full loop before presenting options. Finish has no typed artifact, so select the preserved standalone red-team loop rather than the typed-artifact gate.
 
 **Recommended:**
 - **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)
-- **crucible:forge** — Retrospective between test audit and red-team (Step 2.75)
-- **crucible:merge-pr** — Handles merge execution with CI verification (Step 6, Option 2)
+- **crucible:getting-started** (`forge.md`) — Retrospective between test audit and red-team (Step 2.75)
+- **Safe PR merge subflow** — [merge.md](merge.md) handles merge execution with CI verification (Step 6, Option 2 or direct request).
 
 ## Gate Execution Ledger
 
-Before completing this skill, confirm every mandatory checkpoint was executed:
+Before completing this skill, copy this checklist into the response, mark each item as completed only after verifying it, and return to the missed step if any required item fails:
 
 - [ ] Test verification
 - [ ] Code review
@@ -479,5 +489,6 @@ Before completing this skill, confirm every mandatory checkpoint was executed:
 - [ ] Pre-push validation passed
 - [ ] Repository safety checked (if public repo, Option 2)
 - [ ] Post-push CI monitoring completed green (Option 2 only)
+- [ ] PR merge checkpoints completed when merging an existing PR ([merge.md](merge.md))
 
 **If any checkbox is unchecked, STOP. Go back and execute the missed gate.**

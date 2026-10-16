@@ -1,7 +1,14 @@
----
-name: consensus
-description: Multi-model consensus for high-stakes quality decisions. Opt-in MCP-based system that dispatches prompts to multiple LLM providers in parallel and synthesizes their responses. Used by quality-gate (stagnation judge, periodic red-team) and design (Challenger).
----
+# Contents
+
+- Overview · Tool Interface · `consensus_query` (MCP tool) · Consensus Modes
+- review · verdict · investigate · Configuration
+- Schema · Field Reference · Validation Rules · Graceful Degradation
+- Cost Estimation · Per-Query Cost Multiplier · Estimated Impact on Quality Gate Runs · Cost Management Recommendations
+- Red Flags · Never · Always · Integration Points
+- Active Integration · Excluded (with rationale) · Reconsideration Criteria · MCP Server Implementation Guide
+- Architecture · Provider Adapters · Parallel Dispatch · Aggregation
+- Testing
+
 
 ## Overview
 
@@ -206,7 +213,7 @@ Periodic application (rather than every-round) keeps cost manageable. A 10-round
 | inquisitor | 5-dimension dispatch | Subagents write and run tests — requires local filesystem and execution environment. External models cannot participate. |
 | quality-gate | Fix verifier | Mechanical check (did the fix address the finding?). Single-model Sonnet is sufficient. Multi-model adds cost without proportional value. |
 | quality-gate | Fix agent | Requires filesystem access to modify code/docs. External models cannot write local files. |
-| red-team | Standalone full-loop | When invoked directly (not via quality-gate), red-team runs its own stagnation loop. Consensus integration is at the quality-gate level, which owns the iteration. |
+| quality-gate red-team mode | Standalone full-loop | When invoked directly (not via quality-gate), the mode runs its own stagnation loop. Consensus integration is at the quality-gate level, which owns the iteration. |
 | design | Investigation agents | Domain Researcher, Impact Analyst all need filesystem access. External models cannot read the local codebase. Recon provides structural context but runs locally. |
 | build | Task implementation | Code generation requires filesystem access and project context. |
 
@@ -252,7 +259,7 @@ Uses `asyncio.gather()` with per-model timeout. Each model call is independent. 
 ### Aggregation
 
 After collecting responses, the aggregator:
-1. Selects the mode-specific prompt template from `skills/consensus/aggregation-{mode}-prompt.md`
+1. Selects the mode-specific prompt template from `skills/quality-gate/aggregation-{mode}-prompt.md`
 2. Injects all successful model responses (identified by provider name)
 3. Dispatches to the first configured Anthropic model (primary aggregator)
 4. Parses the structured JSON output from the aggregator response

@@ -10,7 +10,7 @@ Invocation (from repo root):
 are in bijection with the `name:` frontmatter of every `skills/*/SKILL.md`
 (no omission, no bogus row, no naming mismatch), that every on-disk skill is in
 `CATEGORIES` (and every `CATEGORIES` entry has a SKILL.md), and that every
-registered count token (README, workshop, plugin.json) equals the runtime skill
+registered count token (README, getting-started/workshop.md, plugin.json) equals the runtime skill
 count `n = len(parse_skill_names(root))`. The expected count is ALWAYS derived
 at runtime — never a literal — so the tool cannot reintroduce the stale-count
 bug it exists to retire.
@@ -42,9 +42,9 @@ CATEGORIES: dict[str, list[str]] = {
         "worktree", "parallel", "inquisitor", "migrate",
     ],
     "Quality & Audit": [
-        "delve", "audit", "siege", "consensus", "prospector", "quality-gate",
-        "red-team", "test-coverage", "temper", "review-feedback", "verify",
-        "finish", "dependency-audit", "warden",
+        "delve", "audit", "siege", "prospector", "quality-gate",
+        "test-coverage", "temper", "review-feedback", "verify",
+        "finish", "warden",
     ],
     "Debugging": [
         "debugging",
@@ -53,11 +53,10 @@ CATEGORIES: dict[str, list[str]] = {
         "forge", "project-init", "compass",
     ],
     "Utilities": [
-        "distill", "recall",
+        "distill",
     ],
     "Maintenance & Meta": [
-        "stocktake", "merge-pr", "anvil", "getting-started", "handoff",
-        "workshop", "orchestrator",
+        "stocktake", "anvil", "getting-started", "orchestrator",
     ],
     "Eval & Maintenance (internal)": [
         "cartographer-skill", "temper-eval-collect", "temper-eval-calibrate",
@@ -83,7 +82,7 @@ _GENERIC = re.compile(r"(~?)(\d+)([ -])(skills?)\b")
 _PLUGIN = re.compile(r"(\d+)( agent skills?)\b")
 COUNT_TARGETS: list[tuple[str, re.Pattern[str]]] = [
     ("README.md", _GENERIC),
-    ("skills/workshop/SKILL.md", _GENERIC),
+    ("skills/getting-started/workshop.md", _GENERIC),
     (".claude-plugin/plugin.json", _PLUGIN),
 ]
 
@@ -248,7 +247,7 @@ def check(root: pathlib.Path = ROOT) -> list[str]:
 
     # (7) count-target path existence + (5) count drift (every match == n, and
     # ≥1 match per target). These are doc-INDEPENDENT (they read README /
-    # workshop / plugin.json against runtime n, never the catalog region), so
+    # getting-started/workshop.md / plugin.json against runtime n, never the catalog region), so
     # they run BEFORE the missing-doc early return — a missing docs/skills.md
     # must not mask a co-occurring count drift.
     for relpath, regex in COUNT_TARGETS:

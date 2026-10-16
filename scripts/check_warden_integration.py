@@ -36,7 +36,7 @@ legitimately survives — build's eval-gate pointer lists "temper, inquisitor,
 optional siege, quality-gate" dispatches by name; build's warden step says "Do
 NOT separately invoke temper / inquisitor / siege / quality-gate"; finish's
 Step-2.75 note says "Run this BEFORE red-team"; finish's anti-pattern / Integration
-lines name `crucible:red-team` (Task 18 owns that disclosed-deferred prose). None
+lines name the retired `crucible:red-team` dispatch (Task 18 owns that disclosed-deferred prose). None
 of those are `Use crucible:<leg>`, so keying on the dispatch form leaves them be.
 
 SECTION-SCOPED, NOT WHOLE-FILE: build/SKILL.md carries the `## Phase 4: Completion`
@@ -231,7 +231,7 @@ After all tasks complete:
 3. **REQUIRED SUB-SKILL:** Use crucible:warden on the full implementation. warden
    runs temper + delve + red-team + siege + inquisitor. Do NOT separately invoke
    temper / inquisitor / siege / quality-gate here — warden is the sole gate.
-7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode).
+7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode).
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (record mode).
 11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's warden call**
     (warden already ran in build Phase 4 — the structural double-temper kill).
@@ -255,7 +255,7 @@ and red-team steps.
 
 ### Step 2.75: Forge Retrospective
 
-**RECOMMENDED SUB-SKILL:** Use crucible:forge — capture what happened. Run this
+**RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`) — capture what happened. Run this
 BEFORE red-team so the retrospective has the full execution state.
 
 ### Step 4: Determine Base Branch
@@ -282,7 +282,7 @@ def selftest() -> int:
         f"A1 (0 warden) should fire, got: {check_build(a1_zero)}")
     # A1 BAD (two): a second warden dispatch INSIDE the Phase-4 slice → A1 fires.
     a1_two = _GOOD_BUILD.replace(
-        "7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode).",
+        "7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode).",
         "7. **REQUIRED SUB-SKILL:** Use crucible:warden again.")
     assert any(e.startswith("A1") for e in check_build(a1_two)), (
         f"A1 (2 warden) should fire, got: {check_build(a1_two)}")
@@ -330,7 +330,7 @@ def selftest() -> int:
 
     # A6 BAD: a residual `Use crucible:red-team` DISPATCH in the review region.
     a6_bad = _GOOD_FINISH.replace(
-        "**RECOMMENDED SUB-SKILL:** Use crucible:forge — capture what happened.",
+        "**RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`) — capture what happened.",
         "**REQUIRED SUB-SKILL:** Use crucible:red-team on the changes.")
     assert any(e.startswith("A6") for e in check_finish(a6_bad)), (
         f"A6 (residual red-team dispatch) should fire, got: {check_finish(a6_bad)}")

@@ -4,6 +4,18 @@ version: 1
 
 # Compass Protocol (canonical)
 
+## Contents
+
+- [When to emit](#when-to-emit)
+- [Schema — `docs/compass.md`](#schema--docscompassmd)
+- [Bootstrap sentinel `<pending>`](#bootstrap-sentinel-pending)
+- [Concurrency / lock protocol](#concurrency--lock-protocol)
+- [RMW flow](#rmw-flow)
+- [Multi-arc collision — D8/D8.5 carve-out ordering](#multi-arc-collision--d8d85-carve-out-ordering)
+- [CLI surface](#cli-surface)
+- [D13 compact-form rendering](#d13-compact-form-rendering)
+- [Invariants index (C-1..C-9)](#invariants-index-c-1c-9)
+
 > Canonical write-protocol prompt for `docs/compass.md`, a per-repo arc-state
 > file. Referenced by every skill that reads or writes compass state via
 > `<!-- CANONICAL: shared/compass-protocol.md -->`.
@@ -18,9 +30,9 @@ Four integration points, in lifecycle order:
 | Caller | Event | Fields written |
 |--------|-------|----------------|
 | `build` | After Gate Ledger Initialization completes AND resume decision resolves, BEFORE Phase 1 IN_PROGRESS transition. NOT during crash-recovery branches. SKIPPED if user chose resume (prior arc's `current_arc` already correct). | `current_arc` |
-| `merge-pr` | After `gh pr merge` succeeds AND post-merge CI passes. | `last_meaningful_commit` |
+| `finish` safe PR merge subflow | After `gh pr merge` succeeds AND post-merge CI passes. | `last_meaningful_commit` |
 | `finish` Option 1 | After local merge + tests pass. | `last_meaningful_commit` + arc-closure patch (`current_arc=''`, `next_move`) |
-| `finish` Option 2 | After `gh pr checks --watch` returns green. Does NOT emit `last_meaningful_commit` — CI green != merged; the subsequent `/merge-pr` invocation writes the SHA. | provisional arc-closure patch only |
+| `finish` Option 2 | After `gh pr checks --watch` returns green. Does NOT emit `last_meaningful_commit` — CI green != merged; the safe PR merge subflow writes the SHA after merge and post-merge CI. | provisional arc-closure patch only |
 
 `finish` Options 3 and 4 emit nothing. `getting-started` reads (never writes)
 via `compass read --compact` before the dispatch table.
