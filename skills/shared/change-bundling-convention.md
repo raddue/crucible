@@ -105,10 +105,9 @@ into one bundle and dispatches one worker, exactly as today. The step only
 *changes* behavior when the diff is large enough that prompt-driven review would
 have risked skips; there it guarantees coverage that prompt-following cannot.
 
-## Consumers
+## Consumer
 
 - **warden** — the standalone pre-push gate (:acceptance on a many-file diff →
   fan review legs per bundle, so every changed file is covered exactly once).
-Each consumer's integration documents carry the canonical link and dispatch
-protocol above; neither re-implements the bundling rules — they call
-`scripts/change_bundling.py`.
+  It links this convention and calls `scripts/change_bundling.py`; the bundling
+  rules are not reimplemented in the skill.

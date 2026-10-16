@@ -52,7 +52,7 @@ uncovered (fail-closed).
   `coverage_report`); locale-sibling fold + directory affinity + size cap
   (10/bundle). Contract pinned by `scripts/test_change_bundling.py`.
 - **`scripts/check_change_bundling.py`** — structural CI gate pinning the
-  convention + both integration sites (`--selftest` + tree check, wired into
+  convention + warden integration (`--selftest` + tree check, wired into
   `scripts/run_tests.sh`).
 
 ## v1.9.0 — Calibration reporting moves out-of-repo — 2026-08-31

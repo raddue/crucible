@@ -9,7 +9,6 @@ A curated tour of the headline Crucible skills — the workflows a user typicall
 - [Pipelines (composition)](#pipelines-composition)
 - [What's not in this list (intentionally)](#whats-not-in-this-list-intentionally)
 - [See also](#see-also)
-A curated tour of the headline Crucible skills — the workflows a user typically invokes directly. Crucible ships ~26 skills total, including sub-skills dispatched internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -85,10 +84,7 @@ The big skills compose. The most common pipelines:
 
 Crucible has 26 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `inquisitor`, `checkpoint`, `verify`, plus quality-gate's red-team mode) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
-Crucible has ~26 skills; this list curates ~15. Skills omitted here are either:
-- **Sub-skills** dispatched by other skills (e.g., quality-gate red-team mode, `inquisitor`, `checkpoint`, `verify`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, consensus, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
