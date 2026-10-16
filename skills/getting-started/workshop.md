@@ -1,6 +1,6 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 36 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships 33 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 ## Contents
 
@@ -10,6 +10,11 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 - [What's not in this list (intentionally)](#whats-not-in-this-list-intentionally)
 - [See also](#see-also)
 
+<<<<<<< HEAD
+=======
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~33 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+
+>>>>>>> origin/dev
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
 ## Pick by what you're doing
@@ -82,9 +87,15 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has 36 skills; this list curates ~15. Skills omitted here are either:
+<<<<<<< HEAD
+Crucible has 33 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `checkpoint`, `verify`) — invoked indirectly, not part of the user-facing menu.
 - **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+=======
+Crucible has ~33 skills; this list curates ~15. Skills omitted here are either:
+- **Sub-skills** dispatched by orchestrators (e.g., quality-gate red-team mode, `inquisitor`, `checkpoint`, `verify`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, `review-feedback`, quality-gate consensus mechanism, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+>>>>>>> origin/dev
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -92,4 +103,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 36-skill catalog with eval deltas
+- `docs/skills.md` — full 33-skill catalog with eval deltas

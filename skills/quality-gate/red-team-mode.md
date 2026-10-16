@@ -1,7 +1,12 @@
----
-name: red-team
-description: Use when you need adversarial review of any artifact — design docs, implementation plans, code, PRs, or documentation. Iterates until clean or stagnation.
----
+# Contents
+
+- Overview · Skill Arguments (added by #303) · When to Use · The Iterative Loop
+- Rules · Stagnation Detection · Issue Classification · Per-Round Ledger and Cost-Cap Signals (standalone mode only, #303)
+- Accepted · Deferred (v1.0 — empty in v0.1) · How to Use · 1. Determine artifact type and fix mechanism
+- 2. Dispatch Devil's Advocate · 3. Process findings · 4. Re-review after fixes · What the Devil's Advocate is NOT
+- Depth Calibration · The Iron Law · Rationalization Prevention · Red Flags
+- Dual-Mode Operation · Terminal Verdict Emit · External Model Review (Optional) · Integration
+
 
 # Red Team
 
@@ -14,7 +19,7 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 
 **Core principle:** Fresh eyes every round. No anchoring, no confirmation bias.
 
-**Announce at start:** "I'm using the red-team skill to adversarially review this artifact."
+**Announce at start:** "I'm using quality-gate red-team mode to adversarially review this artifact."
 
 ## Skill Arguments (added by #303)
 
@@ -23,12 +28,12 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 | `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis defaults) | Standalone-mode only: LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. |
 | `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Standalone-mode only: count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). |
 
-These args apply ONLY in standalone-mode iterative-loop invocations. When red-team is invoked single-pass by `crucible:quality-gate`, QG owns the loop and these args are ignored — QG emits its own ledger.
+These args apply ONLY in standalone-mode iterative-loop invocations. When quality-gate red-team mode is invoked single-pass by the full quality-gate loop, QG owns the loop and these args are ignored — QG emits its own ledger.
 
 **Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
 
-- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/SKILL.md`): **10** for code artifacts, **3** for hypothesis artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
-- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/red-team`; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
+- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/loop.md`): **10** for code artifacts, **3** for hypothesis artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
+- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/quality-gate` red-team mode; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
 
 ## When to Use
 
@@ -107,7 +112,7 @@ Cost-cap signal: <fired | not fired>
 (none)
 ```
 
-The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signal_findings` values (those args control prompts, not emission). The ledger format is **unchanged**; its `Total findings: N (F: x, S: y, M: z)` counts now derive from the orchestrator's own section count of the cited findings file (the same single source as the score, #366 — the same population step 3 below defines; see `skills/quality-gate/SKILL.md`'s `qg-score-second-pass-population` CONTRACT block, Score source step 7, for the parse; #561 fresh round 7 M6), with the receipt's `SEVERITY-COUNTS:` line as a declared cross-check.
+The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signal_findings` values (those args control prompts, not emission). The ledger format is **unchanged**; its `Total findings: N (F: x, S: y, M: z)` counts now derive from the orchestrator's own section count of the cited findings file (the same single source as the score, #366 — the same population step 3 below defines; see `skills/quality-gate/loop.md`'s `qg-score-second-pass-population` CONTRACT block, Score source step 7, for the parse; #561 fresh round 7 M6), with the receipt's `SEVERITY-COUNTS:` line as a declared cross-check.
 
 **Diminishing-return signal (standalone-mode, interactive only, #303):** When `dr_signal_findings != null` AND LOCAL round ≥ 2 AND the count of NEW (delta-vs-prior-round) Fatal+Significant findings ≤ `dr_signal_findings`, emit prompt: "Red-team round N surfaced only K NEW Fatal+Significant findings. Diminishing returns reached. Continue or escalate?" Non-interactive: log `DR signal: fired` in the round ledger; no prompt; loop continues.
 
@@ -150,7 +155,7 @@ type-resolution failure, not a transcript/metadata read.
 
 ### 3. Process findings
 
-**Single source of truth (#366, widened #561).** The reviewer `WROTE`s its rich findings to the cited findings file (`[FINDINGS_OUTPUT_PATH]`) and returns an `RCPT v1.1` receipt citing it. **Both** the qualitative branches below **and** the weighted-score loop (step 4) derive from the **orchestrator's own count of the cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections, plus any Fatal/Significant-severity entries under `### Second Pass Findings`** — the **same single source**, so the qualitative verdict and the score cannot diverge. The receipt's CLAIMS / `SEVERITY-COUNTS:` line remain reviewer-declared cross-checks, **not** the score source. **For the entry definition, severity-value normalization/boundary rule, and fence-parity handling this population count depends on — including on a standalone invocation, which loads neither `red-team-prompt.md`'s report-format bracket detail nor `quality-gate/SKILL.md`'s CONTRACT block by default — see `skills/quality-gate/SKILL.md`'s `qg-score-second-pass-population` CONTRACT block (Score source, step 7); do not re-derive the parse from memory here (#561 round 4 F2, #561 fresh round 6 S4).**
+**Single source of truth (#366, widened #561).** The reviewer `WROTE`s its rich findings to the cited findings file (`[FINDINGS_OUTPUT_PATH]`) and returns an `RCPT v1.1` receipt citing it. **Both** the qualitative branches below **and** the weighted-score loop (step 4) derive from the **orchestrator's own count of the cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections, plus any Fatal/Significant-severity entries under `### Second Pass Findings`** — the **same single source**, so the qualitative verdict and the score cannot diverge. The receipt's CLAIMS / `SEVERITY-COUNTS:` line remain reviewer-declared cross-checks, **not** the score source. **For the entry definition, severity-value normalization/boundary rule, and fence-parity handling this population count depends on — including on a standalone invocation, which loads neither `red-team-prompt.md`'s report-format bracket detail nor `quality-gate/loop.md`'s CONTRACT block by default — see `skills/quality-gate/loop.md`'s `qg-score-second-pass-population` CONTRACT block (Score source, step 7); do not re-derive the parse from memory here (#561 round 4 F2, #561 fresh round 6 S4).**
 
 - **No Fatal/Significant issues** (cited findings file has zero `### Fatal Challenges` / `### Significant Challenges` entries, and zero Fatal/Significant-severity entries under `### Second Pass Findings`)**:** Artifact is approved. Proceed. **Directional exception (#561 fresh round 7 S4, mirroring quality-gate's Score source rule step 7):** this approval is void when the receipt's declared `SEVERITY-COUNTS:` fatal+significant total EXCEEDS the orchestrator's own counted population computed above — including when that own count is 0/0 — because a well-intentioned but malformed second-pass Fatal (no line-initial `**Finding:**`/`**Severity:**` marker anywhere) counts 0 under the strict widened parse while the reviewer's own declared total says otherwise (eval #15's exact fixture shape). On that discrepancy the artifact is **NOT approved**: surface both the declared `SEVERITY-COUNTS:` numbers and the orchestrator's own counted numbers, plus the findings file, and route to the fix mechanism as if Fatal/Significant issues were found. **Empty-work-order carve-out (#561 fresh round 9 S3, mirroring quality-gate's own Empty-work-order exception for the identical condition, Score source rule step 7):** when the orchestrator's own counted population is 0 Fatal and 0 Significant, this discrepancy does NOT route to the fix mechanism — dispatching a fix agent against an empty work order is reachable only through a wrongly-attributed `no-op-fix`/`Stagnation` escalation (#561 round 4 SP1) — instead escalate to the user, surfacing the declared `SEVERITY-COUNTS:` numbers and the orchestrator's own counted numbers. When the orchestrator's own count is non-zero, the fix-mechanism routing above still applies.
 - **Fatal/Significant issues found** (cited findings file has ≥1 such entry)**:** Compute the weighted score (Fatal=3, Significant=1) from those sections, including any Fatal/Significant-severity entries under `### Second Pass Findings`. Dispatch fix mechanism. Then go to step 4.
@@ -162,7 +167,7 @@ type-resolution failure, not a transcript/metadata read.
 
 ### 4. Re-review after fixes
 
-Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_type: crucible-red-team`). Compute the weighted score from the **same single source** — the orchestrator's count of the new round's cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections, plus any Fatal/Significant-severity entries under `### Second Pass Findings` (not from the return prose, not from CLAIMS) — parsed per `skills/quality-gate/SKILL.md`'s `qg-score-second-pass-population` CONTRACT block (Score source, step 7) as in step 3 above (#561 fresh round 6 S4) — and compare. **Directional exception, NOT-SATISFIABLE treatment (#561 fresh round 7 S4; corrected #561 fresh round 10 S2; replaced #561 fresh round 12 S3):** applies here too, by reference to step 3's own statement of it — when the new round's declared `SEVERITY-COUNTS:` total EXCEEDS the orchestrator's own count, the comparison is **NOT-SATISFIABLE**: draw neither a progress nor a regression conclusion from it — mirroring quality-gate's own Comparability gate (`quality-gate/SKILL.md` › Stagnation Detection > First-Pass Check), which excludes a discrepancy-blocked round from cross-round comparison rather than forcing it into either branch. This replaces step 4's prior UNLESS-clause forcing, which round 11 S3 showed is the exact logical complement of the Progress/Stagnation split below and so could never change an outcome (own-count-lower+discrepancy → UNLESS fires → Progress; own-count-same-or-higher+discrepancy → exception forces non-progress → Stagnation — identical to what the branches below already produce unaided). **Step-4 empty-work-order carve-out (#561 fresh round 10 S2, mirroring step 3's own carve-out for the identical condition):** when the orchestrator's own counted population for the new round is 0 Fatal and 0 Significant, this discrepancy skips the not-satisfiable loop and escalates to the user directly, surfacing the declared `SEVERITY-COUNTS:` numbers and the orchestrator's own counted numbers, exactly as step 3's carve-out does (dispatching another fix round against an empty work order is reachable only through a wrongly-attributed no-op/Stagnation escalation, which looping here would walk straight into):
+Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_type: crucible-red-team`). Compute the weighted score from the **same single source** — the orchestrator's count of the new round's cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections, plus any Fatal/Significant-severity entries under `### Second Pass Findings` (not from the return prose, not from CLAIMS) — parsed per `skills/quality-gate/loop.md`'s `qg-score-second-pass-population` CONTRACT block (Score source, step 7) as in step 3 above (#561 fresh round 6 S4) — and compare. **Directional exception, NOT-SATISFIABLE treatment (#561 fresh round 7 S4; corrected #561 fresh round 10 S2; replaced #561 fresh round 12 S3):** applies here too, by reference to step 3's own statement of it — when the new round's declared `SEVERITY-COUNTS:` total EXCEEDS the orchestrator's own count, the comparison is **NOT-SATISFIABLE**: draw neither a progress nor a regression conclusion from it — mirroring quality-gate's own Comparability gate (`quality-gate/stagnation.md` › Stagnation Detection > First-Pass Check), which excludes a discrepancy-blocked round from cross-round comparison rather than forcing it into either branch. This replaces step 4's prior UNLESS-clause forcing, which round 11 S3 showed is the exact logical complement of the Progress/Stagnation split below and so could never change an outcome (own-count-lower+discrepancy → UNLESS fires → Progress; own-count-same-or-higher+discrepancy → exception forces non-progress → Stagnation — identical to what the branches below already produce unaided). **Step-4 empty-work-order carve-out (#561 fresh round 10 S2, mirroring step 3's own carve-out for the identical condition):** when the orchestrator's own counted population for the new round is 0 Fatal and 0 Significant, this discrepancy skips the not-satisfiable loop and escalates to the user directly, surfacing the declared `SEVERITY-COUNTS:` numbers and the orchestrator's own counted numbers, exactly as step 3's carve-out does (dispatching another fix round against an empty work order is reachable only through a wrongly-attributed no-op/Stagnation escalation, which looping here would walk straight into):
 - **Discrepancy is not-satisfiable (declared total exceeds the orchestrator's own count, own count non-zero):** loop back to step 3, per the not-satisfiable treatment above — draw no progress/regression conclusion this round.
 - **Strictly lower weighted score (by the orchestrator's own count, no not-satisfiable discrepancy above):** Progress. Loop back to step 3.
 - **Same or higher weighted score (by the orchestrator's own count, no not-satisfiable discrepancy above):** Stagnation. Escalate to user with findings from both rounds.
@@ -240,7 +245,7 @@ Red-team operates in two modes depending on the caller:
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
+**Direct red-team mode only.** When operating in single-pass mode (invoked by the full quality-gate loop), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
 
 When the iterative loop reaches its terminal verdict (clean — no Fatal/Significant — or an escalation exit: stagnation / architectural concern), emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
@@ -250,7 +255,7 @@ When the iterative loop reaches its terminal verdict (clean — no Fatal/Signifi
 
 ## External Model Review (Optional)
 
-**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate handles its own external review integration.
+**Direct red-team mode only.** When operating in single-pass mode (invoked by the full quality-gate loop), skip this section entirely — quality-gate handles its own external review integration.
 
 After dispatching the host red-team subagent, call the `external_review` MCP tool with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
@@ -271,4 +276,4 @@ Append external perspectives after the host Devil's Advocate findings in the out
 **Pairs with:**
 - **crucible:design** innovation pass (`design/innovation.md`) — runs before red-team at each gate
 
-See prompt template: `red-team/red-team-prompt.md`
+See prompt template: `quality-gate/red-team-prompt.md`

@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Create `.claude/consensus-config.yaml` in your project root. See `skills/consensus/consensus-config-example.yaml` for an annotated example.
+Create `.claude/consensus-config.yaml` in your project root. See `skills/quality-gate/consensus-config-example.yaml` for an annotated example.
 
 Minimal config:
 ```yaml
@@ -92,4 +92,4 @@ All tests use mocked API responses — no live API keys needed.
 - **verdict** — Binary/ternary decision aggregation (used by quality-gate stagnation judge)
 - **investigate** — Exploratory analysis aggregation (used by design Challenger)
 
-See `skills/consensus/SKILL.md` for full documentation.
+See `skills/quality-gate/consensus-mechanism.md` for full documentation.

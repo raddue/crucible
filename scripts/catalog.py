@@ -42,9 +42,9 @@ CATEGORIES: dict[str, list[str]] = {
         "worktree", "parallel", "inquisitor", "migrate",
     ],
     "Quality & Audit": [
-        "delve", "audit", "siege", "consensus", "quality-gate",
-        "red-team", "test-coverage", "temper", "review-feedback", "verify",
-        "finish", "dependency-audit", "warden",
+        "delve", "audit", "siege", "quality-gate",
+        "test-coverage", "temper", "review-feedback", "verify",
+        "finish", "warden",
     ],
     "Debugging": [
         "debugging",

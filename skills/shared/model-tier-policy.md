@@ -72,7 +72,7 @@ runtime dispatch gate and must not be used to stop a live dispatch.
 
 - **The `high` profile is the default** for every reasoning role except three roles
   that are not Opus-pinned — `crucible-qg-fix` (Sonnet, below), the
-  standalone `/red-team` fix dispatch, and dependency-audit's inline path
+  standalone `/quality-gate` red-team mode fix dispatch, and dependency-audit's inline path
   (the latter two unpinned/session, residual (a)); the `standard` profile for cheap
   mechanical checks (`crucible-qg-judge` /
   `crucible-qg-verifier`) and for the fix agent (`crucible-qg-fix` — the
@@ -154,8 +154,8 @@ checker guarantee):**
 
 - **(a) `inherit` / session-model roles.** Dependency-audit's inline-on-session
   path has no static pin to catch (`crucible-qg-fix` was the other member of
-  this residual until #537 pinned it to Sonnet). The standalone-or-`finish`-driven `/red-team`
-  fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table) is now a
+  this residual until #537 pinned it to Sonnet). The standalone-or-`finish`-driven quality-gate red-team mode
+  fix-mechanism dispatch (`quality-gate/red-team-mode.md` fix-mechanism table) is now a
   member by the same "no static pin to catch" test — it stayed on the
   inherited/session model when `crucible-qg-fix` pinned away from it (#537;
   see #538). **Operator convention: do not run gate/build/siege — or

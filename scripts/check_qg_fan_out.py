@@ -242,6 +242,8 @@ Exits 0 when aligned, 1 with a `- <error>` list otherwise. Stdlib only.
 See scripts/CHECKER_CONVENTIONS.md.
 """
 from __future__ import annotations
+from qg_source import read_runbook
+
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1232,7 +1234,7 @@ def check_persistence(text: str) -> list[str]:
 
 def _read(path: pathlib.Path, errs: list[str]) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return read_runbook() if path == SKILL else path.read_text(encoding="utf-8")
     except (FileNotFoundError, UnicodeDecodeError, OSError) as err:
         errs.append(f"{path} missing or unreadable: {err}")
         return None

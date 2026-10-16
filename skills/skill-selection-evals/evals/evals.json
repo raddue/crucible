@@ -39,10 +39,14 @@
       "common_mistakes": [
         "test-coverage",
         "test-driven-development",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
+<<<<<<< HEAD
       "reasoning": "Implementation is done — this is not TDD or test-coverage. Inquisitor's per-task mode absorbs adversarial-tester and writes tests designed to make this implementation break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
+=======
+      "reasoning": "Implementation is done — this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Inquisitor per-task mode reads implementation diffs and writes tests designed to make them break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
+>>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -130,14 +134,13 @@
       "dimension": "direct",
       "boundary": "adversarial-scope",
       "prompt": "I just finished the design doc for the new notification service. Red-team it.",
-      "expected_skill": "red-team",
+      "expected_skill": "quality-gate",
       "common_mistakes": [
         "audit",
-        "quality-gate",
         "siege"
       ],
       "context": "Single artifact (design doc) ready for adversarial review. Not a full codebase review, not a security audit.",
-      "reasoning": "Red-team is for adversarial review of a single artifact (design doc, plan, code, PR). Audit reviews existing codebase subsystems through parallel lenses. Quality-gate iterates with fixes until clean. Siege is specifically security-focused. The key signal is 'red-team it' on a single artifact.",
+      "reasoning": "Quality-gate red-team mode preserves the standalone adversarial loop on one artifact; audit remains subsystem review and siege is security-specific.",
       "difficulty": "easy"
     },
     {
@@ -147,7 +150,7 @@
       "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem — correctness, robustness, architecture, everything.",
       "expected_skill": "audit",
       "common_mistakes": [
-        "red-team",
+        "quality-gate red-team mode",
         "temper",
         "recon"
       ],
@@ -163,7 +166,7 @@
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Full feature assembled from multiple components. Need to find integration issues across component boundaries, not review a single artifact or existing subsystem.",
       "reasoning": "Inquisitor full-feature mode runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Inquisitor per-task mode finds edge cases in one implementation.",
@@ -177,7 +180,7 @@
       "expected_skill": "siege",
       "common_mistakes": [
         "audit",
-        "red-team"
+        "quality-gate red-team mode"
       ],
       "context": "Despite using the word 'audit', the focus is specifically on security. This narrows the scope from general audit to security audit.",
       "reasoning": "Siege is the security-specific audit — dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture — broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
@@ -501,7 +504,11 @@
         "workshop"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
+<<<<<<< HEAD
       "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository and optional cross-repo topology before a task. Getting-started is conversation bootstrap, not codebase onboarding.",
+=======
+      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
+>>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -514,7 +521,7 @@
         "project-init"
       ],
       "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
-      "reasoning": "\"Give me a tour\" of the tools routes to getting-started\u2019s workshop tour reference, not codebase onboarding (project-init).",
+      "reasoning": "\"Give me a tour\" of the tools routes to getting-started’s workshop tour reference, not codebase onboarding (project-init).",
       "difficulty": "hard"
     },
     {
@@ -528,7 +535,11 @@
         "getting-started"
       ],
       "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
+<<<<<<< HEAD
       "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap.",
+=======
+      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). getting-started's workshop reference tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
+>>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -542,7 +553,11 @@
         "audit"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
+<<<<<<< HEAD
       "reasoning": "Select task-scoped investigation to map the auth surface for a specific upcoming change. Whole-repo onboarding is not task-scoped; improvement discovery searches for architectural friction, not how auth works.",
+=======
+      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. project-init is first-time whole-repo onboarding (not scoped to a task). prospector hunts architectural friction/improvements, not how-it-works investigation.",
+>>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -556,7 +571,11 @@
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
+<<<<<<< HEAD
       "reasoning": "Select improvement discovery to find architectural friction and propose redesigns. Task investigation answers how-it-works questions; audit reviews a specified subsystem, not an open-ended improvement hunt.",
+=======
+      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+>>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -564,13 +583,22 @@
       "dimension": "negative",
       "boundary": "explore-vs-improve",
       "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
+<<<<<<< HEAD
       "expected_skill": "recon",
+=======
+      "expected_skill": "project-init",
+>>>>>>> origin/dev
       "common_mistakes": [
         "workshop",
         "getting-started"
       ],
+<<<<<<< HEAD
       "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for recon whole-repo-onboarding mode over recon.",
       "reasoning": "Select whole-repo onboarding for first-time mapping and sibling-repo topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
+=======
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for project-init over recon.",
+      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
+>>>>>>> origin/dev
       "difficulty": "hard"
     },
     {
@@ -584,7 +612,11 @@
         "audit"
       ],
       "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
+<<<<<<< HEAD
       "reasoning": "Select task-scoped investigation: this is one module in service of a specific upcoming change. Whole-repo onboarding is unnecessary; improvement discovery is for architectural friction, not understanding the current refund flow.",
+=======
+      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. project-init would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. prospector hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
+>>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -719,7 +751,7 @@
         "design"
       ],
       "context": "The user wants a session-to-session handoff note, not a durable architectural decision record.",
-      "reasoning": "getting-started\u2019s handoff reference (handoff.md) writes session handoff docs. design\u2019s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
+      "reasoning": "getting-started’s handoff reference (handoff.md) writes session handoff docs. design’s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
       "difficulty": "medium"
     },
     {
@@ -732,7 +764,11 @@
         "design"
       ],
       "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
+<<<<<<< HEAD
       "reasoning": "Grudge stores bug regression memory; design decision records store decisions with alternatives, not bugs.",
+=======
+      "reasoning": "grudge is the book of grudges — bug regression memory. design’s decision-record subflow records decisions with alternatives, not bugs.",
+>>>>>>> origin/dev
       "difficulty": "easy"
     },
     {
@@ -745,7 +781,7 @@
         "design"
       ],
       "context": "The work is complete and the user wants to integrate it.",
-      "reasoning": "finish wraps up completed work. design\u2019s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
+      "reasoning": "finish wraps up completed work. design’s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
       "difficulty": "medium"
     },
     {
@@ -772,7 +808,7 @@
         "design"
       ],
       "context": "Completion-shaped wrap-up language after a merge.",
-      "reasoning": "'record where we ended up' is completion framing. design\u2019s decision-record subflow requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
+      "reasoning": "'record where we ended up' is completion framing. design’s decision-record subflow requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
       "difficulty": "hard"
     },
     {
@@ -785,7 +821,11 @@
         "design"
       ],
       "context": "A question seeking an answer about a past decision, not a request to record one.",
+<<<<<<< HEAD
       "reasoning": "Recall and recon mine existing decisions. Design's decision-record subflow writes eligible decisions and refuses on a settled decision as a way to answer past-decision questions.",
+=======
+      "reasoning": "getting-started's recall reference queries session history and recon mines docs/decisions/ — both read sides. design’s decision-record subflow writes and refuses on a settled decision — it has no answer output.",
+>>>>>>> origin/dev
       "difficulty": "medium"
     },
     {
@@ -915,7 +955,7 @@
       "id": "session-hub-recall-01",
       "dimension": "direct",
       "boundary": "session-hub",
-      "prompt": "Recall errors from this session \u2014 what failed before compaction?",
+      "prompt": "Recall errors from this session — what failed before compaction?",
       "expected_skill": "getting-started",
       "common_mistakes": [
         "debugging",
@@ -951,6 +991,48 @@
       "context": "Catalog question before choosing a tool; the user has not asked for a review yet.",
       "reasoning": "The workshop catalog tour (getting-started/workshop.md) answers which skill fits and names /temper; invoking temper now would start a review nobody asked for.",
       "difficulty": "medium"
+    },
+    {
+      "id": "quality-gate-consensus-direct-01",
+      "dimension": "direct",
+      "boundary": "consensus-mechanism",
+      "prompt": "Run a multi-model consensus stagnation judge on this design review; use the optional MCP if configured.",
+      "expected_skill": "quality-gate",
+      "common_mistakes": [
+        "design",
+        "audit"
+      ],
+      "context": "Gate round needs independent verdict synthesis; no new design requested.",
+      "reasoning": "Quality-gate owns the optional consensus mechanism and graceful fallback.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "quality-gate-dependency-direct-01",
+      "dimension": "direct",
+      "boundary": "dependency-audit-lane",
+      "prompt": "Audit dependencies in this repo for CVEs. Check npm, Cargo and Python manifests and report normalized severity.",
+      "expected_skill": "quality-gate",
+      "common_mistakes": [
+        "siege",
+        "audit"
+      ],
+      "context": "Standalone supply-chain preflight, not code red-teaming.",
+      "reasoning": "Quality-gate dependency-audit lane preserves standalone scanning and output semantics.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "quality-gate-red-team-direct-02",
+      "dimension": "direct",
+      "boundary": "adversarial-scope",
+      "prompt": "Red-team this implementation plan, then have fresh reviewers recheck any fixes until clean or stagnated.",
+      "expected_skill": "quality-gate",
+      "common_mistakes": [
+        "audit",
+        "temper"
+      ],
+      "context": "Standalone iterative adversarial review of a plan.",
+      "reasoning": "Quality-gate red-team mode preserves iterative fresh-eyes loop.",
+      "difficulty": "easy"
     }
   ]
 }

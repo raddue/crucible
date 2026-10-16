@@ -142,7 +142,7 @@ This block is passed to the explorer agent, all root cause agents, all analysis 
 ### Pre-Exploration Context
 
 - **RECOMMENDED:** Consult `/recon` persistent-map mode — load known module boundaries, conventions, landmines
-- **RECOMMENDED:** Consult `crucible:forge` (feed-forward mode) — check past retrospectives for known pain points
+- **RECOMMENDED:** Consult `crucible:getting-started` (`forge.md`) (feed-forward mode) — check past retrospectives for known pain points
 
 ### Write Invocation State
 
@@ -705,12 +705,12 @@ After context compaction:
 
 ## Integration
 
-- **Consults:** `/recon` persistent-map mode, `crucible:forge` (feed-forward mode)
+- **Consults:** `/recon` persistent-map mode, `crucible:getting-started` (`forge.md`) (feed-forward mode)
 - **Records to:** `/recon` persistent-map mode — user-approved friction point locations and classifications only
 - **Hands off to:** `/design` — develops selected redesign proposal into a design doc; `/build` may then implement approved design
 - **Complementary to:** `crucible:audit` — audit finds systemic defects, recon improvement discovery finds structural improvements. Run discovery before audit when both are planned.
 - **Called by:** Standalone only (user invokes directly)
-- **Does NOT use:** `crucible:quality-gate` (improvement discovery is advisory, not a fix loop), `crucible:red-team`
+- **Does NOT use:** `crucible:quality-gate` (improvement discovery is advisory, not a fix loop), `crucible:quality-gate` red-team mode.
 - Does not dispatch task investigation; organic exploration serves a different purpose than structured investigation. It does not dispatch design approach evaluation; competing redesign exploration is a distinct discovery output. See #147 for rationale.
 - **Triggered by:** user requests for prospector-style architectural friction discovery, refactor candidates, or “what should I refactor?”
 

@@ -210,7 +210,7 @@ Per leg:
 - **quality-gate (red-team leg)** — loops+fixes its red-team rounds (its own
   loop). quality-gate's `code` fixes are **working-tree edits, never committed**: the
   fix agent's capabilities are `apply-edits` + `run-tests` with no git step
-  (`quality-gate/SKILL.md:75`), those edits run against the working tree, the pre-qg-fix
+  (`quality-gate/loop.md`), those edits run against the working tree, the pre-qg-fix
   **checkpoint snapshots the working directory as rollback** (`:460` — which only makes
   sense because code fixes mutate that tree), and there is no `git commit` anywhere in
   quality-gate's directory. The leg is invoked so its internal
@@ -410,7 +410,7 @@ commit):
    / I-W4). This leg **edits the working tree** — it
    loops+fixes its red-team rounds but, like temper and delve, **does not commit** (its
    fix agent has `apply-edits`/`run-tests` and no git step,
-   `quality-gate/SKILL.md:75,462`). So **warden commits the red-team leg's residual
+   `quality-gate/loop.md`). So **warden commits the red-team leg's residual
    working-tree changes, if any**, here — `chore(warden): red-team fixes <run-id>`,
    non-`fix:` subject per M-c — advancing HEAD **before the terminating leg (step 4)
    and the freeze**. The red-team fix range is then **`SHA_pre_redteam..HEAD`** — a
@@ -506,7 +506,7 @@ Enforcement teeth:
 ## Verdict marker ownership (F2 — single build-tagged emitter)
 
 Two facts make a naive delegation fail-open: quality-gate *always* writes its
-marker even as a sub-skill (`quality-gate/SKILL.md:1111`) and *never* deletes it
+marker even as a sub-skill (`quality-gate/verdict.md`) and *never* deletes it
 ("build orchestrator is responsible for their lifecycle"). If warden invoked the
 red-team leg with **build's** PipelineID, both the leg and warden would write a
 `gate-verdict-*.md` carrying build's PipelineID with potentially divergent
@@ -517,7 +517,7 @@ So:
 - warden invokes the quality-gate red-team leg with **`mode: full`** and **warden's own run-id** as the
   PipelineID (and `Phase: code`), **not** build's PipelineID. A PipelineID is
   present, so the leg stays **non-interactive** — quality-gate does not drop into
-  standalone between-rounds check-in mode (`quality-gate/SKILL.md:1111`; this
+  standalone between-rounds check-in mode (`quality-gate/loop.md`; this
   resolves M3) — while its `gate-verdict-<warden-run-id>.md` marker carries
   warden's run-id and therefore **never matches build's PipelineID filter**.
 - warden writes the **one** `gate-verdict-*.md` that carries **build's** PipelineID
@@ -544,7 +544,7 @@ warden emits **no** `code` calibration entry to `runs.jsonl` — it writes
 no calibration row of its own. Each leg **self-emits its native per-skill calibration
 entry**, exactly as it does under build today: temper's Tier-A `code` entry
 (`temper/SKILL.md:323`), siege's (`siege/SKILL.md:690`), the quality-gate red-team
-leg's terminal `code` entry (`quality-gate/SKILL.md:1066`, unconditional), and
+leg's terminal `code` entry (`quality-gate/verdict.md`, unconditional), and
 delve's and inquisitor's Tier-B **stub** `code` entries (`delve/SKILL.md:164`,
 `inquisitor/SKILL.md:222`; `backfilled:false`, no merge verdict — a stub entry, not
 *no* entry). None are suppressed, and **no leg's SKILL.md is edited** (Option C).
@@ -580,7 +580,7 @@ for something warden solved.
 
 Consistent with the LOCKED double-siege decision, warden does **not** pass
 `skip_siege`/`force_siege` to the quality-gate red-team leg (they are real
-`quality-gate/SKILL.md:187-188` params); suppressing the QG-internal siege would
+`quality-gate/loop.md` params); suppressing the QG-internal siege would
 silently break warden's second siege pass (I-W4). Per-leg forensics at gate time
 also live in (a) the sectioned-per-reviewer report (I-W2) and (b) the per-reviewer
 receipts bound into `receipt-ledger.jsonl` (see Dispatch + return conventions).
@@ -664,7 +664,7 @@ The boundary is asserted by selection-eval prompts in `skills/skill-selection-ev
 - **`reviewer-set` default (fail-safe toward coverage, S3 / I-W9).** warden distinguishes
   a **sub-skill** invocation from a **standalone** one by the **presence of `Phase` +
   `PipelineID`** in the dispatch context — the *same* detection mechanism quality-gate uses
-  (`quality-gate/SKILL.md:186`). Given that discrimination: the standalone `/warden` entry
+  (`quality-gate/loop.md`). Given that discrimination: the standalone `/warden` entry
   (no Phase/PipelineID) defaults to `standalone`; a **sub-skill dispatch (Phase+PipelineID
   present) that omits `reviewer-set` defaults to `full`** — the higher-coverage set,
   matching build's intent — so a mis-edited sub-skill call site that drops just the
@@ -850,7 +850,7 @@ numbers are added.
   not papered over (Ordering step 0 / I-W6). No auto-save/restore machinery: warden pushes
   the precondition back to the user, exactly as it does for a detached HEAD.
 - **Standalone finish (not from build) through warden (M3)**: finish today uses
-  `crucible:red-team` directly because at finish time there is "no typed artifact." Routed
+  `crucible:quality-gate (red-team mode)` directly because at finish time there is "no typed artifact." Routed
   through warden, the red-team leg is always `crucible:quality-gate` on artifact `code`,
   invoked with **warden's own run-id** as PipelineID — so it runs non-interactively (no
   between-rounds check-ins) in the standalone-finish path as well as inside build. warden's

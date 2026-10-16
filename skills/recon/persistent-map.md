@@ -409,7 +409,7 @@ Cartographer and Forge are complementary:
 - **Together** they eliminate the `wrong-assumption` deviation type that Forge keeps logging
 
 During feed-forward, both run:
-1. `crucible:forge` feed-forward → process warnings
+1. `crucible:getting-started` (`forge.md`) feed-forward → process warnings
 2. `/recon` persistent-map mode consult → structural awareness
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.

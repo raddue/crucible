@@ -51,7 +51,7 @@ version: 1
 **Sub-skill inheritance:** Sub-skills (quality-gate, red-team, design's innovation pass, etc.) use the **parent orchestrator's dispatch directory and seq counter**. Two passing mechanisms:
 
 1. **Subagent dispatches** (Agent/Task tool): The `Dispatch-Dir:` header field in the dispatch file carries the path. Subagents extract it and use it for their own dispatches.
-2. **Skill invocations** (crucible:quality-gate, crucible:red-team, etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
+2. **Skill invocations** (crucible:quality-gate, crucible:quality-gate (red-team mode), etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
 
 Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup. The seq counter MUST be recovered from the manifest (last `seq` + 1) immediately before each dispatch — do not cache across dispatches. Nested sub-skills (e.g., quality-gate calling red-team) append entries to the shared manifest, so a cached counter goes stale.
 
@@ -115,7 +115,7 @@ Begin by reading that file.
 > reference implementation, retained deliberately; de-duplicating it is tracked
 > separately).
 >
-> Prior art and reference implementation of tier 1: `skills/quality-gate/SKILL.md`
+> Prior art and reference implementation of tier 1: `skills/quality-gate/cost-fix.md`
 > ("Scope Anchoring for Fix Agents"). Measured evidence for tier 2: `#562` spike,
 > `docs/research/2026-09-06-scope-judge-spike.md`.
 

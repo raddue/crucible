@@ -211,7 +211,7 @@ The quality-gate verdict directory remains project-wide: `~/.claude/projects/<pr
 
 - **Timestamps:** Obtained via Bash `date -u +%Y-%m-%dT%H:%M:%S` (Bash is allowed for `date` commands that don't reference `.claude/` paths)
 - **Ledger archival (rename):** Uses Bash `mv` since Write/Read/Edit/Glob have no rename capability
-- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a **tooling-discipline convention, not an enforced hook** — see `quality-gate/SKILL.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry. Follow it regardless (a deployment may add such a hook), but do not cite the hook as the reason.
+- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a **tooling-discipline convention, not an enforced hook** — see `quality-gate/recovery.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry. Follow it regardless (a deployment may add such a hook), but do not cite the hook as the reason.
 
 ### Enforcement Rules
 
@@ -628,7 +628,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
-- **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+- **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`) (feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use `/recon` (persistent-map mode) (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
@@ -1231,8 +1231,8 @@ After all tasks complete:
    - **Non-ignored new untracked files** → classify each: a legitimately-generated file that belongs in the repo (a golden/fixture) → **commit** it (fold into the same commit); an incidental artifact that should never be tracked (coverage output, a cache) → **gitignore** it (a test-hygiene fix) so it stops appearing.
    - There is **NO bare "assert-clean" branch.** An assert-clean would spuriously halt a *healthy* build whenever a passing test regenerates a golden file, and untracked test residue would make the review gate REFUSE inside a healthy build. build must **produce** the clean tree, not merely check for one.
    - A tree that is **still** dirty or untracked *after* the commit/gitignore step is a **surfaced build/test defect** — surface it (error out) and stop; do NOT silently sweep it into the gate's first commit. End state: `git status --porcelain` empty (tracked **and** untracked), identical to the review gate's entry precondition.
-3. **REQUIRED SUB-SKILL:** Use crucible:warden on the full implementation — the consolidated pre-push review gate. Pass `reviewer-set: full`, `Phase: code`, and `PipelineID: <current PipelineID>`. warden runs the full reviewer set (temper + delve + red-team[quality-gate leg] + siege[conditional, same security-signal trigger] + inquisitor[unconditional in full]) as one disjunction-of-native-gates over a fully-clean tree (Step 2.5 guaranteed it), drives and commits every leg's fixes (non-`fix:` subjects), and emits the single build-`PipelineID` aggregate verdict marker. On `BLOCKED`, halt the pipeline (fail-closed). Do NOT separately invoke temper / inquisitor / siege / quality-gate here — warden is the sole code-leg gate-driver (I-W4).
-6b. **Verify warden's aggregate verdict marker and write Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
+3. **REQUIRED REVIEW AND SUPPLY-CHAIN SIGNALS:** Use crucible:warden on the full implementation and dispatch `crucible:quality-gate` **dependency-audit mode** (`dependency-audit.md`, `scope_root` = project root) in parallel. They consume the same code artifact but not each other's findings. Pass warden `reviewer-set: full`, `Phase: code`, and `PipelineID: <current PipelineID>`; warden runs temper + delve + red-team[quality-gate leg] + siege[conditional] + inquisitor[unconditional in full], drives and commits its fixes, and emits the aggregate review marker. The dependency-audit mode writes its separate `audit-results.md` signal; it does not enter the red-team loop and is not part of warden's weighted score. Await both. On either warden `BLOCKED` or audit `Result: BLOCKED`, halt Phase 4 (fail-closed); surface audit FINDINGS/INCONCLUSIVE/FAILED separately, never as a clean audit. Do NOT separately invoke other reviewer legs or another full quality-gate; warden remains the sole code-review gate-driver (I-W4).
+6b. **Verify warden's aggregate verdict marker and integrate the independent dependency-audit result before writing Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). The marker to verify is now **warden's** build-`PipelineID` aggregate verdict marker — warden owns it (it is no longer a temper or quality-gate marker). The READ mechanism (marker present + `Verdict: PASS` + PipelineID match) is unchanged; only the marker's owner/name changed. Delete the verdict marker after writing the ledger entry.
 7. **RECOMMENDED SUB-SKILL:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:
@@ -1346,7 +1346,7 @@ Decision types to capture:
 - `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
 Red-team, design innovation, and inquisitor prompts live in their respective skills:
-- `crucible:red-team` — `skills/red-team/red-team-prompt.md`
+- `crucible:quality-gate (red-team mode)` — `skills/quality-gate/red-team-prompt.md`
 - `crucible:design` innovation pass — `skills/design/innovation-prompt.md`
 - `crucible:inquisitor` per-task mode — `skills/inquisitor/break-it-prompt.md`
 - `crucible:inquisitor` full-feature mode — `skills/inquisitor/inquisitor-prompt.md`
@@ -1359,8 +1359,8 @@ Build is the outermost orchestrator. The **design and plan** gates route via `cr
 
 | Pipeline Stage | Artifact Type | Replaces |
 |---------------|---------------|----------|
-| Phase 1, Step 2 (after design) | design | Existing `crucible:red-team` on design |
-| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
+| Phase 1, Step 2 (after design) | design | Existing `crucible:quality-gate` on design (preserved red-team review) |
+| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:quality-gate` on plan (preserved red-team review) |
 | Phase 4 (single warden gate) | code | `crucible:warden` — runs the red-team leg (+ temper/delve/inquisitor/siege) |
 
 For the **code leg**, code review (`crucible:temper`), inquisitor (`crucible:inquisitor`), and the quality-gate red-team leg are now consolidated inside `crucible:warden` — temper does structured quality checks, inquisitor writes cross-component adversarial tests, and the red-team leg does adversarial artifact review (plus delve and a conditional siege run). The three purposes still stand, but warden drives them as one disjunction-of-native-gates rather than as separate steps.
@@ -1405,13 +1405,13 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:design** — Phase 1
 - **crucible:finish** — Phase 4
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
-- **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
+- **crucible:quality-gate (red-team mode)** — Adversarial review engine (invoked by quality-gate)
 - **crucible:design** innovation pass — Creative enhancement before quality gates
 - **crucible:inquisitor** — Per-task adversarial testing (Phase 3) and full-feature cross-component testing (Phase 4, inside the warden gate)
 - **crucible:warden** — Consolidated pre-push code-review gate (Phase 4): temper + delve + quality-gate red-team leg + conditional siege + inquisitor as one disjunction-of-native-gates.
 
 **Recommended sub-skills:**
-- **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
+- **crucible:getting-started (`forge.md`)** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **`/recon` (persistent-map mode)** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N)
 

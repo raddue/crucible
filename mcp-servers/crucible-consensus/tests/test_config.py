@@ -166,6 +166,17 @@ def test_enabled_false(tmp_path, monkeypatch):
     assert config.enabled is False
 
 
+def test_shipped_example_loads(tmp_path, monkeypatch):
+    """The copyable example remains valid YAML and usable by the server."""
+    example = Path(__file__).resolve().parents[3] / "skills/quality-gate/consensus-config-example.yaml"
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude/consensus-config.yaml").write_text(example.read_text())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test")
+    config = load_config(str(tmp_path))
+    assert config.enabled and len(config.models) >= config.min_models
+
+
 def test_nested_consensus_key(tmp_path, monkeypatch):
     """Config nested under 'consensus:' key loads correctly (matches example YAML)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")

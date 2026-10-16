@@ -199,7 +199,7 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
                 logger.warning(f"Skipping malformed additional_response: {e}")
 
     # Aggregate responses
-    prompts_dir = str(Path(state.project_dir) / "skills" / "consensus")
+    prompts_dir = str(Path(state.project_dir) / "skills" / "quality-gate")
     result = await aggregate(
         responses=responses,
         prompt=prompt,
