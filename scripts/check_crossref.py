@@ -53,9 +53,8 @@ PLACEHOLDERS = {"skill-name", "old-name", "new-name"}
 def is_exempt(name: str) -> bool:
     """True only for documented template placeholders — literal fill-ins that
     are not references to real skills. Agent types are NOT exempt here; they are
-    resolved against `agents/<token>.md` in resolves(). Merged getting-started
-    references use child reference filenames in prose; legacy crucible:<name>
-    spellings for those absorbed workflows are accepted as aliases."""
+    resolved against `agents/<token>.md` in resolves(). Merged getting-started references use child filenames in prose; only explicit
+    template placeholders are exempt."""
     return name in PLACEHOLDERS
 
 

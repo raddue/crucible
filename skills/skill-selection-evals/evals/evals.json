@@ -151,7 +151,7 @@
         "recon"
       ],
       "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact \u2014 an entire subsystem with multiple files.",
-      "reasoning": "Audit dispatches parallel analysis agents across four lenses (correctness, robustness, consistency, architecture) on an existing subsystem. Red-team reviews a single artifact. Code-review is lighter-weight. Prospector looks for architectural friction across the whole codebase, not a specific subsystem.",
+      "reasoning": "Audit dispatches parallel analysis agents across four lenses (correctness, robustness, consistency, architecture) on an existing subsystem. Red-team reviews a single artifact. Code-review is lighter-weight. Recon improvement discovery looks for architectural friction across the whole codebase, not a specific subsystem.",
       "difficulty": "medium"
     },
     {
@@ -564,8 +564,8 @@
       "common_mistakes": [
         "getting-started"
       ],
-      "context": "Whole-repo first-time mapping PLUS cross-repo topology \u2014 the distinguishing signal for recon whole-repo-onboarding mode over recon.",
-      "reasoning": "Select whole-repo onboarding for first-time mapping and sibling-repo topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology \u2014 contrasted with task-scoped recon investigation.",
+      "reasoning": "Select recon whole-repo onboarding mode for first-time mapping and sibling-repository topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
       "difficulty": "hard"
     },
     {

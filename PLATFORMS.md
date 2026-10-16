@@ -56,7 +56,7 @@ These skills require features specific to Claude Code. They will not work on oth
 | Skill | Platform Dependency | Why It Can't Degrade |
 |-------|-------------------|---------------------|
 | build | Agent teams (TeamCreate, TaskCreate, SendMessage) | Orchestrates 20+ subagents across 4 phases; sequential fallback exists but is Claude Code-specific |
-| forge | Persistent memory (`~/.claude/projects/<hash>/memory/forge/`) | Retrospectives must persist across sessions to provide value |
+| getting-started (forge reference) | Persistent memory (`~/.claude/projects/<hash>/memory/forge/`) | Retrospectives must persist across sessions to provide value |
 | recon persistent-map mode | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
 | recon whole-repo-onboarding mode | Persistent map memory + subagent scan | Onboarding output must persist across sessions |
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
