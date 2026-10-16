@@ -1,5 +1,9 @@
 # Eval Results
 
+Published evidence stays here. Private harnesses and corpora referenced below
+moved to `raddue/crucible-eval` in #460; historical paths and measurements are
+preserved as recorded, not claims that those files remain in this checkout.
+
 Crucible skills are evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). 12 skills carry **execution evals** (the table below); a separate **sequence-eval** suite covers ordering boundaries (further down). This is the same eval methodology Anthropic built for measuring whether skills actually improve output quality — we use it here to prove that Crucible's skills deliver measurable value, not just vibes.
 
 ## How It Works
