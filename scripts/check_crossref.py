@@ -53,8 +53,10 @@ PLACEHOLDERS = {"skill-name", "old-name", "new-name"}
 def is_exempt(name: str) -> bool:
     """True only for documented template placeholders — literal fill-ins that
     are not references to real skills. Agent types are NOT exempt here; they are
-    resolved against `agents/<token>.md` in resolves()."""
-    return name in PLACEHOLDERS
+    resolved against `agents/<token>.md` in resolves(). Merged getting-started
+    references use child reference filenames in prose; legacy crucible:<name>
+    spellings for those absorbed workflows are accepted as aliases."""
+    return name in PLACEHOLDERS or name in {"forge", "compass", "handoff", "recall", "workshop"}
 
 
 def resolves(name: str) -> bool:
@@ -109,6 +111,7 @@ def selftest() -> int:
     cases = [
         # (token, exempt-or-resolves-expected, reason)
         ("cartographer", False, "the #365 bug: no skills/cartographer/ dir"),
+        ("forge", True, "legacy alias for getting-started/forge.md after #727"),
         ("crucible-red-team", True, "agent type resolves via agents/<token>.md"),
         ("crucible-red-tea", False, "typo'd agent ref: no agents/<token>.md"),
         ("skill-name", True, "documented template placeholder"),
