@@ -50,7 +50,7 @@ CATEGORIES: dict[str, list[str]] = {
         "debugging",
     ],
     "Knowledge & Learning": [
-        "forge", "project-init", "compass",
+        "project-init",
     ],
     "Utilities": [
         "distill",
