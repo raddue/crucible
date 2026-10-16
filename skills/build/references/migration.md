@@ -1,9 +1,35 @@
----
-name: migrate
-description: "Autonomous migration planning and execution. Takes a migration target (framework upgrade, API version bump, dependency major version, deprecation removal) and produces a phased migration plan with compatibility verification, then optionally executes via build's refactor mode. Triggers on /migrate, 'migration plan', 'upgrade X from Y to Z', 'remove deprecated', 'major version bump'."
----
+# Build — Migration Mode
 
-# Migrate
+Migration mode is the absorbed `migrate` skill (#720), invoked from build's Mode Detection. Everything below is the original migrate runbook, preserved verbatim apart from invocation naming. "Dispatch build" means: run build's own Phase 1–4 pipeline (SKILL.md) for that migration phase in the named feature or refactor mode — build's phase flow itself is unchanged. Prompt template paths (`./*-prompt.md`) are relative to `skills/build/`. The `migrate` value in the pipeline-active marker, status file `Skill:` field and scratch path is kept so existing hooks and recovery state keep working.
+
+## Contents
+
+- [Overview](#overview)
+- [Invocation](#invocation)
+- [Communication Requirement (Non-Negotiable)](#communication-requirement-non-negotiable)
+- [Pipeline Status](#pipeline-status)
+- [Model Allocation](#model-allocation)
+- [Scratch Directory](#scratch-directory)
+- [Context Management](#context-management)
+- [Compaction Recovery](#compaction-recovery)
+- [Pipeline-Active Marker](#pipeline-active-marker)
+- [Phase 0: Pre-flight](#phase-0-pre-flight)
+- [Phase 1: Analyze Migration Target](#phase-1-analyze-migration-target)
+- [Phase 2: Map Blast Radius](#phase-2-map-blast-radius)
+- [Phase 3: Decompose into Phases](#phase-3-decompose-into-phases)
+- [Phase 4: Design Compatibility Layer](#phase-4-design-compatibility-layer)
+- [Phase 5: Plan Consumer Waves](#phase-5-plan-consumer-waves)
+- [User Gate](#user-gate)
+- [Phase 6: Define Rollback Points](#phase-6-define-rollback-points)
+- [Phase 7: Execute via Build](#phase-7-execute-via-build)
+- [Phase 8: Cleanup](#phase-8-cleanup)
+- [Escalation Triggers](#escalation-triggers)
+- [What the Orchestrator Must NOT Do](#what-the-orchestrator-must-not-do)
+- [Integration](#integration)
+- [Prompt Templates](#prompt-templates)
+- [Quality Gate Requirement (Non-Negotiable)](#quality-gate-requirement-non-negotiable)
+- [Quality Gate Orchestration](#quality-gate-orchestration)
+- [Red Flags](#red-flags)
 
 ## Overview
 
@@ -12,11 +38,11 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 
 Autonomous migration planning and execution: analyzes a migration target, maps blast radius, decomposes into safe phases with compatibility layers, groups consumers into waves, then executes through build's refactor/feature mode with verification at each phase boundary.
 
-**Announce at start:** "Running migrate on [migration target description]."
+**Announce at start:** "Running build in migration mode on [migration target description]."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Purpose:** Bridge between prospector discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. /migrate makes it autonomous.
+**Purpose:** Bridge between prospector discovery ("you should modernize X") and build execution ("here is the plan, execute it"). Today that bridge is manual. Build's migration mode makes it autonomous.
 
 **Two modes:**
 - **Plan + Execute** (default) -- produces a phased migration plan, then executes each phase through build
@@ -25,10 +51,10 @@ Autonomous migration planning and execution: analyzes a migration target, maps b
 ## Invocation
 
 ```
-/migrate "upgrade lodash from v3 to v4"                    # plan + execute
-/migrate --plan-only "upgrade React Router v5 to v6"       # plan only, no execution
-/migrate --execute docs/plans/2026-03-23-lodash-migration-plan.md  # execute existing plan
-/migrate --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo
+/build --migrate "upgrade lodash from v3 to v4"                    # plan + execute
+/build --migrate --plan-only "upgrade React Router v5 to v6"       # plan only, no execution
+/build --migrate --execute docs/plans/2026-03-23-lodash-migration-plan.md  # execute existing plan
+/build --migrate --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo
 ```
 
 ## Communication Requirement (Non-Negotiable)

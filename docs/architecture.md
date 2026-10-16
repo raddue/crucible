@@ -1,6 +1,6 @@
 # Architecture
 
-How Crucible's skills compose. The catalog at [skills.md](skills.md) lists every skill; this doc explains how the orchestrator skills (build, debugging, spec, migrate) chain them and where the recommended-but-optional accelerators (forge, cartographer) plug in.
+How Crucible's skills compose. The catalog at [skills.md](skills.md) lists every skill; this doc explains how the orchestrator skills (build — including its migration mode — debugging, spec) chain them and where the recommended-but-optional accelerators (forge, cartographer) plug in.
 
 ## The build pipeline
 
@@ -23,7 +23,7 @@ The **design** decision-record workflow records durable Architecture Decision Re
 
 ## Investigation and decision layers
 
-**Recon** and **design** provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Design's approach-evaluation subflow evaluates competing approaches with constraint_fit scoring and kill criteria. Design uses both in Phase 2; spec and migrate consume the same subflow for their decisions. `/recon` remains usable before any task; `/design` can evaluate approaches standalone.
+**Recon** and **design** provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Design's approach-evaluation subflow evaluates competing approaches with constraint_fit scoring and kill criteria. Design uses both in Phase 2; spec and build migration mode consume the same subflow for their decisions. `/recon` remains usable before any task; `/design` can evaluate approaches standalone.
 
 ## Spec → build handoff
 

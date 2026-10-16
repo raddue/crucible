@@ -5,7 +5,7 @@ version: 1
 # Pipeline Status Convention
 
 Canonical reference for the per-run ambient status file shared by the
-long-running orchestrators (`build`, `debugging`, `audit`, `siege`, `migrate`,
+long-running orchestrators (`build`, `debugging`, `audit`, `siege`, build migration mode,
 `spec`). Each skill references this file via
 `<!-- CANONICAL: shared/pipeline-status-convention.md -->` and keeps only its
 **skill-specific body** (Task Progress / Quality Gates / … ) plus its own

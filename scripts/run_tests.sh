@@ -368,6 +368,8 @@ run python3 scripts/test_aacr_bench_measure.py
 
 # --- Catalog and release packaging unit suites ---
 run python3 scripts/test_catalog.py
+# build/migrate consolidation + build body split (#720/#719)
+run python3 scripts/test_build_split.py
 run python3 scripts/test_package_release.py
 run python3 eval/memory/test_memory.py
 

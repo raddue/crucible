@@ -42,7 +42,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | prospector | Subagent dispatch for parallel exploration | Explores sequentially |
 | siege | Parallel attacker-perspective agents (scales 3–6) | Perspectives run sequentially |
 | spec | Subagent dispatch for per-ticket investigation | Tickets processed sequentially |
-| migrate | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
+| build (migration mode) | Subagent dispatch (recon/design approach evaluation); build for execution | Planning runs sequentially; execution mode needs build (Tier 3) |
 | checkpoint | Shadow git snapshots for pipeline rollback | No automatic rollback; manual git recovery |
 | getting-started (compass reference) | `scripts/compass.py` CLI (POSIX only) | Arc-state file (`docs/compass.md`) maintained by hand |
 | finish (safe PR merge subflow) | `git` + a forge CLI (`gh` or equivalent) for CI checks and merge | Manual merge + CI inspection |
