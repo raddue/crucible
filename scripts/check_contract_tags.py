@@ -616,8 +616,8 @@ EXPECTED_ADDED_LINES = [
     "If this step is skipped or fails, Path B's Stop hook "
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
-    "",
     "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.",
+    "",
 ] + _ADDED_TAIL
 EXPECTED_REMOVED_LINES = [
     '  --files "<comma-separated files the PR changed>" \\',
@@ -999,13 +999,10 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "base")
     base = _git(root, "rev-parse", "HEAD").stdout.strip()
-    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n",
-                "If this step is skipped or fails, Path B's Stop hook "
-                "(`grudge-resolution-guard.sh`) will block the session's next "
-                "Stop event until a grudge is recorded or explicitly skipped — "
-                "see `hooks/README.md`.\n\n"
-                "Non-`fix(*)` PRs record nothing. See `skills/debugging/SKILL.md` for grudge mechanics.\n\n",
-                "\n" + "".join(line + "\n" for line in _ADDED_TAIL)])
+    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n"]
+               + [line + "\n" for line in EXPECTED_ADDED_LINES[6:9]]
+               + ["\n"]
+               + [line + "\n" for line in _ADDED_TAIL])
     skill.write_text("".join(working), encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "add paragraph")

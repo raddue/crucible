@@ -195,8 +195,10 @@ _PASS = {
     "skills/merge-pr/SKILL.md": (
         '  --files="<changed file 1>" --files="<changed file 2>" \\\n'
     ),
-    "skills/debugging/SKILL.md": '  --files="<path 1>" --files="<path 2>"\n',
-    "skills/debugging/SKILL.md": "  --files=src/a.py --files=src/b.py\n",
+    "skills/debugging/SKILL.md": (
+        '  --files="<path 1>" --files="<path 2>"\n'
+        "  --files=src/a.py --files=src/b.py\n"
+    ),
 }
 
 _FAIL_EXPECT = [

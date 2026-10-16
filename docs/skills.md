@@ -49,7 +49,7 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 
 | Skill | Description |
 |---|---|
-| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, post-fix quality gate with test gap writer, and grudge regression-oracle read/write mechanics. Queries machine-local per-repo grudges before work; records confirmed fixes. Shadow git checkpoints before fix cycles, sibling fixes, and quality gate for structured rollback. |
+| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, post-fix quality gate with test gap writer, and grudge regression-oracle read/write mechanics. Queries machine-local per-repo grudges before work; records confirmed fixes. Phase 4.5 "Where Else?" scan locates sibling bugs and persists defect signatures to cartographer. Shadow git checkpoints before fix cycles, sibling fixes, and quality gate for structured rollback. |
 
 ## Knowledge & Learning
 

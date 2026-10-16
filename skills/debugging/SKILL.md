@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Also use for /grudge, "check grudges", "record a grudge", "any past bugs here", "regression oracle", or "bug graveyard"
+description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
 ---
 
 # Systematic Debugging
@@ -18,8 +18,7 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Models:** Quick structural mapping requests `fast`; investigation, synthesis, and implementation request `high`. The Claude Code examples use current reference aliases such as `model: haiku` and `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
-
-### Grudge regression oracle — read/write mechanics (#271)
+## Grudge regression oracle — read/write mechanics (#271)
 
 ### Where grudges live (read this first)
 
@@ -130,9 +129,9 @@ files_touched: ["repo/rel/path", ...]
 anti_pattern_signature: "<regex or literal snippet>"   # optional
 date_fixed: "YYYY-MM-DD"
 ---
-### Repro
+## Repro
 <steps>
-### Why this kept happening
+## Why this kept happening
 <expanded root cause>
 ```
 
@@ -165,9 +164,9 @@ reason_failed: "<why it failed>"
 files_touched: ["repo/rel/path", ...]
 date: "YYYY-MM-DD"
 ---
-### Approach tried
+## Approach tried
 <approach>
-### Why it failed
+## Why it failed
 <reason>
 ```
 
@@ -184,6 +183,7 @@ approach is rejected.
 
 No semantic search (glob + regex only); no cross-**user** shared grudgebook
 (sanitized community grudges — v1.1 candidate); no `settings.json` hook.
+
 
 
 ## Communication Requirement (Non-Negotiable)
@@ -205,7 +205,7 @@ Every status update must include:
 
 **Depth principle:** When in doubt, dispatch MORE investigation agents, not fewer. A bug that looks simple from the surface often has a complex root cause. Spinning up 4-6 focused investigators in parallel costs minutes; missing the root cause costs hours.
 
-### Pipeline Status
+## Pipeline Status
 
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
 
@@ -227,7 +227,7 @@ The status file uses this structure (overwritten in full each time):
 **Suggested Action:** <omit when GREEN; concrete one-sentence action when YELLOW/RED>
 **Elapsed:** <computed from Started>
 
-### Recent Events
+## Recent Events
 - [HH:MM] <most recent event>
 - [HH:MM] <previous event>
 (last 5 events, newest first)
@@ -238,12 +238,12 @@ The status file uses this structure (overwritten in full each time):
 Append after the shared header:
 
 ```
-### Investigation
+## Investigation
 - Hypothesis: "Missing null check in event handler dispatch chain"
 - Cycle: 2 of 4 max
 - Phase 4 fix attempts: 1 (WIP commit pending verification)
 
-### Compression State
+## Compression State
 Goal: [original user request / bug report]
 Key Decisions:
 - [accumulated decisions, max 10]
@@ -278,11 +278,11 @@ After compaction, before re-writing the status file:
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files (see Session State below)
 3. Emit a Compression State Block into the conversation to seed the new context window
-3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, hypothesis changes, file modifications), use `/recall` to query `events.jsonl` with filters for targeted recovery.
+3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, hypothesis changes, file modifications), use the recall reference (`/getting-started recall <query>`, `getting-started/recall.md`) to query `events.jsonl` with filters for targeted recovery.
 4. Write the updated status file
 5. Output inline status to CLI
 
-### Session State and Compaction Recovery
+## Session State and Compaction Recovery
 
 The debugging skill writes session state to disk at **every phase transition**, not just on failure. This ensures compaction recovery works regardless of when it occurs.
 
@@ -335,16 +335,16 @@ At major phase boundaries (0→1, Synthesis→3, 3.5→4, 4.5→5), write a **ha
 **Timestamp:** ISO-8601
 **Goal:** [original bug report, verbatim]
 
-### Inputs for Phase M
+## Inputs for Phase M
 - **[Input name]:** [disk path or inline value]
 
-### Decisions Carried Forward
+## Decisions Carried Forward
 - [DEC-N] [decision]: [reasoning, one line]
 
-### Active Constraints
+## Active Constraints
 - [constraint affecting remaining work]
 
-### Shed Receipt
+## Shed Receipt
 - [what was shed] → [where it lives on disk]
 ```
 
@@ -354,7 +354,7 @@ At major phase boundaries (0→1, Synthesis→3, 3.5→4, 4.5→5), write a **ha
 - CSBs continue at non-major-boundary checkpoint triggers (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5, hypothesis cycles, fix attempts, escalations, health transitions). Phase 4.4 is a sub-phase within 4→4.5 and emits no CSB for its own phase transition; the escalation and health-transition triggers above apply inside it normally (gate (1) case (b) escalates to the user).
 - **Backward compatibility:** If no manifest exists at a recovery point, fall back to CSB-based recovery.
 
-### The Iron Law
+## The Iron Law
 
 ```
 NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
@@ -362,7 +362,7 @@ NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
 
 If you haven't dispatched Phase 1 investigation and received findings back, you cannot propose fixes. If you haven't received a synthesis report, you cannot form a hypothesis. If you haven't formed a hypothesis, you cannot dispatch implementation.
 
-### When to Use
+## When to Use
 
 Use for ANY technical issue:
 - Test failures
@@ -386,7 +386,7 @@ Use for ANY technical issue:
 
 ---
 
-### The Orchestrator-Subagent Debugging Workflow
+## The Orchestrator-Subagent Debugging Workflow
 
 All investigation and implementation is delegated to subagents via the Agent tool. The orchestrator handles hypothesis formation, dispatch decisions, and escalation -- nothing else.
 
@@ -513,7 +513,7 @@ The gate routes toward debugging's own Phase 1 Reproduction investigator from th
    - Non-match companion file IS loaded for investigators, truncated to 50 entries at load time with note "(list truncated to 50 most recent entries)"
 5. **`Last loaded` update:** Loading is pure-read. After all investigator dispatches complete, batch-update the `Last loaded` field to today on all signatures that were loaded.
 
-**Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See the Grudge regression oracle section above.
+**Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See `skills/grudge/SKILL.md`.
 
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, requested profile `fast`; Claude Code maps it to `model: haiku`) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
@@ -667,12 +667,12 @@ The orchestrator:
 Maintain a running log across cycles:
 
 ```
-### Cycle 1
+## Cycle 1
 - Hypothesis: "[specific hypothesis]"
 - Based on: [which reports informed this]
 - Result: [filled in after Phase 4 completes]
 
-### Cycle 2
+## Cycle 2
 - Hypothesis: "[specific hypothesis]"
 - Based on: [which reports informed this]
 - Result: [filled in after Phase 4 completes]
@@ -1011,7 +1011,7 @@ When dispatching the Phase 4.5 scan agent, load matching defect signatures from 
 5. **Report back.** Structured report:
 
 ```
-### Where Else? Scan Report
+## Where Else? Scan Report
 
 ### Generalized Pattern
 [2-3 sentence pattern description]
@@ -1139,7 +1139,7 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 **If all tests PASS:** Debugging workflow is complete.
 
-**Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and record with the **store identity** (DEC-4: the git-common-dir parent, shared across linked worktrees, NOT this worktree's root which would lose the record when the worktree is removed): `store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"` `store_key="$(basename "$store_root" 2>/dev/null)"`, then run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files="<path 1>" --files="<path 2>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repo-root "$store_root" --repo "$store_key" --repro "<minimal repro>" --why "<why it kept happening>"`. See the Grudge regression oracle section above.
+**Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and record with the **store identity** (DEC-4: the git-common-dir parent, shared across linked worktrees, NOT this worktree's root which would lose the record when the worktree is removed): `store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"` `store_key="$(basename "$store_root" 2>/dev/null)"`, then run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files="<path 1>" --files="<path 2>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repo-root "$store_root" --repo "$store_key" --repro "<minimal repro>" --why "<why it kept happening>"`. See `skills/grudge/SKILL.md`.
 
 **If some tests FAIL** (gaps reveal incomplete fix coverage):
 1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)
@@ -1211,7 +1211,7 @@ Decision types:
 After the Implementation agent reports back, the orchestrator evaluates four possible outcomes:
 
 **Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.4 (scope check), then Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
-- **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
+- **RECOMMENDED:** Use crucible:getting-started (`forge.md`, retrospective mode) — capture the debugging journey and lessons learned
 - **Chronicle signal fallback:** If forge retrospective will not run (user declined, session ending),
   append a minimal chronicle signal directly:
   - Construct signal: `v=1`, `ts=now`, `skill="debugging"`, `outcome` from fix verification,
@@ -1285,7 +1285,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 
 ---
 
-### Quick Reference
+## Quick Reference
 
 | Phase | Agent(s) | Key Activities | Success Criteria |
 |-------|----------|---------------|------------------|
@@ -1304,7 +1304,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 
 ---
 
-### Quality Gate
+## Quality Gate
 
 This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5).
 
@@ -1318,7 +1318,7 @@ This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5).
 
 ---
 
-### Red Flags -- STOP and Follow Process
+## Red Flags -- STOP and Follow Process
 
 If you catch yourself thinking:
 
@@ -1365,7 +1365,7 @@ If you catch yourself thinking:
 
 **If 3+ cycles failed:** Escalate to user. Question the architecture. Do not dispatch Cycle 4 agents.
 
-### Your Human Partner's Signals You're Doing It Wrong
+## Your Human Partner's Signals You're Doing It Wrong
 
 **Watch for these redirections:**
 - "Is that not happening?" - You assumed without dispatching verification
@@ -1376,7 +1376,7 @@ If you catch yourself thinking:
 
 **When you see these:** STOP. Return to Phase 1. Dispatch fresh investigation.
 
-### Common Rationalizations
+## Common Rationalizations
 
 | Excuse | Reality |
 |--------|---------|
@@ -1391,7 +1391,7 @@ If you catch yourself thinking:
 | "Let me just peek at the code real quick" | Orchestrators dispatch, they don't investigate. Send a subagent. |
 | "I'll dispatch implementation without a hypothesis" | No hypothesis = no direction. The agent will guess. Form the hypothesis first. |
 
-### User-Provided Diagnosis Traps
+## User-Provided Diagnosis Traps
 
 The rationalizations above are self-originated — you talking yourself out of process. The traps below are user-originated — the user (reasonably, in good faith) providing a diagnosis that tempts you to skip investigation. These are harder to resist because accommodating the user feels helpful.
 
@@ -1405,7 +1405,7 @@ The rationalizations above are self-originated — you talking yourself out of p
 | "It's obviously X, I just need you to fix it" | "The user has more context, trust their judgment" | Trust their observations (symptoms, timeline, reproduction steps). Verify their conclusions (root cause, fix). These are different things. |
 | "We can investigate later, just patch it now" | "Pragmatism — ship the fix, investigate in a follow-up" | 'Investigate later' means 'never investigate.' The patch becomes the permanent fix. Do it right now. |
 
-### When Process Reveals "No Root Cause"
+## When Process Reveals "No Root Cause"
 
 If systematic investigation reveals issue is truly environmental, timing-dependent, or external:
 
@@ -1416,7 +1416,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 **But:** 95% of "no root cause" cases are incomplete investigation. Dispatch more agents before concluding this.
 
-### Supporting Techniques and Prompt Templates
+## Supporting Techniques and Prompt Templates
 
 **Prompt templates** (used when dispatching subagents):
 - **`./investigator-prompt.md`** -- Phase 1 investigation agent prompt
@@ -1445,10 +1445,10 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:cartographer-skill`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
 **Recommended skills:**
-- **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)
+- **`crucible:getting-started` (`forge.md`)** -- Retrospective after fix verified (captures debugging lessons)
 - **`crucible:checkpoint`** -- Shadow git checkpoints before implementation, sibling fixes, and quality gate (pre-debug-fix-cycle-N, pre-where-else, pre-debug-gate). Provides structured rollback for fix attempts and sibling work.
 
-### Real-World Impact
+## Real-World Impact
 
 From debugging sessions:
 - Systematic approach: 15-30 minutes to fix
