@@ -107,7 +107,7 @@ Before dispatching the design skill, determine whether this build is:
 
 - **Feature mode** (default) — adding new capability. Success = new acceptance tests pass.
 - **Refactor mode** — restructuring existing code. Success = existing behavior preserved + structural goals met.
-- **Migration mode** — planning and executing a migration (framework upgrade, API version bump, dependency major version, deprecation removal; entered as `/build <migration request>`, e.g. "migration plan", "upgrade X from Y to Z", "remove deprecated", "major version bump"). Success = every migration phase reaches its safe stopping point and the old version is removed. Migration mode is an invocable subflow that wraps this pipeline: follow [references/migration.md](references/migration.md) end to end; it dispatches this pipeline once per migration phase in feature or refactor mode. Build's own phase flow (Phases 1–4) is unchanged.
+- **Migration mode** — planning and executing a migration (framework upgrade, API version bump, dependency major version, deprecation removal; entered as `/build <migration request>`, e.g. "migration plan", "upgrade X from Y to Z", "remove deprecated", "major version bump"; `--plan-only`, `--execute <migration-plan>` and `--orgs` are migration-mode options and imply migration mode). Success = every migration phase reaches its safe stopping point and the old version is removed. Migration mode is an invocable subflow that wraps this pipeline: follow [references/migration.md](references/migration.md) end to end; it dispatches this pipeline once per migration phase in feature or refactor mode. Build's own phase flow (Phases 1–4) is unchanged.
 
 **Detection:** If the user's intent is ambiguous, ask directly before proceeding:
 
