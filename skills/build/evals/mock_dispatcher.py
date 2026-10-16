@@ -1,7 +1,7 @@
 """Mock dispatcher for build-evals harness.
 
 Read canned subagent return receipts and mock user-input turns from disk.
-Used by build's Mock Dispatch Mode (in SKILL.md) when CRUCIBLE_BUILD_EVAL_MOCK_DIR
+Used by build's Mock Dispatch Mode (in references/runtime-protocols.md) when CRUCIBLE_BUILD_EVAL_MOCK_DIR
 is set in the environment.
 """
 from __future__ import annotations

@@ -1002,6 +1002,62 @@
       "context": "Standalone iterative adversarial review of a plan.",
       "reasoning": "Quality-gate red-team mode preserves iterative fresh-eyes loop.",
       "difficulty": "easy"
+    },
+    {
+      "id": "build-migration-01",
+      "dimension": "direct",
+      "boundary": "build-migration",
+      "prompt": "Write a migration plan for moving our API client off the deprecated v1 SDK.",
+      "expected_skill": "build",
+      "common_mistakes": [
+        "planning",
+        "design"
+      ],
+      "context": "Migration-plan request for a dependency transition.",
+      "reasoning": "Build migration mode produces the phased migration plan with compatibility layer, consumer waves and rollback points; planning lacks blast-radius and coexistence mechanics; design only evaluates strategy.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-migration-02",
+      "dimension": "direct",
+      "boundary": "build-migration",
+      "prompt": "Upgrade lodash from v3 to v4 across the monorepo.",
+      "expected_skill": "build",
+      "common_mistakes": [
+        "test-driven-development",
+        "prospector"
+      ],
+      "context": "Explicit 'upgrade X from Y to Z' request.",
+      "reasoning": "Upgrade-from-to phrasing routes to build migration mode (phased plan, then per-phase build execution). Prospector discovers modernization targets but does not plan or execute them.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-migration-03",
+      "dimension": "direct",
+      "boundary": "build-migration",
+      "prompt": "Remove deprecated APIs from the payments module now that every caller should be on the new interface.",
+      "expected_skill": "build",
+      "common_mistakes": [
+        "prospector",
+        "temper"
+      ],
+      "context": "Deprecation removal with possible remaining consumers.",
+      "reasoning": "'Remove deprecated' routes to build migration mode: blast-radius mapping confirms no consumers remain before the removal phase. Temper reviews diffs; it does not plan removals.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "build-migration-04",
+      "dimension": "direct",
+      "boundary": "build-migration",
+      "prompt": "We need a major version bump of React Router, 5 to 6, without breaking the app midway.",
+      "expected_skill": "build",
+      "common_mistakes": [
+        "debugging",
+        "design"
+      ],
+      "context": "Major-version dependency bump needing safe intermediate states.",
+      "reasoning": "Major version bump routes to build migration mode, whose safe-stopping-point invariant keeps every phase shippable. Nothing is broken yet, so debugging is wrong.",
+      "difficulty": "medium"
     }
   ]
 }

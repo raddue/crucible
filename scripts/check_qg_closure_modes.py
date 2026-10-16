@@ -6,6 +6,7 @@ Path-pinned, stdlib-only structural check. Use --selftest for mutation guards.
 from __future__ import annotations
 
 from qg_source import read_runbook
+from build_source import read_runbook as read_build_runbook
 
 import pathlib
 import sys
@@ -15,7 +16,7 @@ TARGETS = {
     "quality-gate": ROOT / "skills/quality-gate/SKILL.md",
     "build": ROOT / "skills/build/SKILL.md",
     "spec": ROOT / "skills/spec/SKILL.md",
-    "migrate": ROOT / "skills/migrate/SKILL.md",
+    "migrate": ROOT / "skills/build/references/migration.md",
     "warden": ROOT / "skills/warden/SKILL.md",
 }
 
@@ -166,7 +167,8 @@ def main(argv: list[str]) -> int:
     errors: list[str] = []
     for name, path in TARGETS.items():
         try:
-            texts[name] = read_runbook() if name == "quality-gate" else path.read_text(encoding="utf-8")
+            texts[name] = (read_runbook() if name == "quality-gate" else read_build_runbook()
+                           if name == "build" else path.read_text(encoding="utf-8"))
         except OSError as exc:
             errors.append(f"{name}: unreadable {path}: {exc}")
     if not errors:

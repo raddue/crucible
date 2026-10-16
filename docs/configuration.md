@@ -4,7 +4,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 ## Run mode
 
-**Auto mode** (recommended for autonomous pipelines) — Crucible is designed for long-running autonomous pipelines (build, debugging, spec, migrate) that complete complex development tasks without user intervention. Auto mode lets Claude execute tool calls without per-action prompts while still confirming destructive operations (deletes, force-pushes, shared-system writes). It supersedes earlier guidance that recommended `--dangerously-skip-permissions`. Pair auto mode with a safety hook or other failsafe if your environment warrants extra protection — see [Anthropic's hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for setup guidance.
+**Auto mode** (recommended for autonomous pipelines) — Crucible is designed for long-running autonomous pipelines (build — including its migration mode —, debugging, spec) that complete complex development tasks without user intervention. Auto mode lets Claude execute tool calls without per-action prompts while still confirming destructive operations (deletes, force-pushes, shared-system writes). It supersedes earlier guidance that recommended `--dangerously-skip-permissions`. Pair auto mode with a safety hook or other failsafe if your environment warrants extra protection — see [Anthropic's hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for setup guidance.
 
 ## Environment variables
 
@@ -31,7 +31,7 @@ See `hooks/README.md` for details on storage layout, the outbox pattern, and hoo
 
 ## Build Routing Advisor (hooks)
 
-Optional PreToolUse hook (`hooks/build-routing-advisor.sh`) that warns — without blocking — when a raw-agent dispatch looks like it should have gone through `/build`, `/spec`, `/debugging`, or `/migrate`. Warn-only and tier-aware (matches Claude Code's skill-trigger vocabulary). Enable via **untracked** `.claude/settings.local.json` or user-global `~/.claude/settings.json` with a `PreToolUse` matcher on `Agent`. The post-merge reconciler (`hooks/tests/tools/build-routing-reconcile.sh`) provides a read-only audit of dispatches in recent session index data. Per GH-604 (`hooks/README.md` → Hook Registration Surface), never commit a `.claude/settings.json` that registers hooks — it turns every branch checkout into an execution surface.
+Optional PreToolUse hook (`hooks/build-routing-advisor.sh`) that warns — without blocking — when a raw-agent dispatch looks like it should have gone through `/build` (including migration mode), `/spec`, or `/debugging`. Warn-only and tier-aware (matches Claude Code's skill-trigger vocabulary). Enable via **untracked** `.claude/settings.local.json` or user-global `~/.claude/settings.json` with a `PreToolUse` matcher on `Agent`. The post-merge reconciler (`hooks/tests/tools/build-routing-reconcile.sh`) provides a read-only audit of dispatches in recent session index data. Per GH-604 (`hooks/README.md` → Hook Registration Surface), never commit a `.claude/settings.json` that registers hooks — it turns every branch checkout into an execution surface.
 
 ## External Model Review (MCP)
 

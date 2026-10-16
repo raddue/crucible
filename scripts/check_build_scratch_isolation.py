@@ -5,6 +5,8 @@ from __future__ import annotations
 import pathlib
 import sys
 
+from build_source import read_runbook
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FILES = {
     "build": ROOT / "skills/build/SKILL.md",
@@ -114,7 +116,8 @@ def selftest() -> int:
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
         return selftest()
-    sources = {name: path.read_text(encoding="utf-8") for name, path in FILES.items()}
+    sources = {name: read_runbook() if name == "build" else path.read_text(encoding="utf-8")
+               for name, path in FILES.items()}
     missing = check(sources)
     if missing:
         print("BUILD SCRATCH ISOLATION CHECK FAILED:")

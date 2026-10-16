@@ -11,7 +11,7 @@
 
 ## How the toggle works
 
-Build's `## Mock Dispatch Mode (eval-gate)` section in SKILL.md is enabled when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set. Three env vars together replace the parts of build's runtime that would otherwise dispatch real subagents or ask the user questions:
+Build's `## Mock Dispatch Mode (eval-gate)` section in `skills/build/references/runtime-protocols.md` is enabled when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set. Three env vars together replace the parts of build's runtime that would otherwise dispatch real subagents or ask the user questions:
 
 | Env var | Behavior when set | When unset |
 |---|---|---|
