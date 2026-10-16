@@ -1,5 +1,7 @@
 # Persistent Map
 
+**Trigger phrases:** codebase map, cartographer, consult the map, record codebase discovery, load module context.
+
 ## Contents
 
 - [Overview](#overview)

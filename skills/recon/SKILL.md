@@ -102,7 +102,7 @@ List of depth modules to produce after core synthesis. Valid values:
 
 Most invocations request 0-1 depth modules. Omit for core-only output (cheapest).
 
-**Auto-inclusion:** Debugging-keyword tasks automatically add `diagnostic-context` (see Phase 4 Auto-Inclusion). Pass `modules: []` (explicit empty list) to suppress auto-inclusion — omitting `modules:` does not suppress it.
+**Auto-inclusion:** Debugging-keyword tasks automatically add `diagnostic-context` (see [Phase 4 Auto-Inclusion](investigation-workflow.md#phase-4-depth-module-dispatch)). Pass `modules: []` (explicit empty list) to suppress auto-inclusion — omitting `modules:` does not suppress it.
 
 **`scope`** (optional)
 Directory constraint. When provided, overrides scout scope suggestions entirely — scouts constrain exploration to the given path(s). Cheaper, faster.

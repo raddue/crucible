@@ -477,7 +477,7 @@ Write to `scratch/<run-id>/problem-frame.md`.
 
 ### Constraint Selection
 
-The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
+The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](prospector/REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
 
 **Friction-type-to-constraint mapping (canonical, in REFERENCE.md):**
 
