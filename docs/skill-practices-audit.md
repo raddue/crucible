@@ -18,7 +18,7 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
-| quality-gate | PASS | FAIL | PASS | PASS | PASS | FAIL |
+| quality-gate | PASS | PASS | PASS | PASS | PASS | PASS |
 | recon | PASS | FAIL | FAIL | PASS | PASS | FAIL |
 | replay | PASS | PASS | PASS | PASS | PASS | PASS |
 | siege | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
@@ -31,14 +31,14 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 21/27 | 10/27 | 26/27 | 21/27 | 20/27 | 6/27 |
+| TOTAL | 21/27 | 11/27 | 26/27 | 21/27 | 20/27 | 7/27 |
 
-## Violations (84)
+## Violations (79)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `build` Contents (2): skills/shared/return-convention.md: >100 lines, no contents list in first 20; skills/spec/contract-schema.md: >100 lines, no contents list in first 20
+- `build` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `build` Scripts (1): SKILL.md:14: script step lacks nearby dependency/setup note (heuristic)
 - `checkpoint` Frontmatter (1): description lacks when-to-use signal
 - `debugging` Body (1): 1453 body lines (max 500)
@@ -50,14 +50,13 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
 - `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
 - `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `orchestrator` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
+- `orchestrator` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20
 - `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
 - `planning` Frontmatter (1): description should use third-person, not first/second-person voice
-- `quality-gate` Contents (1): skills/shared/return-convention.md: >100 lines, no contents list in first 20
 - `recon` Contents (9): skills/recon/cartographer/recorder-prompt.md: >100 lines, no contents list in first 20; skills/recon/improvement-discovery.md:7: unresolved #phase-0-5-framework-detection; skills/recon/persistent-map.md:12: unresolved #defect-signatures; … and 6 more
 - `recon` Nesting (1): skills/recon/improvement-discovery.md -> skills/recon/prospector/REFERENCE.md not linked directly
 - `siege` Body (1): 1035 body lines (max 500)
-- `siege` Contents (4): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20; … and 1 more
+- `siege` Contents (3): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/security-signals.md: >100 lines, no contents list in first 20
 - `siege` Scripts (2): SKILL.md:21: script step lacks nearby dependency/setup note (heuristic); SKILL.md:317: script step lacks nearby dependency/setup note (heuristic)
 - `source-driven-development` Contents (1): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20
 - `spec` Body (1): 631 body lines (max 500)
@@ -70,5 +69,5 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `test-coverage` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `warden` Body (1): 942 body lines (max 500)
-- `warden` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20
+- `warden` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20
 - `warden` Frontmatter (1): description should use third-person, not first/second-person voice
