@@ -25,6 +25,13 @@ def main() -> None:
             "machine.md:4: machine-specific absolute path"]
         machine.write_text("/home/user/work\n")
         assert not check_machine_paths.offenders(root, ["machine.md"])
+        for listing in (b"", b"\xff"):
+            output = StringIO()
+            with (patch.object(check_machine_paths, "ROOT", root),
+                  patch.object(check_machine_paths.subprocess, "check_output", return_value=listing),
+                  redirect_stdout(output)):
+                assert check_machine_paths.main() == 1
+            assert output.getvalue().startswith("- git ls-files")
         example = root / "skills" / "worktree" / "SKILL.md"
         example.parent.mkdir(parents=True)
         example.write_text("filler\n" * 188 + "Worktree ready at /Users" + "/jesse/myproject/.worktrees/auth\n")
@@ -72,6 +79,12 @@ def main() -> None:
         report.write_text("current\n")
         assert check_scorecard_freshness.diff_report(report, "current\n") == ""
         assert check_scorecard_freshness.diff_report(report, "stale\n")
+        output = StringIO()
+        with (patch.object(check_scorecard_freshness, "ROOT", root),
+              patch.object(check_scorecard_freshness.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["checker"])),
+              redirect_stdout(output)):
+            assert check_scorecard_freshness.main() == 1
+        assert output.getvalue().splitlines() == ["- scorecard generation failed: checker exited with status 1"]
     print("CI gap self-test OK")
 
 

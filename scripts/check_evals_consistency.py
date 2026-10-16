@@ -4,9 +4,6 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Exceptions to skill-directory lookup: none currently documented/needed.
-DOCUMENTED_EXCEPTIONS: set[str] = set()
-
 
 def check(root: Path) -> list[str]:
     errors = []
@@ -23,7 +20,7 @@ def check(root: Path) -> list[str]:
                 label = f"{path.relative_to(root)}:{case.get('id', index)}"
                 if name in case.get("common_mistakes", []):
                     errors.append(f"{label}: expected_skill {name!r} also in common_mistakes")
-                if not isinstance(name, str) or not (root / "skills" / name / "SKILL.md").is_file() and name not in DOCUMENTED_EXCEPTIONS:
+                if not isinstance(name, str) or not (root / "skills" / name / "SKILL.md").is_file():
                     errors.append(f"{label}: expected_skill {name!r} has no skill directory")
     return errors
 

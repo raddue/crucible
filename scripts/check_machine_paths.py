@@ -33,7 +33,15 @@ def offenders(root: Path, files: list[str]) -> list[str]:
 
 
 def main() -> int:
-    files = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().strip("\0").split("\0")
+    try:
+        raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT)
+        files = raw.decode().strip("\0").split("\0")
+    except (subprocess.CalledProcessError, UnicodeError) as exc:
+        print(f"- git ls-files failed: {exc}")
+        return 1
+    if not files or files == [""]:
+        print("- git ls-files returned no paths")
+        return 1
     errors = offenders(ROOT, files)
     if errors:
         print("\n".join(f"- {error}" for error in errors))
