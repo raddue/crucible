@@ -183,13 +183,8 @@ class FleetTest(unittest.TestCase):
         self.assertEqual(doc["orchestrator"]["me"], "w3:p1")
         self.assertEqual(doc["pending"], "await result")
 
-    def test_skill_documents_identity_and_fail_closed_cleanup(self):
-        skill_path = os.path.join(REPO_ROOT, "skills", "orchestrator", "SKILL.md")
-        with open(skill_path, encoding="utf-8") as f:
-            text = f.read()
-        self.assertIn("pane_identity", text)
-        self.assertIn("guarded close", text)
-        self.assertIn("--receipt-file", text)
+    def test_skill_is_not_shipped(self):
+        self.assertFalse(os.path.exists(os.path.join(REPO_ROOT, "skills", "orchestrator")))
 
 if __name__ == "__main__":
     unittest.main()

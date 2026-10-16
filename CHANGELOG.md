@@ -37,8 +37,8 @@ ones (deleted/binary are explicit skips, never silent), bundle locale siblings /
 same-directory files, and emit a per-file coverage report that assigns every
 changed file to exactly one bundle — machine-enforced (a file with no bundle and
 no skip raises), so a review over a many-file diff produces per-file coverage
-with no silent skips. `warden` and `orchestrator` both dispatch one review
-worker per bundle, concurrently; the union of every leg's coverage markers must
+with no silent skips. `warden` dispatches one review
+worker per bundle; the union of every leg's coverage markers must
 equal the report's `bundled` set on completion, and a dead bundle surfaces as
 uncovered (fail-closed).
 
@@ -46,7 +46,7 @@ uncovered (fail-closed).
 
 - **`skills/shared/change-bundling-convention.md`** — canonical reference for the
   deterministic step (enumerate → select → bundle → cover-report) + the
-  one-worker-per-bundle dispatch protocol, linked by warden and orchestrator.
+  one-worker-per-bundle dispatch protocol, linked by warden.
 - **`scripts/change_bundling.py`** — pure stdlib engine
   (`parse_git_name_status`, `select_reviewable`, `bundle_files`,
   `coverage_report`); locale-sibling fold + directory affinity + size cap

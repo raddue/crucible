@@ -260,10 +260,10 @@ run python3 scripts/test_compass.py
 # Implementation-level compass regression corpus stays with scripts/compass.py.
 run python3 -m pytest eval/compass/ -q
 
-# --- orchestrator fleet-file CRUD (skills/orchestrator step 2) ---
+# --- Herdr fleet-file CRUD ---
 run python3 scripts/test_orchestrator_fleet.py
 
-# --- orchestrator passive liveness detector (skills/orchestrator scan) ---
+# --- Herdr passive liveness detector ---
 run python3 scripts/test_orchestrator_scan.py
 run python3 scripts/test_orchestrator_ping.py
 

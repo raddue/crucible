@@ -1,6 +1,8 @@
 # Skills
 
-The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how the orchestrator skills (build — including migration mode — debugging, spec) chain these together.
+The full Crucible skill catalog. Skills are the unit of methodology — each one encodes a specific workflow (TDD, quality gates, debugging, etc.) that the agent follows when invoked. See [architecture.md](architecture.md) for how skills chain together.
+
+orchestrator lives machine-locally (~/.claude/skills/orchestrator), not shipped.
 
 <!-- CATALOG:START -->
 ## Core Pipeline
@@ -63,6 +65,5 @@ The full Crucible skill catalog. Skills are the unit of methodology — each one
 | **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan, full evaluation, or efficiency report modes. Efficiency mode reads chronicle signals to produce per-skill token cost breakdowns, dispatch tier distribution, and structural baseline comparisons. |
 | **anvil** | Create new skills, modify and improve existing skills, and measure skill performance (formerly skill-creator). Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy. |
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. Includes the five-level trust hierarchy (L1 Trusted → L5 Untrusted) framework for resolving conflicts between loaded content from different sources. Also the session-continuity hub: bundled flat references for compass arc state (`docs/compass.md` read/update/doctor/compress), forge retrospectives / feed-forward / 10+-retro mutation proposals, handoff docs, recall session-history queries, and the workshop catalog tour. |
-| **orchestrator** | Use when the user wants a Claude Code session inside Herdr (a terminal multiplexer for coding agents) to act as the "team boss" driving multiple parallel Crucible worker sessions — spinning workers up, checking on them, retiring them, and reporting consolidated status. Trigger on "orchestrator", "team boss", "coordinate sessions", "spin up workers", "Herdr orchestrator", or any request to fan Crucible work out across several live Herdr sessions rather than do it all in this one session. Requires HERDR_ENV=1 — if this session isn't inside Herdr, say so and stop rather than trying to substitute a different fan-out mechanism (that's `batch`/`convoy`'s job, not this skill's). |
 
 <!-- CATALOG:END -->
