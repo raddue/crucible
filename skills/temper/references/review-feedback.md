@@ -1,9 +1,22 @@
----
-name: review-feedback
-description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
----
-
 # Review Feedback
+
+## Contents
+
+- [Overview](#overview)
+- [The Response Pattern](#the-response-pattern)
+- [Forbidden Responses](#forbidden-responses)
+- [Handling Unclear Feedback](#handling-unclear-feedback)
+- [Source-Specific Handling](#source-specific-handling)
+- [YAGNI Check](#yagni-check-for-professional-features)
+- [Implementation Order](#implementation-order)
+- [When To Push Back](#when-to-push-back)
+- [Acknowledging Correct Feedback](#acknowledging-correct-feedback)
+- [Gracefully Correcting Your Pushback](#gracefully-correcting-your-pushback)
+- [Common Mistakes](#common-mistakes)
+- [Real Examples](#real-examples)
+- [GitHub Thread Replies](#github-thread-replies)
+- [Calibration ledger emit](#calibration-ledger-emit-tier-b-stub--feedback-only-mode)
+- [The Bottom Line](#the-bottom-line)
 
 ## Overview
 
@@ -204,17 +217,17 @@ You understand 1,2,3,6. Unclear on 4,5.
 
 When replying to inline review comments on GitHub, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.
 
-## Calibration ledger emit (Tier B stub — standalone only)
+## Calibration ledger emit (Tier B stub — feedback-only mode)
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Standalone top-level invocation ONLY.** Emit a ledger row IFF `review-feedback` was invoked as its own top-level feedback-evaluation session (a user `/review-feedback`, or an orchestrator dispatching it as a discrete step that owns a run). When this skill's discipline is applied **inline** inside another skill's flow, emit **nothing** — that host skill owns its own ledger row. There is no run lifecycle for an inline application, so there is no `run_id` to mint and nothing to emit.
+**Standalone feedback-only invocation of temper ONLY.** Emit a ledger row IFF temper was invoked as a discrete feedback-evaluation session that owns a run, without running its code-diff review loop. When this discipline is applied **inline** inside another skill's flow or temper's own diff loop, emit **nothing** — the host skill or temper's terminal diff verdict owns its ledger row. There is no separate feedback run lifecycle for an inline application, so there is no `run_id` to mint and nothing to emit.
 
 When (and only when) running standalone, at the terminal conclusion emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
-- Mint exactly ONE UUIDv7 (`scripts/uuid7.py`) at the start of the standalone session and reuse it for the single emit at the terminal conclusion (not mid-flow). `(run_id, skill="review-feedback")` dedup (L-2) guarantees idempotency.
+- Mint exactly ONE UUIDv7 (`scripts/uuid7.py`) at the start of the standalone session and reuse it for the single emit at the terminal conclusion (not mid-flow). `(run_id, skill="temper")` dedup (L-2) guarantees idempotency.
 - The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — a missing emit must **never block** the skill.
-- Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "review-feedback"`, `tier: "B"`, `verdict` (feedback evaluated and resolved → `PASS`; feedback disputed / routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type` (per the reviewed artifact; default `code`).
+- Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "temper"`, `tier: "B"`, `verdict` (feedback evaluated and resolved → `PASS`; feedback disputed / routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type` (per the reviewed artifact; default `code`).
 - Set ALL calibration fields EXPLICITLY null per "Tier-B null semantics": `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0`, `comment: null`, `backfilled: false`, `falsified: null`, `falsified_by: null`.
 
 ## The Bottom Line

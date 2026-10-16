@@ -72,7 +72,7 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 | Fixing a bug or test failure | debugging |
 | Writing implementation code | test-driven-development |
 | Claiming work is done | verify → finish |
-| Receiving code review feedback | review-feedback |
+| Receiving code review feedback | temper (inbound feedback mode) |
 | Onboarding to an unfamiliar codebase | project-init |
 
 ### Build-shaped work routes through /build
