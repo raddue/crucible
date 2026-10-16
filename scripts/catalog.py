@@ -44,7 +44,6 @@ CATEGORIES: dict[str, list[str]] = {
     "Quality & Audit": [
         "delve", "audit", "siege", "quality-gate",
         "temper", "verify",
-        "skill-selection-evals",
         "finish", "warden",
     ],
     "Debugging": [

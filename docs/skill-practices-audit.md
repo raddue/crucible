@@ -22,7 +22,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | recon | PASS | FAIL | FAIL | PASS | PASS | FAIL |
 | replay | PASS | PASS | PASS | PASS | PASS | PASS |
 | siege | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
-| skill-selection-evals | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | source-driven-development | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | stocktake | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
@@ -31,9 +30,9 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 21/27 | 11/27 | 26/27 | 20/27 | 20/27 | 6/27 |
+| TOTAL | 20/26 | 10/26 | 25/26 | 20/26 | 19/26 | 6/26 |
 
-## Violations (84)
+## Violations (83)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
@@ -59,7 +58,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `siege` Body (1): 1035 body lines (max 500)
 - `siege` Contents (4): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20; … and 1 more
 - `siege` Scripts (2): SKILL.md:21: script step lacks nearby dependency/setup note (heuristic); SKILL.md:317: script step lacks nearby dependency/setup note (heuristic)
-- `skill-selection-evals` Frontmatter (1): description lacks when-to-use signal
 - `source-driven-development` Contents (1): skills/shared/fetched-content-containment.md: >100 lines, no contents list in first 20
 - `spec` Body (1): 631 body lines (max 500)
 - `spec` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20

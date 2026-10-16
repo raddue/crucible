@@ -142,7 +142,7 @@ From 24 failure memories:
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Standalone top-level invocation ONLY.** Emit a ledger row IFF `verify` was invoked as its own top-level run (a user `/verify`, including when the test-alignment mode is requested, or an orchestrator dispatching it as a discrete step that owns a run). When this skill's discipline is applied **inline** before another skill's completion claim — the common case — emit **nothing**; that host skill owns its own ledger row. Verify has no run lifecycle of its own when applied inline, so there is no `run_id` to mint and nothing to emit. Test-alignment mode follows the same standalone-only rule; inline callers own the ledger row. This precondition is non-negotiable: a naive per-application emit would flood the ledger.
+**Standalone top-level invocation ONLY.** Emit a ledger row IFF `verify` was invoked as its own top-level run (a user `/verify`, or an orchestrator dispatching it as a discrete step that owns a run). When this skill's discipline is applied **inline** before another skill's completion claim — the common case — emit **nothing**; that host skill owns its own ledger row. Verify has no run lifecycle of its own when applied inline, so there is no `run_id` to mint and nothing to emit. This precondition is non-negotiable: a naive per-application emit would flood the ledger.
 
 When (and only when) running standalone, at the terminal verdict emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
@@ -346,18 +346,7 @@ Invoke `crucible:verify` in test-alignment mode with:
 - Context: [description of changes]
 ```
 
-## Calibration ledger emit (Tier B stub — standalone only)
-
-<!-- CANONICAL: shared/ledger-append.md -->
-
-**Standalone top-level invocation ONLY.** Emit a ledger row IFF `verify` was invoked as its own top-level run (a user `/verify`, or the standalone test-alignment caller-integration path above). When dispatched **inline** by a host skill (`debugging` Phase 5, `build` Phase 3, `finish` Step 2.5), emit **nothing** — that host owns its own ledger row. The terminal "Test Alignment Audit Report" is the single emit point; emit once there, not mid-audit.
-
-When (and only when) running standalone, emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
-
-- Mint exactly ONE UUIDv7 (`scripts/uuid7.py`) at the start of the standalone run and reuse it for the single emit. `(run_id, skill="verify")` dedup (L-2) guarantees idempotency.
-- The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — a missing emit must **never block** the skill.
-- Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "verify"`, `tier: "B"`, `verdict` (all affected tests pass post-alignment with no coincidence flags and no fix failures → `PASS`; coincidence tests flagged or fix failures needing caller judgment → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the audited test files, repo-relative), `artifact_type: "code"`.
-- Set ALL calibration fields EXPLICITLY null per "Tier-B null semantics": `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0`, `comment: null`, `backfilled: false`, `falsified: null`, `falsified_by: null`.
+- **Test-alignment verdict mapping:** At the audit's single terminal emit point, use the standalone-only mechanics above. Map to `PASS` when all affected tests pass after alignment with no coincidence flags or fix failures; map to `ESCALATED` when coincidence tests or fix failures require caller judgment. Keep `skill: "verify"`, `artifact_type: "code"`, and `gated_files` set to the audited test files.
 
 ## Guardrails
 
