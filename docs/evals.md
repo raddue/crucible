@@ -46,16 +46,13 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
 | inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated harness (#424) has since exercised the dispatch directly: Phase 1 found no *identification-breadth* lift from the fan-out, and Phase 1b found no lift from the dimension *taxonomy* — but Phase 1b's execution measurement shows a real **+29 pp lift (execution harness, detection axis) from parallel test-writing breadth** over a bare baseline — see *Inquisitor Fan-Out* / *Phase 1b* below |
 
-<<<<<<< HEAD
 ### Recon mode consolidation (#720)
 
 The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison was blocked because four Claude CLI calls failed authentication before outputs existed. No scored outputs or valid A/B delta are available; do not claim a measured quality improvement.
 
-=======
 ## Issue #720: Quality-Gate Hub Merge (matched single-prompt A/B, Claude Opus 5.5)
 
 Matched old (`git show edf71fb^:skills/quality-gate/SKILL.md`) and merged quality-gate (43-line entry plus eight flat runbook refs) on one adversarial webhook-plan prompt. Both arms used `claude -p --model claude-opus-5-5 --tools ''`, no tools or edits, and disclosed simulation rather than claiming reviewer execution. A fixed 10-item rubric covered unsigned ingestion, SSRF, unbounded retry, unreplicated Redis, severity, weighted score, fresh re-review, non-PASS, no fabricated execution, and siege. **Old 10/10; merged 10/10; delta 0 percentage points.** Outputs and prompts: `/tmp/crucible-qg-720-ab/`. This is one matched, ceilinged prompt; it shows no regression on the sampled review path but cannot validate live dispatch, standalone red-team mode, consensus or dependency-audit behavior. The structural suite covers those wiring contracts separately.
->>>>>>> origin/dev
 ## Finish / safe-merge consolidation A/B (#720)
 
 A `/anvil` A/B has not been run for this merge. The merge preserves the source `skills/merge-pr/SKILL.md` mechanics in `skills/finish/merge.md` and makes `/finish` the single routing target, but behavioral non-regression remains unmeasured; run the paired eval before publication.
