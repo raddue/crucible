@@ -37,7 +37,6 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | TDD | 94% | 50% | **+44%** | Red-green-refactor discipline. Without the skill, agents write code-then-tests or skip "write failing test first" |
 | design | 100% | 64% | **+36%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers vs a single one-shot design |
 | audit | 72% | 38% | **+34%** | Multi-lens methodology and no-fix discipline. (Absolute with-rate is capped because the multi-lens protocol is partly dispatch-based and this run executed as a single agent with no nested fan-out — so the multi-agent value wasn't exercised here — but the delta over baseline is still large) |
-| test-coverage | 92% | 73% | **+19%** | Coincidence/alignment-gap detection; the baseline checks surface coverage only |
 | innovate | 100% | 86% | **+14%** | Structured divergent alternatives with cost/impact analysis vs a shorter improvement list |
 | debugging | 96% | 83% | **+13%** | Multi-angle investigation before forming a hypothesis. The 4.8 baseline is already strong here but less systematic |
 | review-feedback | 100% | 95% | **+5%** | Near-ceiling baseline on 4.8 — the model already rebuts wrong suggestions with evidence; small residual lift |
@@ -45,6 +44,10 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | planning | 100% | 100% | **+0%** | On 4.8 the baseline already produces bite-sized, well-specified plans; the structure no longer adds measurable lift (was +39% on 4.6 — the clearest case of capability erasing a delta) |
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
 | inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated harness (#424) has since exercised the dispatch directly: Phase 1 found no *identification-breadth* lift from the fan-out, and Phase 1b found no lift from the dimension *taxonomy* — but Phase 1b's execution measurement shows a real **+29 pp lift (execution harness, detection axis) from parallel test-writing breadth** over a bare baseline — see *Inquisitor Fan-Out* / *Phase 1b* below |
+
+### Test-alignment audit absorption (#720)
+
+The separate test-alignment audit was absorbed into verify. Four audit eval cases now live in `skills/verify/evals/evals.json`; no post-merge A/B run was performed, so no delta is claimed for the absorbed mode. The earlier standalone audit result (92% / 73%, +19%) is historical, not a verify measurement.
 
 ### Recon mode consolidation (#720)
 
@@ -374,7 +377,7 @@ edits 11 `SKILL.md` files in this change window (`skills/calibration-reconcile/S
 `skills/ledger/SKILL.md` are removed outright along with their skill directories — not edited —
 and carry no eval-before-publish obligation). Of those 11: 6 lose an active `brier_advisory.py`
 call site (`getting-started`, `quality-gate`, `audit`, `delve`, `siege`, `inquisitor` — 8 call
-sites total); 3 more (`review-feedback`, `test-coverage`, `verify`) lose a "No advisory wiring"
+sites total); 2 more (`review-feedback`, `verify`) lose a "No advisory wiring"
 note that documented the *absence* of a call site rather than a real one; and `stocktake` /
 `workshop` are edited for unrelated reasons (a checker-inventory line removal, a skill-count
 correction) with no calibration/advisory surface at all — out of scope for this record.
@@ -384,7 +387,7 @@ regression harnesses, so those three don't need the manual check below. The rema
 `evals.json`-bearing edits are: `skills/getting-started/SKILL.md` (loses its entire "Calibration
 Snapshot" session-init section), `skills/quality-gate/SKILL.md` (loses item `1.5.` from its
 "How It Works" enumeration), `skills/audit/SKILL.md` (loses its `advise audit` call site and
-CANONICAL block), and `skills/review-feedback/SKILL.md`, `skills/test-coverage/SKILL.md`,
+CANONICAL block), and `skills/review-feedback/SKILL.md`,
 `skills/verify/SKILL.md` (each loses one "No advisory wiring" documentation line — added on
 round-4 quality-gate review, since the original pass here covered only the 3 with a real call
 site). None of the 6 is backed by a CI-gated eval harness the way `siege`/`delve`/`inquisitor`
@@ -398,7 +401,7 @@ satisfied by an existing gate.
 grep -o -i -E 'calibrat[a-z]*|ledger|brier|snapshot|advisor[a-z]*' \
   skills/getting-started/evals/evals.json skills/quality-gate/evals/evals.json \
   skills/audit/evals/evals.json skills/review-feedback/evals/evals.json \
-  skills/test-coverage/evals/evals.json skills/verify/evals/evals.json
+  skills/verify/evals/evals.json
 ```
 
 Zero hits in `getting-started` (15 sequence evals covering verify-before-completion,
@@ -406,7 +409,7 @@ debugging-before-fix, tdd-deletion-rule, design-before-build, and review-feedbac
 none touch session-init or calibration reporting). One incidental, unrelated hit in `quality-gate`
 (the word "snapshot" inside an unrelated prompt about a `_cache` dict). Zero hits in `audit` (4
 evals, all systemic-lens code-review scenarios — none touch the removed `advise audit` call site).
-Zero hits in `review-feedback` (3 evals), `test-coverage` (4 evals), and `verify` (4 evals) — all
+Zero hits in `review-feedback` (3 evals) and `verify` (8 evals) — all
 11 are code-review/verification-report scenarios unrelated to calibration reporting, and none
 touches the removed "No advisory wiring" note (unsurprising: that note documented an absence,
 so there was never a call site for an eval to exercise). Every eval in all six files was also

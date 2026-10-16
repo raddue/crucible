@@ -937,7 +937,7 @@ a further** co-timed `code` entry by not emitting.
   the routing-collision fix (S-C / I-W3). *(Phase B/E.)*
 - **finish refactor (M-3):** finish Steps 2+3 replaced by a single warden call, and build's
   finish-skip instruction rewritten to tell finish to skip the **warden call** **with the
-  test-coverage (Step 2.5) skip preserved**. *(Phase E.)*
+  verify test-alignment audit (Step 2.5) skip preserved**. *(Phase E.)*
 - **siege runs twice per warden run, mirroring build (S-A):** warden owns a siege leg at
   step-1 HEAD **and** lets the quality-gate red-team leg re-dispatch its internal siege at
   `SHA_pre_redteam` (warden does **not** suppress it) — coverage-equal to build's two

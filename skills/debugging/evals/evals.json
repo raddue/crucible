@@ -89,7 +89,7 @@
         "Fix reads the updated record from the primary pool (not the read replica) before caching it",
         "Agent identifies that existing tests pass because they use a single local database without read replicas — the test environment doesn't reproduce the production topology",
         "A WIP or fix commit is made after implementing the change (commit strategy)",
-        "Quality review or test-coverage check is performed on the fix"
+        "Quality review or verify test-alignment check is performed on the fix"
       ]
     },
     {

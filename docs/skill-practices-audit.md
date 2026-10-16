@@ -26,14 +26,13 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | stocktake | PASS | FAIL | PASS | FAIL | FAIL | FAIL |
 | temper | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| test-coverage | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-driven-development | PASS | PASS | PASS | PASS | PASS | PASS |
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 21/27 | 10/27 | 26/27 | 21/27 | 20/27 | 6/27 |
+| TOTAL | 20/26 | 10/26 | 25/26 | 20/26 | 19/26 | 6/26 |
 
-## Violations (84)
+## Violations (83)
 
 - `anvil` Body (1): 558 body lines (max 500)
 - `audit` Body (1): 790 body lines (max 500)
@@ -67,7 +66,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `stocktake` Frontmatter (1): description lacks when-to-use signal
 - `stocktake` Scripts (5): SKILL.md:54: script step lacks nearby dependency/setup note (heuristic); SKILL.md:55: script step lacks nearby dependency/setup note (heuristic); SKILL.md:56: script step lacks nearby dependency/setup note (heuristic); … and 2 more
 - `temper` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
-- `test-coverage` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `warden` Body (1): 942 body lines (max 500)
 - `warden` Contents (2): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20; skills/shared/return-convention.md: >100 lines, no contents list in first 20

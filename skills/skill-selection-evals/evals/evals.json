@@ -7,13 +7,13 @@
       "dimension": "direct",
       "boundary": "test-methodology",
       "prompt": "I just changed the auth module, make sure existing tests still make sense",
-      "expected_skill": "test-coverage",
+      "expected_skill": "verify",
       "common_mistakes": [
         "test-driven-development",
-        "verify"
+        "inquisitor"
       ],
       "context": "Code already exists and was recently modified. Tests exist but may be stale after the change.",
-      "reasoning": "TDD is for new code written test-first. Verify checks claims of completion. Test-coverage audits existing tests after code changes to find staleness, needed updates, or removal.",
+      "reasoning": "TDD is for new code written test-first. Verify's test-alignment mode audits existing tests after code changes to find staleness, needed updates, or removal.",
       "difficulty": "medium"
     },
     {
@@ -23,52 +23,54 @@
       "prompt": "I need to implement a Luhn validator for credit card numbers. Let's build it with tests.",
       "expected_skill": "test-driven-development",
       "common_mistakes": [
-        "test-coverage",
+        "verify",
         "build"
       ],
       "context": "New feature, no existing code. User wants test-first development.",
-      "reasoning": "This is greenfield implementation where no code exists yet. 'Build it with tests' signals test-first approach. TDD writes failing tests before implementation. Test-coverage only applies when tests already exist. Build would skip the test-first discipline.",
+      "reasoning": "This is greenfield implementation where no code exists yet. 'Build it with tests' signals test-first approach. TDD writes failing tests before implementation. Verify's test-alignment mode applies only when existing tests may be stale after code changes. Build would skip the test-first discipline.",
       "difficulty": "easy"
     },
     {
       "id": "test-methodology-direct-03",
       "dimension": "direct",
       "boundary": "test-methodology",
-      "prompt": "I just finished implementing the rate limiter. Try to break it \u2014 find edge cases I missed.",
+      "prompt": "I just finished implementing the rate limiter. Try to break it — find edge cases I missed.",
       "expected_skill": "inquisitor",
       "common_mistakes": [
-        "test-coverage",
+        "verify",
         "test-driven-development",
         "quality-gate red-team mode"
       ],
       "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
-      "reasoning": "Implementation is done \u2014 this is not TDD or test-coverage. Inquisitor's per-task mode absorbs adversarial-tester and writes tests designed to make this implementation break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
+      "reasoning": "Implementation is done — this is not TDD or verify's test-alignment mode. Inquisitor's per-task mode absorbs adversarial-tester and writes tests designed to make this implementation break. Red-team reviews artifacts for design flaws, not implementation edge cases.",
       "difficulty": "easy"
     },
     {
       "id": "test-methodology-negative-01",
       "dimension": "negative",
       "boundary": "test-methodology",
-      "prompt": "Write tests for the parser I just built last week. It handles JSON, YAML, and TOML.",
-      "expected_skill": "test-coverage",
+      "prompt": "Audit tests for the parser I just built last week. It handles JSON, YAML, and TOML.",
+      "expected_skill": "verify",
       "common_mistakes": [
-        "test-driven-development"
+        "test-driven-development",
+        "test-gap-writer"
       ],
-      "context": "Code was built last week. Tests need to be added after the fact. This is retroactive test addition, not test-first development.",
-      "reasoning": "Despite saying 'write tests', this is NOT TDD. The parser already exists \u2014 TDD requires writing tests BEFORE implementation. Test-coverage audits and adds tests for existing code. The key signal is 'I just built' (past tense) \u2014 the code-before-test ship has sailed.",
+      "context": "Code was built last week. Existing tests may need alignment checks after the code change; no missing-test authoring requested.",
+      "reasoning": "This requests auditing existing tests after implementation, not authoring missing tests. Verify's test-alignment mode checks stale assertions and removed paths; test-gap-writing is separate and only applies when missing coverage is requested.",
       "difficulty": "hard"
     },
     {
       "id": "test-methodology-context-01",
       "dimension": "context-dependent",
       "boundary": "test-methodology",
-      "prompt": "Write tests for the checkout flow.",
-      "expected_skill": "test-coverage",
+      "prompt": "Check whether existing tests for the checkout flow still match its behavior after a recent change.",
+      "expected_skill": "verify",
       "common_mistakes": [
-        "test-driven-development"
+        "test-driven-development",
+        "test-gap-writer"
       ],
-      "context": "The checkout flow already exists in production. This is adding test coverage to existing, working code.",
-      "reasoning": "Same verb ('write tests') but context determines the skill. When the code already exists and is in production, this is test-coverage (audit and add tests for existing code). If the checkout flow did not exist yet, this would be TDD. The distinguishing signal is whether code exists.",
+      "context": "The checkout flow already exists in production, and the request is explicitly to audit existing tests for alignment, not to add missing tests.",
+      "reasoning": "Verify's test-alignment mode audits existing tests after code changes. TDD is for test-first implementation, while test-gap-writing adds missing tests only when requested.",
       "difficulty": "hard"
     },
     {
@@ -123,7 +125,7 @@
         "quality-gate",
         "audit"
       ],
-      "context": "User is presenting their own code and asking for a review. No prior feedback exists \u2014 this is a request for review.",
+      "context": "User is presenting their own code and asking for a review. No prior feedback exists — this is a request for review.",
       "reasoning": "Temper's outbound diff-review loop applies. Received comments instead use its inbound feedback mode. Audit covers systemic review.",
       "difficulty": "easy"
     },
@@ -175,7 +177,10 @@
       "boundary": "review-direction",
       "prompt": "These code review comments say the fallback is dead code. Verify that claim before changing it.",
       "expected_skill": "temper",
-      "common_mistakes": ["delve", "quality-gate"],
+      "common_mistakes": [
+        "delve",
+        "quality-gate"
+      ],
       "context": "Received comments need verification against actual callers, not a fresh review.",
       "reasoning": "Temper's feedback mode checks reviewer claims against code before acting.",
       "difficulty": "medium"
@@ -186,7 +191,10 @@
       "boundary": "review-direction",
       "prompt": "Address feedback on my PR; one request seems incompatible with our minimum supported version.",
       "expected_skill": "temper",
-      "common_mistakes": ["build", "audit"],
+      "common_mistakes": [
+        "build",
+        "audit"
+      ],
       "context": "Inbound review feedback with a compatibility concern.",
       "reasoning": "Temper's feedback mode verifies compatibility and pushes back with evidence if needed.",
       "difficulty": "medium"
@@ -197,7 +205,10 @@
       "boundary": "review-direction",
       "prompt": "Evaluate these reviewer suggestions before implementing suggestions that sound technically questionable.",
       "expected_skill": "temper",
-      "common_mistakes": ["quality-gate", "delve"],
+      "common_mistakes": [
+        "quality-gate",
+        "delve"
+      ],
       "context": "Received suggestions must be checked before any change.",
       "reasoning": "Temper's feedback mode requires technical verification before implementation.",
       "difficulty": "medium"
@@ -220,14 +231,14 @@
       "id": "adversarial-scope-direct-02",
       "dimension": "direct",
       "boundary": "adversarial-scope",
-      "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem \u2014 correctness, robustness, architecture, everything.",
+      "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem — correctness, robustness, architecture, everything.",
       "expected_skill": "audit",
       "common_mistakes": [
         "quality-gate red-team mode",
         "temper",
         "recon"
       ],
-      "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact \u2014 an entire subsystem with multiple files.",
+      "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact — an entire subsystem with multiple files.",
       "reasoning": "Audit dispatches parallel analysis agents across four lenses (correctness, robustness, consistency, architecture) on an existing subsystem. Red-team reviews a single artifact. Code-review is lighter-weight. Recon improvement discovery looks for architectural friction across the whole codebase, not a specific subsystem.",
       "difficulty": "medium"
     },
@@ -235,7 +246,7 @@
       "id": "adversarial-scope-negative-01",
       "dimension": "negative",
       "boundary": "adversarial-scope",
-      "prompt": "We just assembled the full feature \u2014 auth, API routes, database migrations, and frontend. Hunt for cross-component bugs before we ship.",
+      "prompt": "We just assembled the full feature — auth, API routes, database migrations, and frontend. Hunt for cross-component bugs before we ship.",
       "expected_skill": "inquisitor",
       "common_mistakes": [
         "audit",
@@ -256,21 +267,21 @@
         "quality-gate red-team mode"
       ],
       "context": "Despite using the word 'audit', the focus is specifically on security. This narrows the scope from general audit to security audit.",
-      "reasoning": "Siege is the security-specific audit \u2014 dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture \u2014 broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
+      "reasoning": "Siege is the security-specific audit — dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture — broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit.",
       "difficulty": "hard"
     },
     {
       "id": "completion-claims-direct-01",
       "dimension": "direct",
       "boundary": "completion-claims",
-      "prompt": "I just ran the tests and they all pass \u2014 here's the output:\n\n```\n$ npm test\n  12 passing (340ms)\n  0 failing\n```\n\nFeature works end-to-end. Let's create a PR and merge.",
+      "prompt": "I just ran the tests and they all pass — here's the output:\n\n```\n$ npm test\n  12 passing (340ms)\n  0 failing\n```\n\nFeature works end-to-end. Let's create a PR and merge.",
       "expected_skill": "finish",
       "common_mistakes": [
         "verify",
         "temper"
       ],
       "context": "User has provided fresh test evidence in the current message. Verification is satisfied. This is now an integration decision.",
-      "reasoning": "Finish guides completion \u2014 presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain.",
+      "reasoning": "Finish guides completion — presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain.",
       "difficulty": "easy"
     },
     {
@@ -281,10 +292,10 @@
       "expected_skill": "verify",
       "common_mistakes": [
         "finish",
-        "test-coverage"
+        "test-driven-development"
       ],
       "context": "User is uncertain about completion. They need evidence, not an integration decision.",
-      "reasoning": "Verify runs verification commands and confirms output before any success claims \u2014 evidence before assertions. The user says 'I think' (uncertain) and 'confirm everything works' (needs evidence). Finish would be premature \u2014 the user has not yet confirmed the work is correct.",
+      "reasoning": "Verify runs verification commands and confirms output before any success claims — evidence before assertions. The user says 'I think' (uncertain) and 'confirm everything works' (needs evidence). Finish would be premature — the user has not yet confirmed the work is correct.",
       "difficulty": "easy"
     },
     {
@@ -297,7 +308,7 @@
         "finish"
       ],
       "context": "User claims completion but has not provided evidence of running tests or verification commands in the current session. 'Looks good to me' is a subjective claim, not verified evidence.",
-      "reasoning": "Despite the user's confidence, verify requires fresh evidence in the current session. 'Looks good to me' is not the same as 'tests pass and here is the output'. Verify must run before finish \u2014 the completion claim needs evidence backing.",
+      "reasoning": "Despite the user's confidence, verify requires fresh evidence in the current session. 'Looks good to me' is not the same as 'tests pass and here is the output'. Verify must run before finish — the completion claim needs evidence backing.",
       "difficulty": "hard"
     },
     {
@@ -309,8 +320,8 @@
       "common_mistakes": [
         "verify"
       ],
-      "context": "All verification signals present: tests pass, CI green, peer approvals received. The user is asking what the next step is \u2014 this is an integration decision.",
-      "reasoning": "Same completion-area prompt as other evals in this boundary, but context includes strong evidence (tests, CI, approvals). With evidence satisfied, the question 'what now?' is an integration decision \u2014 finish. If evidence were missing, verify would be correct. The distinguishing context is the presence of multiple verification signals.",
+      "context": "All verification signals present: tests pass, CI green, peer approvals received. The user is asking what the next step is — this is an integration decision.",
+      "reasoning": "Same completion-area prompt as other evals in this boundary, but context includes strong evidence (tests, CI, approvals). With evidence satisfied, the question 'what now?' is an integration decision — finish. If evidence were missing, verify would be correct. The distinguishing context is the presence of multiple verification signals.",
       "difficulty": "medium"
     },
     {
@@ -324,7 +335,7 @@
         "audit"
       ],
       "context": "Active failure with error evidence. This is a bug to investigate and fix, not a completion check or subsystem review.",
-      "reasoning": "Debugging handles active failures \u2014 bugs, test failures, unexpected behavior. The user has an error log showing a specific failure. Verify checks completion claims (no active failure here). Audit reviews subsystems (this is a specific bug, not a broad review).",
+      "reasoning": "Debugging handles active failures — bugs, test failures, unexpected behavior. The user has an error log showing a specific failure. Verify checks completion claims (no active failure here). Audit reviews subsystems (this is a specific bug, not a broad review).",
       "difficulty": "easy"
     },
     {
@@ -335,10 +346,10 @@
       "expected_skill": "debugging",
       "common_mistakes": [
         "verify",
-        "test-coverage"
+        "test-driven-development"
       ],
-      "context": "Tests pass but behavior is wrong. This is a bug \u2014 the tests are insufficient or the bug is in an untested path.",
-      "reasoning": "Despite tests passing, there is unexpected behavior (wrong search results). This is a debugging scenario \u2014 investigate the root cause. Verify would just re-run the (already passing) tests. Test-coverage would audit test quality but not investigate the specific user-reported issue.",
+      "context": "Tests pass but behavior is wrong. This is a bug — the tests are insufficient or the bug is in an untested path.",
+      "reasoning": "Despite tests passing, there is unexpected behavior (wrong search results). This is a debugging scenario — investigate the root cause. Verify would just re-run the (already passing) tests. Verify's test-alignment mode would audit existing test alignment but not investigate the specific user-reported issue.",
       "difficulty": "medium"
     },
     {
@@ -351,8 +362,8 @@
         "audit",
         "verify"
       ],
-      "context": "User reports something is wrong \u2014 this is an active problem, not a proactive review. The phrasing indicates a current issue, not a desire for broad subsystem review.",
-      "reasoning": "'Something is wrong' signals an active problem \u2014 debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate.",
+      "context": "User reports something is wrong — this is an active problem, not a proactive review. The phrasing indicates a current issue, not a desire for broad subsystem review.",
+      "reasoning": "'Something is wrong' signals an active problem — debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate.",
       "difficulty": "medium"
     },
     {
@@ -368,7 +379,7 @@
         "planning"
       ],
       "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline. Tests design-before-build ordering discipline.",
-      "reasoning": "Design must come before build \u2014 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient \u2014 it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline).",
+      "reasoning": "Design must come before build — 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient — it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline).",
       "difficulty": "medium"
     },
     {
@@ -429,7 +440,7 @@
         "test-driven-development"
       ],
       "context": "Build-shaped: spec + implement + PR, with test emphasis.",
-      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG \u2014 invoking TDD or spec directly would bypass build's orchestration.",
+      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG — invoking TDD or spec directly would bypass build's orchestration.",
       "difficulty": "easy"
     },
     {
@@ -458,7 +469,7 @@
         "test-driven-development"
       ],
       "context": "Build-shaped: implement + PR in one prompt.",
-      "reasoning": "Implement + PR together is a build-shaped dispatch \u2014 the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
+      "reasoning": "Implement + PR together is a build-shaped dispatch — the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
       "difficulty": "easy"
     },
     {
@@ -501,7 +512,7 @@
         "planning"
       ],
       "context": "Build-shaped: explicit 'build end-to-end' framing.",
-      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build \u2014 it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
+      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build — it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
       "difficulty": "easy"
     },
     {
@@ -544,7 +555,7 @@
         "simplify"
       ],
       "context": "Boundary case: refactor + PR. Refactor reads like /simplify but scope + PR makes it build-shaped.",
-      "reasoning": "Refactor with explicit PR at the end is still design-through-execution \u2014 particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
+      "reasoning": "Refactor with explicit PR at the end is still design-through-execution — particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
       "difficulty": "medium"
     },
     {
@@ -597,7 +608,7 @@
       "common_mistakes": [
         "getting-started"
       ],
-      "context": "Onboarding to a codebase (not the skill suite) before any specific task \u2014 whole-repo structural context.",
+      "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
       "reasoning": "Recon should select whole-repo onboarding to map an unfamiliar repository before the first task. Workshop tours the skill suite, not the codebase; getting-started is conversation bootstrap.",
       "difficulty": "medium"
     },
@@ -631,12 +642,12 @@
       "id": "explore-vs-improve-negative-01",
       "dimension": "negative",
       "boundary": "explore-vs-improve",
-      "prompt": "First time in this repo \u2014 map the whole thing and any sibling repos it depends on.",
+      "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
       "expected_skill": "recon",
       "common_mistakes": [
         "getting-started"
       ],
-      "context": "Whole-repo first-time mapping PLUS cross-repo topology \u2014 contrasted with task-scoped recon investigation.",
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology — contrasted with task-scoped recon investigation.",
       "reasoning": "Select recon whole-repo onboarding mode for first-time mapping and sibling-repository topology. Task investigation is scoped to a specific task; improvement discovery looks for architectural friction, not repository mapping.",
       "difficulty": "hard"
     },
@@ -649,7 +660,7 @@
       "common_mistakes": [
         "audit"
       ],
-      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module \u2014 task-scoped recon, not whole-repo onboarding.",
+      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
       "reasoning": "Select task-scoped investigation: this is one module in service of a specific upcoming change. Whole-repo onboarding is unnecessary; improvement discovery is for architectural friction, not understanding the current refund flow.",
       "difficulty": "medium"
     },
@@ -660,10 +671,10 @@
       "prompt": "I just finished the JWT parser. Write tests that try to break this one function.",
       "expected_skill": "inquisitor",
       "common_mistakes": [
-        "test-coverage"
+        "verify"
       ],
       "context": "A single completed implementation; the ask is to write tests that break that one component.",
-      "reasoning": "Inquisitor per-task mode reads one implementation and writes up to 5 tests designed to make it break. Full-feature mode hunts cross-component bugs. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
+      "reasoning": "Inquisitor per-task mode reads one implementation and writes up to 5 tests designed to make it break. Full-feature mode hunts cross-component bugs. verify audits existing tests for staleness, not adversarial break-it tests.",
       "difficulty": "medium"
     },
     {
@@ -677,7 +688,7 @@
         "quality-gate"
       ],
       "context": "User wants the whole pre-push review gate run over their changes, not a single reviewer.",
-      "reasoning": "The 'gate ... before I push' push-gate cue routes to warden \u2014 the whole-set gate that runs temper, delve, red-team, siege, and inquisitor and returns one verdict. temper is a single fresh-eyes merge-verdict reviewer (one leg of warden); quality-gate red-teams a typed artifact, not a code push gate.",
+      "reasoning": "The 'gate ... before I push' push-gate cue routes to warden — the whole-set gate that runs temper, delve, red-team, siege, and inquisitor and returns one verdict. temper is a single fresh-eyes merge-verdict reviewer (one leg of warden); quality-gate red-teams a typed artifact, not a code push gate.",
       "difficulty": "medium"
     },
     {
@@ -785,7 +796,7 @@
         "design"
       ],
       "context": "The user wants a session-to-session handoff note, not a durable architectural decision record.",
-      "reasoning": "getting-started\u2019s handoff reference (handoff.md) writes session handoff docs. design\u2019s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
+      "reasoning": "getting-started’s handoff reference (handoff.md) writes session handoff docs. design’s decision-record subflow writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
       "difficulty": "medium"
     },
     {
@@ -824,7 +835,7 @@
         "design"
       ],
       "context": "The work is complete and the user wants to integrate it.",
-      "reasoning": "finish wraps up completed work. design\u2019s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
+      "reasoning": "finish wraps up completed work. design’s decision-record subflow is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
       "difficulty": "medium"
     },
     {
@@ -851,7 +862,7 @@
         "design"
       ],
       "context": "Completion-shaped wrap-up language after a merge.",
-      "reasoning": "'record where we ended up' is completion framing. design\u2019s decision-record subflow requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
+      "reasoning": "'record where we ended up' is completion framing. design’s decision-record subflow requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
       "difficulty": "hard"
     },
     {
@@ -1004,7 +1015,7 @@
       "id": "session-hub-recall-01",
       "dimension": "direct",
       "boundary": "session-hub",
-      "prompt": "Recall errors from this session \u2014 what failed before compaction?",
+      "prompt": "Recall errors from this session — what failed before compaction?",
       "expected_skill": "getting-started",
       "common_mistakes": [
         "debugging",

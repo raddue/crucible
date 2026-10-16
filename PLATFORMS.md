@@ -29,7 +29,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
 | anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
-| test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
+| verify | Subagent dispatch for test-alignment audit/fix agents (Opus) | Audits existing tests after code changes |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
 | design | Subagent dispatch for parallel investigation, Challenger, approach evaluation, and innovation | Investigation, evaluation, challenge, and proposal run in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |

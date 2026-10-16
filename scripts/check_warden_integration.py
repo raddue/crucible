@@ -253,7 +253,7 @@ and red-team steps.
 
 ### Step 2.5: Test Alignment Audit
 
-**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage — audit alignment.
+**RECOMMENDED SUB-SKILL:** Use crucible:verify (test-alignment mode) — audit alignment.
 
 ### Step 2.75: Forge Retrospective
 
@@ -325,7 +325,7 @@ def selftest() -> int:
         f"A5 (0 warden) should fire, got: {check_finish(a5_zero)}")
     # A5 BAD (two): a second warden dispatch in the review region → A5 fires.
     a5_two = _GOOD_FINISH.replace(
-        "**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage — audit alignment.",
+        "**RECOMMENDED SUB-SKILL:** Use crucible:verify (test-alignment mode) — audit alignment.",
         "**REQUIRED SUB-SKILL:** Use crucible:warden a second time.")
     assert any(e.startswith("A5") for e in check_finish(a5_two)), (
         f"A5 (2 warden) should fire, got: {check_finish(a5_two)}")
