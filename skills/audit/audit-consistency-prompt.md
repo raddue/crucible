@@ -133,7 +133,7 @@ Receives full source for Agent A's flagged files. Confirms or rejects suspected 
 Requested profile: high.
 
 ```
-Task tool (general-purpose):
+Task tool (general-purpose, model: opus):
   description: "Audit consistency lens (Agent B: deep inspection)"
   prompt: |
     You are an auditor confirming or rejecting suspected pattern

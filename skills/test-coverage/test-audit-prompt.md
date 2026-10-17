@@ -5,7 +5,7 @@
 
 Use this template when dispatching the test audit agent. The orchestrator fills in the bracketed sections.
 
-Requested profile: high.
+Requested profile: high (Claude Code uses native `model: opus`).
 
 ```
 Agent tool (subagent_type: "general-purpose"):
