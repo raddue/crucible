@@ -96,7 +96,7 @@ def parse_receipt_v11(text):
 def selftest():
     """Exercise v1.1 parse, delegated lint, and sweep without scenario files."""
     rv = layer1
-    base = next(Path(__file__).resolve().parent.glob("scenario-*.jsonl"))
+    base = Path(__file__).resolve().parent / "scenario-disagreement.jsonl"
     receipt = json.loads(base.read_text(encoding="utf-8").splitlines()[0])["receipt"]
     parsed = parse_receipt_v11(receipt)
     if parsed.get("version") != "1.1":

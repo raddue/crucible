@@ -844,6 +844,7 @@ class TestV11Extension(unittest.TestCase):
     def test_v11_keyword_matches_lowercase_ascii(self):
         rv = _import_rv()
         self.assertIsNotNone(rv._v11_keyword_end("tripwire-child: none", "TRIPWIRE-CHILD:"))
+        self.assertIsNone(rv._v11_keyword_end("tripwire: none", "TRIPWIRE:"))
 
 
 class TestTier2Ledger(unittest.TestCase):
