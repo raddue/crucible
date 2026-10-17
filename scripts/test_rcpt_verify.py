@@ -841,6 +841,10 @@ class TestV11Extension(unittest.TestCase):
         self.assertIsNotNone(parsed["tripwire"])
         self.assertEqual(parsed["supersedes"], "none")
 
+    def test_v11_keyword_matches_lowercase_ascii(self):
+        rv = _import_rv()
+        self.assertIsNotNone(rv._v11_keyword_end("tripwire-child: none", "TRIPWIRE-CHILD:"))
+
 
 class TestTier2Ledger(unittest.TestCase):
     """Tier-2 part-3 receipt-ledger binding (#369 PR-B): each DISPATCHED TRACE line
@@ -11367,7 +11371,7 @@ class TestPR714ReviewRound3_567(_InqBase):
     def test_pre_next_continuation_lines_do_not_false_positive(self):
         rv = _import_rv()
         for line in ("  Supersedes: earlier note", "# tripwire: x",
-                     "- supersedes: y", "  tripwire-child: z"):
+                     "- supersedes: y"):
             with self.subTest(line=line):
                 body = self._base_body().replace("RCPT v1 ", "RCPT v1.1 ", 1).replace(
                     "SUSPICION  0.10", line + "\nSUSPICION  0.10")

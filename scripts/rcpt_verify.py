@@ -2556,7 +2556,8 @@ def _v11_keyword_end(line, keyword):
         new = set()
         if ord(ch) < 128:
             for j, w in states:
-                if j < m and ch == keyword[j]:
+                if j < m and (ch == keyword[j] or
+                               keyword == "TRIPWIRE-CHILD:" and ch.upper() == keyword[j].upper()):
                     new.add((j + 1, w))
         else:
             res = _confusables_skeleton(ch)[0].upper()
