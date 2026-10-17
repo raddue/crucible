@@ -45,11 +45,11 @@ class LintError(layer1.LintError):
 
 
 def parse_receipt_v11(text):
+    """Parse a receipt, delegating v1.1 sections and retaining v1 compatibility."""
     if text.startswith("RCPT v1.1 "):
         parsed = layer1.parse_v11_sections(text)
         parsed["version"] = "1.1"
         return parsed
-    """Parse v1.1 receipt: Layer 1 sections + TRIPWIRE + SUPERSEDES [+ TRIPWIRE-CHILD]."""
     version_m = re.match(r"^RCPT v(1|1\.1) ", text)
     if not version_m:
         raise LintError("header missing or bad version")

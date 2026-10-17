@@ -53,12 +53,6 @@ check_ancestors() {
     done
 }
 check_ancestors target "$TARGET"
-TARGET_PARENT=$(dirname -- "$TARGET")
-if [ ! -d "$TARGET_PARENT" ]; then
-    echo "target parent does not exist: $TARGET_PARENT" >&2
-    echo "Create it first: sudo install -d -o root -g root -m 0755 \"$TARGET_PARENT\"" >&2
-    exit 1
-fi
 check_ancestors python "$PY"
 # The system python path can be a symlink; validate its resolved destination too.
 PY=$(readlink -f -- "$PY")

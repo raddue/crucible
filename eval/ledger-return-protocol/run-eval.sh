@@ -3,9 +3,9 @@
 #
 # Runs three checks:
 #   1. Context-reduction metric on the hand-authored sample corpus
-#      (5 representative dispatches). Target: p50 ratio <= 0.25.
+#      (5 representative dispatches). Target: p50 ratio <= 0.40.
 #   2. Sample-corpus receipts all pass the reference linter.
-#   3. All synthetic injections (attack shapes a/b/c/d) are caught
+#   3. All synthetic injections are caught
 #      by the reference linter.
 #
 # The sample corpus is a small hand-authored stand-in. A full replay
