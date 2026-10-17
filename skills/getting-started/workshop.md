@@ -93,4 +93,3 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the skills compose
 - `docs/skills.md` — full 25-skill catalog with eval deltas
-- `docs/skills.md` — full 25-skill catalog with eval deltas

@@ -58,8 +58,7 @@ def tracked_md_files() -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "*.md"], cwd=ROOT, capture_output=True, text=True
     ).stdout.splitlines()
-    return [f for f in out if not f.startswith(SCAN_EXCLUDE_PREFIXES)
-            and (ROOT / f).is_file()]
+    return [f for f in out if not f.startswith(SCAN_EXCLUDE_PREFIXES)]
 
 
 def find_links(lines: list[str]) -> list[tuple[int, str]]:
