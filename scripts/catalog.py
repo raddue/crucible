@@ -43,7 +43,7 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "Quality & Audit": [
         "delve", "audit", "siege", "quality-gate",
-        "test-coverage", "temper", "review-feedback", "verify",
+        "test-coverage", "temper", "verify",
         "finish", "warden",
     ],
     "Debugging": [
@@ -55,11 +55,7 @@ CATEGORIES: dict[str, list[str]] = {
         "distill",
     ],
     "Maintenance & Meta": [
-        "stocktake", "anvil", "getting-started", "orchestrator",
-    ],
-    "Eval & Maintenance (internal)": [
-        "temper-eval-collect", "temper-eval-calibrate",
-        "skill-selection-evals",
+        "anvil", "getting-started", "orchestrator",
     ],
 }
 

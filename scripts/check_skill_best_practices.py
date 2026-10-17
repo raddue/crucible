@@ -9,7 +9,7 @@ from pathlib import Path
 from catalog import _scalar_value
 
 ROOT = Path(__file__).resolve().parent.parent
-EXCLUDED = {"shared", "skill-selection-evals"}
+EXCLUDED = {"shared"}
 COLUMNS = ("Body", "Contents", "Nesting", "Frontmatter", "Scripts")
 # Canonical markers declare references; inline-code path mentions do not.
 LINK = re.compile(r"<!--\s*CANONICAL:\s*([^\s>]+\.md)(?:\s+[^>]*?)?\s*-->|\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
@@ -97,7 +97,7 @@ def audit(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
     result = {}
     for skill in sorted((root / "skills").glob("*/SKILL.md")):
         name = skill.parent.name
-        if name in EXCLUDED or name.startswith("temper-eval-"):
+        if name in EXCLUDED:
             continue
         problems = {column: [] for column in COLUMNS}
         lines = read_markdown(skill, problems["Frontmatter"]).splitlines()

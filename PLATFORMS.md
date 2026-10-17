@@ -13,7 +13,6 @@ These skills contain methodology instructions only. No platform-specific tool re
 | planning | Structured implementation planning with task decomposition |
 | test-driven-development | Red-green-refactor discipline with rationalization counters |
 | verify | Evidence-before-claims verification discipline |
-| review-feedback | Technical rigor when processing code review feedback |
 | getting-started | Skill discovery and invocation discipline |
 | handoff | Session-handoff doc capturing arc state and the next pickup |
 | workshop | Guided tour of the headline orchestrator skills |
@@ -26,16 +25,15 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 |-------|----------------------|-------------------|
 | quality-gate (including red-team mode) | Subagent dispatch for fresh Devil's Advocate reviewers each round | Agent reviews iteratively in-context (anchoring risk) |
 | inquisitor | 5 parallel adversarial dimensions | Dimensions run sequentially |
-| temper | Subagent dispatch for review | Agent reviews in-context |
+| temper (diff-review mode) | Subagent dispatch for review | Agent reviews in-context; feedback-only mode needs no subagent |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | inquisitor (per-task mode) | Subagent dispatch for adversarial test writing | Agent writes tests in-context |
-| anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
+| anvil | Subagent dispatch for blind A/B skill evals and read-only skill-suite auditing | Eval runs sequentially in-context; quantitative benchmarking skipped; suite audit runs sequentially |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
 | design | Subagent dispatch for parallel investigation, Challenger, approach evaluation, and innovation | Investigation, evaluation, challenge, and proposal run in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |
 | worktree | Git worktree creation | Standard branch-based isolation |
-| stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
 | audit | Subagent dispatch for parallel analytical lenses | Lenses run sequentially in-context |
 | delve | Subagent dispatch for finder fan-out + verify gate | Finders run sequentially |
 | recon | Subagent dispatch for parallel task scouts, partition scans, and friction analysis | Scouts, explorers, or analysts run sequentially |
@@ -63,9 +61,6 @@ These skills require features specific to Claude Code. They will not work on oth
 | getting-started (recall reference) | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
 | quality-gate consensus mechanism | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
-| temper-eval-calibrate | Session-dispatch eval harness (Claude Code) | Wraps live session invocations; no portable equivalent |
-| temper-eval-collect | Task-tool parallel reviewer dispatch (Claude Code) | Live reviewer dispatch is harness-specific |
-| skill-selection-evals | Anthropic skill-creator eval harness (anvil's ancestor) | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |
 
 ## Platform-Specific References
 

@@ -1,5 +1,9 @@
 # Eval Results
 
+Published evidence stays here. Private harnesses and corpora referenced below
+moved to `raddue/crucible-eval` in #460; historical paths and measurements are
+preserved as recorded, not claims that those files remain in this checkout.
+
 Crucible skills are evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). 12 skills carry **execution evals** (the table below); a separate **sequence-eval** suite covers ordering boundaries (further down). This is the same eval methodology Anthropic built for measuring whether skills actually improve output quality — we use it here to prove that Crucible's skills deliver measurable value, not just vibes.
 
 ## How It Works
@@ -49,6 +53,14 @@ This dual approach prevents skills from gaming the eval by producing well-format
 ### Recon mode consolidation (#720)
 
 The `/recon` consolidation adds task investigation, whole-repo onboarding, persistent-map maintenance, and architectural-friction discovery modes. The standard trigger harness (`skills/anvil/scripts/run_eval.py`) could not detect temporary skill commands from this plugin-managed repo, so it is not valid for measuring the change. A bounded blind output comparison was blocked because four Claude CLI calls failed authentication before outputs existed. No scored outputs or valid A/B delta are available; do not claim a measured quality improvement.
+
+## Issue #720: skill-suite audit → anvil (2026-10-16)
+
+A paired old-audit/merged-anvil behavioral A/B was not run. The source audit instructions were copied into `skills/anvil/references/skill-audit.md`, with command and cache paths retargeted; no model outputs were graded and no performance delta is claimed. Five skill-selection cases live in `skills/anvil/evals/routing.json` for full-suite health, cached quick scan, efficiency reporting, anvil's existing single-skill edit/eval workflow, and legacy `stocktake`/`skill-creator` trigger names; these fixtures have not been run as a live routing eval. The selection harness moved to `crucible-eval` in #739. Run a matched paired eval before claiming behavioral parity.
+
+## Issue #720: review-feedback → temper (2026-10-15)
+
+Temper+review-feedback consolidation: A/B not run, no measured delta claimed. The `/anvil` eval launcher did not start, so no model outputs were graded. Existing 2026-06-13 `review-feedback` +5% result above measures the old standalone skill against a no-skill baseline; it is not evidence for this merge. The three old feedback scenarios were copied to `skills/temper/evals/review-feedback.json`, and three selection cases cover "address comments", "respond to review", and clarify-first; these fixtures have not been run as a live A/B. Run a paired old-temper/merged-temper eval before claiming behavior parity.
 
 ## Issue #720: Quality-Gate Hub Merge (matched single-prompt A/B, Claude Opus 5.5)
 

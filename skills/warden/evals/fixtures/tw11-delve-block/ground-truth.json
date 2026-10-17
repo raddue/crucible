@@ -1,9 +1,0 @@
-{
-  "_provenance": "Authored BY HAND from skills/warden/SKILL.md against the descriptor (see provenance.md). NOT copied from a live run. block_reason is scored as an opaque string; the comparator does not model the ≤2-re-run cap logic.",
-  "fixture_id": "tw11-delve-block",
-  "expected": {
-    "reviewer_set": ["temper", "delve", "red-team", "inquisitor"],
-    "verdict": "BLOCKED",
-    "block_reason": "delve leg: a surfaced-not-applied finding (ambiguous repair, no safe auto-fix) leaves the native predicate {CONFIRMED,PLAUSIBLE}x{Critical,Important} tripping — warden BLOCKs with a named user hand-off"
-  }
-}

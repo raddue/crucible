@@ -1,8 +1,0 @@
-{
-  "_provenance": "Authored BY HAND from skills/warden/SKILL.md against the descriptor (see provenance.md). NOT copied from a live run.",
-  "fixture_id": "tw3-doc-only-multifile",
-  "expected": {
-    "reviewer_set": ["temper", "delve", "red-team"],
-    "verdict": "PASS"
-  }
-}
