@@ -11,6 +11,7 @@ Verify work before claiming completion, fix, or passing status. Its test-alignme
 
 - [Core verification](#overview)
 - [Test-alignment mode](#test-alignment-mode)
+  - [Alignment protocol](#alignment-protocol)
 - [Calibration ledger](#calibration-ledger-emit-tier-b-stub--standalone-only)
 
 ## Overview
@@ -165,7 +166,7 @@ Use this mode after code changes to audit existing tests. It is distinct from te
 
 **Triggers:** "audit tests", "check test alignment", "stale tests", "test health", or any request to verify existing tests match changed code.
 
-# Test Alignment Audit
+### Alignment protocol
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -264,7 +265,7 @@ The fix agent:
 
 **On success:** Reports changes made (tests updated, tests deleted, all passing).
 
-**On failure:** Reverts its own changes using `git checkout` + `git clean` (see `test-fix-prompt.md`), then verifies clean working tree with `git status`. Reports: "Attempted fix for [finding], reverted because [test failure details]. Manual intervention needed." This prevents broken test modifications from polluting the working tree. The caller decides next steps per its own protocol.
+**On failure:** Reverts its own changes using `git checkout` + `git clean` (see `./references/test-fix-prompt.md`), then verifies clean working tree with `git status`. Reports: "Attempted fix for [finding], reverted because [test failure details]. Manual intervention needed." This prevents broken test modifications from polluting the working tree. The caller decides next steps per its own protocol.
 
 **Precondition:** The working tree must be clean when this skill starts. The caller should commit before invoking verify in test-alignment mode (debugging's commit strategy handles this). In multi-batch mode, the orchestrator commits each successful batch before dispatching the next, maintaining the clean-tree invariant throughout. If uncommitted changes are detected, the fix agent reports this and does not proceed.
 
