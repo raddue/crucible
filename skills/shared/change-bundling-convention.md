@@ -5,8 +5,8 @@ version: 1
 # Change-Bundling Convention
 
 > Canonical reference for deterministic changed-file selection + bundling across
-> all orchestrator/review dispatch. `warden` and `orchestrator` reference this
-> file via `<!-- CANONICAL: shared/change-bundling-convention.md -->`.
+> review dispatch. `warden` references this file via
+> `<!-- CANONICAL: shared/change-bundling-convention.md -->`.
 >
 > **This is a shared skill reference, not a CLAUDE.md directive.** CLAUDE.md
 > must not duplicate the bundling rules.
@@ -23,7 +23,7 @@ the review set. This convention ports that shape to Crucible dispatch.
 
 ## The deterministic step
 
-Before any review worker is dispatched over a many-file diff, the orchestrator
+Before any review worker is dispatched over a many-file diff, the caller
 runs **one** deterministic selection + bundling pass (the contract below is
 executed by `scripts/change_bundling.py`, the single source of truth; its
 contract is pinned by `scripts/test_change_bundling.py`). The step's output —
@@ -65,7 +65,7 @@ Group the selected files into bundles:
 
 **Determinism:** same input changed-file set → same bundles, regardless of input
 order, run, or reviewer. Order-independence is the point: the bundle partition is
-a pure function of the changed paths, so two orchestrators (or two runs) never
+a pure function of the changed paths, so two callers (or two runs) never
 disagree on who covers what.
 
 ### Cover-report (the no-silent-skip guarantee)
@@ -105,13 +105,9 @@ into one bundle and dispatches one worker, exactly as today. The step only
 *changes* behavior when the diff is large enough that prompt-driven review would
 have risked skips; there it guarantees coverage that prompt-following cannot.
 
-## Consumers
+## Consumer
 
 - **warden** — the standalone pre-push gate (:acceptance on a many-file diff →
   fan review legs per bundle, so every changed file is covered exactly once).
-- **orchestrator** — Herdr team-boss dispatch (:bundle review work per
-  `change-bundling` bundle, one worker per bundle, concurrent).
-
-Each consumer's SKILL.md carries the same canonical link and the dispatch
-protocol above; neither re-implements the bundling rules — they call
-`scripts/change_bundling.py`.
+  It links this convention and calls `scripts/change_bundling.py`; the bundling
+  rules are not reimplemented in the skill.

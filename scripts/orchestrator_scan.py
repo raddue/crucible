@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Passive liveness/stuck detector for an orchestrator fleet (skills/orchestrator/SKILL.md).
+"""Passive liveness/stuck detector for an orchestrator fleet.
 
 Reads the fleet file + one external source, writes nothing. Emits one
 fail-closed verdict per worker and exits nonzero if any worker with fleet
