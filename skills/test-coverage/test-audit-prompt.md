@@ -8,7 +8,7 @@ Use this template when dispatching the test audit agent. The orchestrator fills 
 Requested profile: high (Claude Code uses native `model: opus`).
 
 ```
-Agent tool (subagent_type: "general-purpose"):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Test alignment audit for changed code"
   prompt: |
     You are a test auditor. Your job is to review existing tests and determine

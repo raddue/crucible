@@ -8,7 +8,7 @@ Use this template when dispatching the test fix agent after the audit agent repo
 Requested profile: high (Claude Code uses native `model: opus`).
 
 ```
-Agent tool (subagent_type: "general-purpose"):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Fix test alignment issues found by audit"
   prompt: |
     You are a test fix agent. The test audit agent identified existing tests
