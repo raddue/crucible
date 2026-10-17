@@ -41,6 +41,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | TDD | 94% | 50% | **+44%** | Red-green-refactor discipline. Without the skill, agents write code-then-tests or skip "write failing test first" |
 | design | 100% | 64% | **+36%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers vs a single one-shot design |
 | audit | 72% | 38% | **+34%** | Multi-lens methodology and no-fix discipline. (Absolute with-rate is capped because the multi-lens protocol is partly dispatch-based and this run executed as a single agent with no nested fan-out — so the multi-agent value wasn't exercised here — but the delta over baseline is still large) |
+| test-coverage (absorbed into verify, #720) | 92% | 73% | **+19%** | Historical standalone audit result; not a verify measurement. The absorbed mode has not had a post-merge A/B run. |
 | innovate | 100% | 86% | **+14%** | Structured divergent alternatives with cost/impact analysis vs a shorter improvement list |
 | debugging | 96% | 83% | **+13%** | Multi-angle investigation before forming a hypothesis. The 4.8 baseline is already strong here but less systematic |
 | review-feedback | 100% | 95% | **+5%** | Near-ceiling baseline on 4.8 — the model already rebuts wrong suggestions with evidence; small residual lift |
