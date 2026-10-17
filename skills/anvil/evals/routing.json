@@ -1,0 +1,76 @@
+{
+  "skill_name": "anvil",
+  "eval_type": "selection",
+  "evals": [
+    {
+      "id": "anvil-skill-audit-01",
+      "dimension": "direct",
+      "boundary": "anvil-skill-audit",
+      "prompt": "Audit our entire skill library for overlapping and stale skills, broken references, and weak instructions. Give a keep/improve/retire/merge verdict for each; do not edit them.",
+      "expected_skill": "anvil",
+      "common_mistakes": [
+        "audit",
+        "quality-gate"
+      ],
+      "context": "Cross-skill health audit, not a subsystem or one artifact review.",
+      "reasoning": "Anvil skill-suite audit mode inventories all skills and gives decision-enabling verdicts without modifying them.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "anvil-skill-audit-02",
+      "dimension": "context-dependent",
+      "boundary": "anvil-skill-audit",
+      "prompt": "The skill-health results are a month old. Run a quick scan of changed skills and show only the diff.",
+      "expected_skill": "anvil",
+      "common_mistakes": [
+        "recon",
+        "verify"
+      ],
+      "context": "Cached skill-suite results exist and are stale.",
+      "reasoning": "Anvil audit quick scan re-evaluates changed skills and carries forward unchanged results.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "anvil-skill-audit-03",
+      "dimension": "direct",
+      "boundary": "anvil-skill-audit",
+      "prompt": "Give me an efficiency report across our skills from chronicle signals: per-skill estimated tokens, duration, rework, dispatch mix and trend.",
+      "expected_skill": "anvil",
+      "common_mistakes": [
+        "forge",
+        "audit"
+      ],
+      "context": "Skill-suite efficiency mode, not a single skill edit.",
+      "reasoning": "Anvil audit efficiency mode aggregates chronicle signals and reports per-skill costs and dispatch structure.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "anvil-skill-edit-04",
+      "dimension": "direct",
+      "boundary": "anvil-skill-edit",
+      "prompt": "I need to improve the trigger description and run blind A/B evals for one existing skill.",
+      "expected_skill": "anvil",
+      "common_mistakes": [
+        "forge",
+        "audit"
+      ],
+      "context": "Single skill edit/evaluation, distinct from suite-wide health audit.",
+      "reasoning": "Anvil retains its core skill-edit and A/B evaluation workflow.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "anvil-legacy-triggers-05",
+      "dimension": "direct",
+      "boundary": "anvil-legacy-triggers",
+      "prompt": "Run stocktake on the full skill library for overlap and broken refs, then use skill-creator to improve one weak skill and compare its evals.",
+      "expected_skill": "anvil",
+      "common_mistakes": [
+        "audit",
+        "quality-gate"
+      ],
+      "context": "Legacy names for the absorbed suite audit and existing skill improvement workflow.",
+      "reasoning": "Anvil handles both stocktake-style suite audits and skill-creator-style skill editing and evaluation.",
+      "difficulty": "medium"
+    }
+  ]
+}

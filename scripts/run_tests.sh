@@ -174,6 +174,7 @@ run python3 scripts/check_canonical_links.py
 run python3 scripts/test_ci_fail_gaps.py
 run python3 scripts/check_conflict_markers.py
 run python3 scripts/check_machine_paths.py
+run python3 scripts/test_anvil_audit_mode.py
 run python3 scripts/catalog.py check
 # Design's decision-record output retains the ADR integrity gate after skill consolidation.
 run python3 scripts/check_adr_integrity.py --selftest

@@ -49,9 +49,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
 | inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated harness (#424) has since exercised the dispatch directly: Phase 1 found no *identification-breadth* lift from the fan-out, and Phase 1b found no lift from the dimension *taxonomy* — but Phase 1b's execution measurement shows a real **+29 pp lift (execution harness, detection axis) from parallel test-writing breadth** over a bare baseline — see *Inquisitor Fan-Out* / *Phase 1b* below |
 
-### Test-alignment audit absorption (#720)
 
-The separate test-alignment audit was absorbed into verify. Four audit eval cases now live in `skills/verify/evals/evals.json`; no post-merge A/B run was performed, so no delta is claimed for the absorbed mode. The earlier standalone audit result (92% / 73%, +19%) is historical, not a verify measurement.
 
 ### Recon mode consolidation (#720)
 
@@ -442,8 +440,7 @@ clause covers *inability* — outage, budget exhaustion; this is *informed refus
 measurement that cannot move), and is recorded as such rather than silently reported as a
 completed live A/B.
 
-
-Test-coverage’s test-alignment audit was absorbed into verify in #720; no post-merge A/B run was performed.
+Test-coverage was absorbed into verify in #720; no post-merge A/B run was performed.
 
 ## Running Evals
 

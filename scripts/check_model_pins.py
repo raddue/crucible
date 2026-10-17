@@ -25,7 +25,7 @@ Security-surface set (evaluated on the repo-relative path):
     pure-prose stem-matcher like skills/shared/security-signals.md cannot host
     a fable pin, so it is not forced to carry a marker);
   - carve-outs (never security-surface): skills/audit/**,
-    skills/verify/**, skills/stocktake/** — the general audit skill's
+    skills/verify/**, skills/stocktake/**, and skills/anvil/references/skill-audit.md — audit-only files
     lenses are ELIGIBLE-PENDING-VERIFICATION in the model-tier policy, so
     forcing a hard-out marker onto them would contradict the taxonomy.
 
@@ -81,7 +81,7 @@ Known over-match (accepted): in NON-marked prose docs an unfenced
 line-anchored `model:` example still registers as a pin. Harmless — the
 marker is matched as a STANDALONE line (has_marker), so a prose doc that
 merely *quotes* the marker string inline (the policy doc's "Marker
-convention", the stocktake bullet) is NOT treated as marked; rule (a)
+convention", the anvil audit bullet) is NOT treated as marked; rule (a)
 therefore cannot fire there, and rule (b) can at worst require a marker
 on a security-named doc. On MARKED files one residual remains: an
 UNFENCED prose mention of fable after `model:` but inside a tool-form
@@ -102,6 +102,7 @@ EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
 CARVE_OUTS = ("skills/audit/", "skills/verify/", "skills/stocktake/")
+CARVE_OUT_FILES = {"skills/anvil/references/skill-audit.md"}
 
 # Each regex captures the VALUE REGION after `model:`, not a single token:
 # form 1 to the first `#` or end-of-line, forms 2-3 to the closing paren.
@@ -648,7 +649,7 @@ def has_marker(text: str) -> bool:
     """True iff the marker appears as its own line (a real stamp), NOT merely
     quoted inline in prose/backticks (a documentation mention). Task-2 stamps
     always place the marker on its own line, so genuine stamps still match;
-    a doc that merely quotes the marker string (the policy doc, the stocktake
+    a doc that merely quotes the marker string (the policy doc, the anvil audit
     bullet) is correctly NOT treated as marked."""
     return any(line.strip() == MARKER for line in text.splitlines())
 
@@ -660,7 +661,7 @@ def is_fable(value: str) -> bool:
 
 def is_security_surface(rel: str, text: str) -> bool:
     """Membership in the machine-checkable security-surface set."""
-    if rel.startswith(CARVE_OUTS):
+    if rel.startswith(CARVE_OUTS) or rel in CARVE_OUT_FILES:
         return False
     if rel.startswith(DIR_ALLOWLIST) or rel in EXPLICIT_FILES or rel in EXPLICIT_SECURITY_SKILLS:
         return True
@@ -1002,8 +1003,8 @@ def selftest() -> int:
                 "to carry a marker (eligible-pending, process-gated)"),
         ("skills/verify/SKILL.md", f"{pin}\n",
          False, "carve-out: verify is NOT flagged"),
-        ("skills/stocktake/SKILL.md", f"{pin}\n",
-         False, "carve-out: stocktake is NOT flagged"),
+        ("skills/anvil/references/skill-audit.md", f"{pin}\n",
+         False, "carve-out: anvil audit is NOT flagged"),
         ("skills/siege/SKILL.md",
          f"{m}\nTask tool (general-purpose, model: Fable):\n",
          True, "case-insensitive: `model: Fable` on a marked file is caught"),

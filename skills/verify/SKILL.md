@@ -346,7 +346,8 @@ Invoke `crucible:verify` in test-alignment mode with:
 - Context: [description of changes]
 ```
 
-- **Test-alignment verdict mapping:** At the audit's single terminal emit point, use the standalone-only mechanics above. Map to `PASS` when all affected tests pass after alignment with no coincidence flags or fix failures; map to `ESCALATED` when coincidence tests or fix failures require caller judgment. Keep `skill: "verify"`, `artifact_type: "code"`, and `gated_files` set to the audited test files.
+- **Host-pipeline dispatch:** When build Phase 3, debugging Phase 5, or finish Step 2.5 invokes test-alignment mode inline, do not emit a ledger row; the host owns its row. Only standalone `/verify` invocation emits, using the UUID, schema, null-field, and failure-handling mechanics above.
+- **Test-alignment verdict mapping:** At the audit's single terminal emit point for standalone invocation, map to `PASS` when all affected tests pass after alignment with no coincidence flags or fix failures; map to `ESCALATED` when coincidence tests or fix failures require caller judgment. Keep `skill: "verify"`, `artifact_type: "code"`, and `gated_files` set to the audited test files.
 
 ## Guardrails
 
