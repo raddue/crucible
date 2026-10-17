@@ -6,7 +6,7 @@
 
 Use this template when dispatching the Chain Analyst agent. The orchestrator fills in the bracketed sections. The Chain Analyst runs AFTER agents 1-5 complete.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

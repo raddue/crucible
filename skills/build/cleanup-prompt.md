@@ -4,7 +4,7 @@
 
 Use this template when dispatching a de-sloppify cleanup agent in Phase 3.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

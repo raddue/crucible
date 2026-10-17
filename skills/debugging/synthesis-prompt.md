@@ -6,7 +6,7 @@ Use this template when dispatching a synthesis subagent to consolidate Phase 1 i
 
 The orchestrator includes ALL Phase 1 agent reports verbatim in the template below. The synthesis agent distills them into a concise root-cause analysis so the orchestrator only reads a short summary.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):

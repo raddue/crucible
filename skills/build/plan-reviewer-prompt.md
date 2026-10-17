@@ -4,10 +4,10 @@
 
 Use this template when dispatching a plan reviewer subagent in Phase 2.
 
-Requested profile: high or standard — lead decides per task complexity. Claude Code call-level model mapping: high -> `model: opus`, standard -> `model: sonnet`.
+Requested profile: high or standard — lead decides per task complexity. `high` and `standard` are role intent; host adapters resolve them to configured models.
 
 ```
-Task tool (general-purpose, model: opus or sonnet — see build skill for decision heuristic):
+Task tool (general-purpose, model: opus):
   description: "Review implementation plan for [feature]"
   prompt: |
     You are reviewing an implementation plan against its design document.

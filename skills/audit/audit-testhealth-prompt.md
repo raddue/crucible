@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Test-health lens agent. The orchestrator fills in the bracketed sections.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

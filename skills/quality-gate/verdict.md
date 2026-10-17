@@ -252,8 +252,8 @@ adapter observes the endpoint-reported model name).
 agent type and the dispatch runs as `general-purpose` on the inherited/session
 model (`skills/quality-gate/loop.md`, plus Task 9's new qg-verifier and
 qg-judge warnings), the named agent def was **not** dispatched. Recording its
-nominal `model:` pin as `ran` would log an inherited Opus verifier as `sonnet`,
-or an inherited Sonnet red-team as `opus` — precisely the model flip this feature
+nominal model selector as `ran` would log an inherited high-tier verifier as `standard`,
+or an inherited standard-tier red-team as `high` — precisely the model flip this feature
 exists to expose. For any dispatch that hit a type-resolution failure, write
 `{"ran": "unknown", "basis": "indeterminate", "prov": "intent"}` (or an actual
 fallback model ID, if one is observed) — never the absent def's pin. The one-time
@@ -261,7 +261,7 @@ fallback warning does not retro-correct stored `model_resolution`.
 
 For each **single-model** dispatch: `ran` is `unknown` and `basis`
 `indeterminate` in v1 — design §9 defines `ran` as an endpoint-reported id or
-`unknown`, and the dispatch's static `model:` pin (e.g. `opus`, `sonnet`) is
+`unknown`, and the dispatch's requested `model_profile` (e.g. `high`, `standard`) is
 *requested*, not observed: no `RESOLVED:` producer or transcript oracle ships
 (design §6.2). Recording the alias would pool a silent provider-side fallback with
 the requested model, so the requested pin is not carried in `ran` at all (S2,

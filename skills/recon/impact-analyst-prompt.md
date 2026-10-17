@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Impact Analyst depth agent. Primary consumers: `/design`, `/build`. Produces systems affected, integration risks, and reversibility assessment for the `## Impact Analysis` section.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: Explore, model: opus):

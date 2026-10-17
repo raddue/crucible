@@ -5,7 +5,7 @@
 
 Use this template when dispatching a Phase 2 root cause analysis agent. The orchestrator fills in the bracketed sections — one agent per High-severity friction point.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ~~~
 Agent tool (subagent_type: general-purpose, model: sonnet):

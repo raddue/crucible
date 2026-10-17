@@ -5,7 +5,7 @@
 
 Use this template when dispatching a teammate (or sequential sub-agent) to process a single ticket during `/spec` execution. The orchestrator fills in all `[PLACEHOLDER]` injection points before dispatch.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: "spec-writer-[TICKET_NUMBER]"):

@@ -18,7 +18,7 @@ Audits whether existing tests need updating, removal, or modification after code
 
 **Technology-agnostic:** This skill works with any programming language and test framework. Examples use generic patterns. The audit agent adapts its checks to whatever language and testing conventions are present in the project.
 
-**Models:** Test audit and fix agents request `high`. The Claude Code examples use the current reference alias `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+**Models:** Test audit and fix agents request `high`. Generic-host profile intent is prose; the following Claude Code-specific dispatch examples use native `model: opus`. Other hosts use their supported binding or operator/session default per `shared/model-tier-policy.md`.
 
 ## Why This Exists
 
@@ -59,7 +59,7 @@ The skill receives from the caller:
 
 ### Test Audit Agent
 
-Dispatch: `Agent tool (subagent_type: "general-purpose", model: opus)`
+Claude Code dispatch: `Agent tool (subagent_type: "general-purpose", model: opus)`
 
 The audit agent receives the code diff, affected test files (full source), and optional context. It checks three categories:
 
@@ -86,7 +86,7 @@ The audit agent receives the code diff, affected test files (full source), and o
 
 ### Test Fix Agent
 
-If the audit agent reports findings in categories 1-2, dispatch a fix agent (Opus) that receives:
+If the audit agent reports findings in categories 1-2, dispatch a Claude Code fix agent (`model: opus`; requested profile `high`) that receives:
 - The audit report
 - The affected test files (full source)
 - The code diff

@@ -12,9 +12,7 @@
 
 Use this template when dispatching a devil's advocate subagent in Phase 2, Step 3.
 
-The `crucible-red-team` agent type pins the model to Opus (`agents/crucible-red-team.md`),
-so the model is enforced by the agent def — do NOT add a call-level `model:` parameter
-(it would override the def; see `shared/harness-adapter.md` Mapping 1b).
+On Claude Code, `agents/crucible-red-team.md` requests `high` and its native `model: opus` selector binds that request. Do NOT add a call-level `model:` parameter (it would override the agent def; see `shared/harness-adapter.md` Mapping 1b). Other hosts need their own supported mapping; the profile request alone does not enforce a model.
 
 ```
 Task tool (subagent_type: crucible-red-team):

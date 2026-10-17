@@ -6,7 +6,7 @@ Use this template when the orchestrator dispatches the Phase 4.5 "Where Else?" s
 
 Fill in the placeholders before dispatching.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):

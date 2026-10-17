@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Phase 2.5 blind-spots agent. The orchestrator fills in the bracketed sections. This agent runs AFTER all Phase 2 lenses have reported, BEFORE Phase 3 synthesis.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):
