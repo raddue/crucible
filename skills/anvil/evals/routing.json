@@ -24,7 +24,7 @@
       "expected_skill": "anvil",
       "common_mistakes": [
         "recon",
-        "test-coverage"
+        "verify"
       ],
       "context": "Cached skill-suite results exist and are stale.",
       "reasoning": "Anvil audit quick scan re-evaluates changed skills and carries forward unchanged results.",

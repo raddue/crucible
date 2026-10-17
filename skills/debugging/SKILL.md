@@ -1126,16 +1126,16 @@ Quality-gate handles iteration tracking, stagnation detection, compaction recove
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
-**Step 2.5: Test suite audit** — Invoke `crucible:test-coverage` (if available) against the changed code and affected test files. This audits whether existing tests need updating, removal, or modification after the fix. Three categories:
+**Step 2.5: Test suite audit** — Invoke `crucible:verify` in test-alignment mode (if available) against the changed code and affected test files. This audits whether existing tests need updating, removal, or modification after the fix. Three categories:
 - **Tests to update** — assertions, descriptions, or setup now wrong or misleading given the fix (includes stale assertions expecting old values)
 - **Tests to delete** — tests for removed code paths
 - **Coincidence tests** — tests whose setup exercises changed code but assertions verify unrelated properties (flagged for judgment, not auto-fixed)
 
-If `crucible:test-coverage` is not available, skip this step. The test gap writer (Step 3) handles missing coverage but NOT stale/misleading existing tests — this step fills that gap.
+If `crucible:verify` is not available, skip this step. The test gap writer (Step 3) handles missing coverage but NOT stale/misleading existing tests — this step fills that gap.
 
-The test-coverage skill handles its own fix dispatch and revert-on-failure logic internally. It returns a structured report with actions taken.
+Verify's test-alignment mode handles its own fix dispatch and revert-on-failure logic internally. It returns a structured report with actions taken.
 
-**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + test-coverage audit report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
+**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + verify test-alignment report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by verify's test-alignment mode). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
 **If all tests PASS:** Debugging workflow is complete.
 
@@ -1437,7 +1437,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
 - **`crucible:quality-gate`** -- Adversarial review in Phase 5 (iteration tracking, stagnation detection, compaction recovery)
 - **`crucible:quality-gate (red-team mode)`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
-- **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
+- **`crucible:verify`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
 **Does not dispatch /recon or /design approach evaluation** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not design approach evaluation. See #147 for rationale.
 

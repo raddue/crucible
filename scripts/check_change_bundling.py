@@ -20,9 +20,8 @@ cannot self-match — see `scripts/CHECKER_CONVENTIONS.md`):
       bundle rules, and the no-silent-skip guarantee (a file that is neither
       bundled nor explicitly skipped is a defect).
 
-  skills/warden/SKILL.md and skills/orchestrator/SKILL.md — each carries the
-      canonical link and a dispatch clause: one review worker per bundle, every
-      changed file covered exactly once.
+  skills/warden/SKILL.md — carries the canonical link and a dispatch clause:
+      one review worker per bundle, every changed file covered exactly once.
 
 Stdlib only. Exits 0 when every clause is present, 1 with a `- <error>` list
 otherwise. Style mirrors `scripts/check_dispatch_graphify_consult.py`.
@@ -36,7 +35,6 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "scripts/change_bundling.py"
 CONVENTION = ROOT / "skills/shared/change-bundling-convention.md"
 WARDEN = ROOT / "skills/warden/SKILL.md"
-ORCHESTRATOR = ROOT / "skills/orchestrator/SKILL.md"
 
 # label -> literal substring that MUST appear in scripts/change_bundling.py.
 ENGINE_REQUIRED: dict[str, str] = {
@@ -63,8 +61,7 @@ CONVENTION_REQUIRED: dict[str, str] = {
     "machine-enforced coverage": "raises",
 }
 
-# label -> literal substring that MUST appear in BOTH warden + orchestrator
-# SKILL.md (the integration clause).
+# label -> literal substring that MUST appear in warden's integration clause.
 DISPATCH_REQUIRED: dict[str, str] = {
     "canonical link": "<!-- CANONICAL: shared/change-bundling-convention.md -->",
     "per-bundle worker": "bundle",
@@ -72,9 +69,11 @@ DISPATCH_REQUIRED: dict[str, str] = {
 }
 
 
+
 def check_required(text: str, required: dict[str, str]) -> list[str]:
     return [f"missing {label}: `{sub}`" for label, sub in required.items()
             if sub not in text]
+
 
 
 def selftest() -> int:
@@ -90,7 +89,6 @@ def selftest() -> int:
             assert any(e == f"missing {label}: `{sub}`" for e in errs), (
                 f"removing {label!r} should flag it, got: {errs}")
 
-    # cross-file probes keep the engine/convention/who-drives-it wiring honest.
     engine = ENGINE.read_text(encoding="utf-8") if ENGINE.is_file() else ""
     convention = (
         CONVENTION.read_text(encoding="utf-8") if CONVENTION.is_file() else "")
@@ -101,12 +99,11 @@ def selftest() -> int:
             "convention must cite the engine module by name"
         assert "warden" in convention.lower(), \
             "convention must name warden as a consumer"
-        assert "orchestrator" in convention.lower(), \
-            "convention must name orchestrator as a consumer"
 
     print("selftest OK — GOOD passes; removing a clause flags exactly that "
           "clause; engine/convention wiring consistent.")
     return 0
+
 
 
 def main() -> int:
@@ -117,19 +114,14 @@ def main() -> int:
     for path, required, what in (
         (ENGINE, ENGINE_REQUIRED, "the change-bundling engine"),
         (CONVENTION, CONVENTION_REQUIRED, "the change-bundling convention"),
+        (WARDEN, DISPATCH_REQUIRED, "warden"),
     ):
-        if not path.is_file():
-            errs.append(f"missing file: {path.relative_to(ROOT)}")
-        else:
-            errs += check_required(path.read_text(encoding="utf-8"), required)
-
-    for path, what in ((WARDEN, "warden"), (ORCHESTRATOR, "orchestrator")):
         if not path.is_file():
             errs.append(f"missing file: {path.relative_to(ROOT)}")
         else:
             errs += [
                 f"missing {label} in {what}: `{sub}`"
-                for label, sub in DISPATCH_REQUIRED.items()
+                for label, sub in required.items()
                 if sub not in path.read_text(encoding="utf-8")
             ]
 
@@ -139,9 +131,8 @@ def main() -> int:
             print(f"  - {e}")
         return 1
     print("OK — deterministic change-bundling engine + convention present; "
-          "warden and orchestrator both carry the per-bundle dispatch clause.")
+          "warden carries the per-bundle dispatch clause.")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

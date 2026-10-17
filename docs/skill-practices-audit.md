@@ -15,7 +15,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | finish | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | getting-started | PASS | PASS | PASS | PASS | PASS | PASS |
 | inquisitor | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| orchestrator | PASS | FAIL | PASS | PASS | FAIL | FAIL |
 | parallel | PASS | PASS | PASS | PASS | PASS | PASS |
 | planning | PASS | PASS | PASS | FAIL | PASS | FAIL |
 | quality-gate | PASS | PASS | PASS | PASS | PASS | PASS |
@@ -25,14 +24,13 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | source-driven-development | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | temper | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| test-coverage | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-driven-development | PASS | PASS | PASS | PASS | PASS | PASS |
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 21/26 | 11/26 | 25/26 | 21/26 | 20/26 | 8/26 |
+| TOTAL | 19/24 | 11/24 | 23/24 | 19/24 | 19/24 | 8/24 |
 
-## Violations (71)
+## Violations (52)
 
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
@@ -48,8 +46,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `finish` Contents (1): CLAUDE.md: >100 lines, no contents list in first 20
 - `finish` Scripts (6): SKILL.md:166: script step lacks nearby dependency/setup note (heuristic); SKILL.md:174: script step lacks nearby dependency/setup note (heuristic); SKILL.md:205: script step lacks nearby dependency/setup note (heuristic); … and 3 more
 - `inquisitor` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `orchestrator` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20
-- `orchestrator` Scripts (17): SKILL.md:50: script step lacks nearby dependency/setup note (heuristic); SKILL.md:51: script step lacks nearby dependency/setup note (heuristic); SKILL.md:52: script step lacks nearby dependency/setup note (heuristic); … and 14 more
 - `planning` Frontmatter (1): description should use third-person, not first/second-person voice
 - `recon` Contents (9): skills/recon/cartographer/recorder-prompt.md: >100 lines, no contents list in first 20; skills/recon/improvement-discovery.md:7: unresolved #phase-0-5-framework-detection; skills/recon/persistent-map.md:12: unresolved #defect-signatures; … and 6 more
 - `recon` Nesting (1): skills/recon/improvement-discovery.md -> skills/recon/prospector/REFERENCE.md not linked directly
@@ -61,7 +57,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `spec` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `spec` Frontmatter (1): description should use third-person, not first/second-person voice
 - `temper` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
-- `test-coverage` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `warden` Body (1): 942 body lines (max 500)
 - `warden` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20

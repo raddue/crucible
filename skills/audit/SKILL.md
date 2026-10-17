@@ -74,7 +74,7 @@ Every `code`-path lens — Architecture, Consistency, Robustness (systemic), Tes
 **Delegation contracts:**
 - **Maintainability / complexity / hotspots → `/recon` improvement-discovery mode** (it owns git-churn metrics + redesign). Not an audit lens.
 - **Instance bugs → `/delve`** (only when the user passes `--bugs`; see `--bugs` Sub-Path). When `/delve` is not installed, see the `/delve`-absent fallback.
-- **Test authoring → out of scope** for audit (audit never authors or fixes tests); test **staleness → `test-coverage`**. The Test-health lens only diagnoses + prioritizes systemic coverage gaps; it is never diff-scoped.
+- **Test authoring → out of scope** for audit (audit never authors or fixes tests); test **staleness → `verify` test-alignment mode**. The Test-health lens only diagnoses + prioritizes systemic coverage gaps; it is never diff-scoped.
 
 ### Code Finding Schema — mandatory `sites`
 
@@ -557,7 +557,7 @@ All lenses output structured findings with these common fields: `{severity, file
 **Prompt:** `audit-testhealth-prompt.md`
 **Question:** "Where is the subsystem systemically under-tested?"
 **Looks for:** Codebase-wide systemic coverage gaps — categories of behavior, modules, or seams with no tests across the subsystem; structural testability problems. **Diagnose + prioritize only.**
-**Does NOT do:** author or fix tests (out of scope for audit); diff-scoped coverage checks; test **staleness** (route staleness to `test-coverage`).
+**Does NOT do:** author or fix tests (out of scope for audit); diff-scoped coverage checks; test **staleness** (route staleness to `verify` test-alignment mode).
 **Gets:** Tier 1 overview + test file manifest + source-to-test mapping.
 **Dispatch:** Single agent.
 
@@ -758,7 +758,7 @@ Each analysis template includes:
 - Silently drop findings that match existing issues (always show, let user decide)
 - **Silently drop a single-reproduction finding when `/delve` is absent** — surface it under the "Out-of-scope instance bugs (install /delve to triage)" stub.
 - **Run Drift without `--drift intent=<path>`, auto-discover an intent artifact, or advertise a Drift section when `--drift` was not passed.**
-- **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/recon` improvement-discovery mode. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `test-coverage`.
+- **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/recon` improvement-discovery mode. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `verify` test-alignment mode.
 - Exceed 1500 lines of total prompt content in any agent dispatch — this cap governs inlined prompt content per dispatch, and for non-code the shared dispatch-context bundle is held to the same 1500-line ceiling via the step-4.5 truncation order (artifact never truncated; Supporting Context then Operating Environment trimmed if over)
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
@@ -786,7 +786,7 @@ Each analysis template includes:
 | `/recon` persistent-map mode | Record mode | Phase 4 (Phase 1 manifest only) |
 | `crucible:delve` | Instance-bug sweep | Code path, opt-in `--bugs`: invoked as a SKILL at `effort=high` over the full subsystem; feeds the suppress-and-cite gate. (audit reaches `delve-engine` only transitively through `/delve`; it carries the separate `dispatch: delve` skill marker — see the Dispatch section.) |
 | `/recon` improvement-discovery mode | Maintainability / complexity / hotspot depth | Code path, on request — audit delegates rather than re-deriving git-churn friction |
-| `crucible:test-coverage` | Test **staleness** | Code path — Test-health routes staleness here (Test-health itself only diagnoses systemic coverage gaps) |
+| `crucible:verify` | Test **staleness** | Code path — Test-health routes staleness to verify's test-alignment mode (Test-health itself only diagnoses systemic coverage gaps) |
 
 - **Dispatches:** Code audit templates (architecture, consistency [2 agents], robustness-systemic, test-health, blind-spots; drift when `--drift`) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback). Instance bugs delegated to the `/delve` skill on `--bugs`.
 - **Pairs with:** `crucible:getting-started` (`forge.md`) -- audit findings could inform retrospective if they reveal systemic patterns

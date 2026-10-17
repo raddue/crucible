@@ -25,7 +25,7 @@ Security-surface set (evaluated on the repo-relative path):
     pure-prose stem-matcher like skills/shared/security-signals.md cannot host
     a fable pin, so it is not forced to carry a marker);
   - carve-outs (never security-surface): skills/audit/**,
-    skills/test-coverage/**, skills/anvil/references/skill-audit.md — the skill-suite audit mode's
+    skills/verify/**, skills/stocktake/**, and skills/anvil/references/skill-audit.md — audit-only files
     lenses are ELIGIBLE-PENDING-VERIFICATION in the model-tier policy, so
     forcing a hard-out marker onto them would contradict the taxonomy.
 
@@ -101,7 +101,7 @@ EXPLICIT_SECURITY_SKILLS = {"skills/quality-gate/dependency-audit.md"}
 EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md"}
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
-CARVE_OUTS = ("skills/audit/", "skills/test-coverage/")
+CARVE_OUTS = ("skills/audit/", "skills/verify/", "skills/stocktake/")
 CARVE_OUT_FILES = {"skills/anvil/references/skill-audit.md"}
 
 # Each regex captures the VALUE REGION after `model:`, not a single token:
@@ -1001,8 +1001,8 @@ def selftest() -> int:
         ("skills/audit/audit-robustness-prompt.md", f"{pin}\n",
          False, "carve-out: audit's security-pattern lenses are NOT forced "
                 "to carry a marker (eligible-pending, process-gated)"),
-        ("skills/test-coverage/SKILL.md", f"{pin}\n",
-         False, "carve-out: test-coverage is NOT flagged"),
+        ("skills/verify/SKILL.md", f"{pin}\n",
+         False, "carve-out: verify is NOT flagged"),
         ("skills/anvil/references/skill-audit.md", f"{pin}\n",
          False, "carve-out: anvil audit is NOT flagged"),
         ("skills/siege/SKILL.md",
