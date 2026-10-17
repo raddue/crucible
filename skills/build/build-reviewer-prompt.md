@@ -141,7 +141,7 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     ### Pass 2: Test Quality Review
 
     Now review the TESTS for quality. Note: staleness checks (stale tests,
-    tests to update, dead tests) are handled by crucible:test-coverage after
+    tests to update, dead tests) are handled by crucible:verify after
     this review. Focus on test QUALITY here:
 
     **Missing Coverage:**

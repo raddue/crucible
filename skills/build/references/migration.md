@@ -1,6 +1,6 @@
 # Build — Migration Mode
 
-Migration mode is the absorbed `migrate` skill (#720), invoked from build's Mode Detection. Everything below is the original migrate runbook, preserved verbatim apart from invocation, announce and purpose naming. "Dispatch build" means: run build's own Phase 1–4 pipeline (SKILL.md) for that migration phase in the named feature or refactor mode — build's phase flow itself is unchanged. Prompt template paths (`./*-prompt.md`) are relative to `skills/build/`. The `migrate` value in the pipeline-active marker, status file `Skill:` field and scratch path is kept so existing hooks and recovery state keep working.
+Migration mode is invoked from build's Mode Detection. The workflow mechanics below are preserved verbatim apart from invocation, announce and purpose naming. "Dispatch build" means: run build's own Phase 1–4 pipeline (SKILL.md) for that migration phase in the named feature or refactor mode — build's phase flow itself is unchanged. Prompt template paths (`./*-prompt.md`) are relative to `skills/build/`. The `migrate` value in the pipeline-active marker, status file `Skill:` field and scratch path is kept so existing hooks and recovery state keep working.
 
 ## Contents
 
@@ -471,7 +471,7 @@ For each phase in approved plan:
        - Execute rollback procedure from Phase 6
        - Escalate to user with failure context
   6. Quality-gate the phase output (artifact type: code)
-  7. Test-coverage audit on the phase's changes
+  7. Verify test-alignment audit on the phase's changes
   8. Proceed to next phase
 ```
 
@@ -534,7 +534,7 @@ Escalate to the user when:
 | `crucible:build` | Feature mode | Phase 7 (per-phase execution for additive phases) |
 | `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase; explicit immutable mode) |
 | `crucible:quality-gate` | Plan gate | After Phase 5 (artifact type: plan, on migration plan; explicit immutable mode) |
-| `crucible:test-coverage` | Per-phase audit | Phase 7 (test alignment after each phase) |
+| `crucible:verify` | Per-phase audit | Phase 7 (test alignment after each phase) |
 | `/recon` improvement-discovery mode | Upstream | Recon improvement discovery identifies modernization friction; migrate plans the transition |
 
 ## Prompt Templates

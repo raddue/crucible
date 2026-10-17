@@ -41,7 +41,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | TDD | 94% | 50% | **+44%** | Red-green-refactor discipline. Without the skill, agents write code-then-tests or skip "write failing test first" |
 | design | 100% | 64% | **+36%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers vs a single one-shot design |
 | audit | 72% | 38% | **+34%** | Multi-lens methodology and no-fix discipline. (Absolute with-rate is capped because the multi-lens protocol is partly dispatch-based and this run executed as a single agent with no nested fan-out — so the multi-agent value wasn't exercised here — but the delta over baseline is still large) |
-| test-coverage | 92% | 73% | **+19%** | Coincidence/alignment-gap detection; the baseline checks surface coverage only |
+| test-coverage (absorbed into verify, #720) | 92% | 73% | **+19%** | Historical standalone audit result; not a verify measurement. The absorbed mode has not had a post-merge A/B run. |
 | innovate | 100% | 86% | **+14%** | Structured divergent alternatives with cost/impact analysis vs a shorter improvement list |
 | debugging | 96% | 83% | **+13%** | Multi-angle investigation before forming a hypothesis. The 4.8 baseline is already strong here but less systematic |
 | review-feedback | 100% | 95% | **+5%** | Near-ceiling baseline on 4.8 — the model already rebuts wrong suggestions with evidence; small residual lift |
@@ -49,6 +49,8 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | planning | 100% | 100% | **+0%** | On 4.8 the baseline already produces bite-sized, well-specified plans; the structure no longer adds measurable lift (was +39% on 4.6 — the clearest case of capability erasing a delta) |
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
 | inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated harness (#424) has since exercised the dispatch directly: Phase 1 found no *identification-breadth* lift from the fan-out, and Phase 1b found no lift from the dimension *taxonomy* — but Phase 1b's execution measurement shows a real **+29 pp lift (execution harness, detection axis) from parallel test-writing breadth** over a bare baseline — see *Inquisitor Fan-Out* / *Phase 1b* below |
+
+
 
 ### Recon mode consolidation (#720)
 
@@ -442,6 +444,8 @@ narrower, cheaper substitute for Task 10's own "eval cannot be executed at all" 
 clause covers *inability* — outage, budget exhaustion; this is *informed refusal* to spend on a
 measurement that cannot move), and is recorded as such rather than silently reported as a
 completed live A/B.
+
+Test-coverage was absorbed into verify in #720; no post-merge A/B run was performed.
 
 ## Running Evals
 

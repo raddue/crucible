@@ -14,7 +14,7 @@
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, verify, test-gap-writer, inquisitor per-task mode, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section in `references/runtime-protocols.md`. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
 
 ### Step 0: Load Module Context for Subagents
 
@@ -144,8 +144,8 @@ digraph review {
   "Pass 1: Code Review" -> "Implementer fixes code findings";
   "Implementer fixes code findings" -> "Pass 2: Test Quality Review";
   "Pass 2: Test Quality Review" -> "Implementer fixes test findings";
-  "Implementer fixes test findings" -> "Test Alignment Audit (crucible:test-coverage)";
-  "Test Alignment Audit (crucible:test-coverage)" -> "Test Gap Writer";
+  "Implementer fixes test findings" -> "Test Alignment Audit (crucible:verify)";
+  "Test Alignment Audit (crucible:verify)" -> "Test Gap Writer";
   "Test Gap Writer" -> "Inquisitor per-task mode";
   "Inquisitor per-task mode" -> "Task complete";
 }
@@ -153,7 +153,7 @@ digraph review {
 
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
-**Pass 2 — Test Quality Review:** Test independence? Determinism? Edge cases? Integration tests where mocks are masking real behavior? AAA pattern? Correct test level? (Staleness and alignment checks are handled by the test-coverage dispatch below.)
+**Pass 2 — Test Quality Review:** Test independence? Determinism? Edge cases? Integration tests where mocks are masking real behavior? AAA pattern? Correct test level? (Staleness and alignment checks are handled by verify's test-alignment mode dispatch below.)
 
 #### Review Tier Routing
 
@@ -211,21 +211,21 @@ When a contract YAML exists for the current ticket, reviewers receive the contra
 
 #### Test Alignment Audit
 
-After the implementer addresses Pass 2 findings, invoke `crucible:test-coverage` against the task's changes:
+After the implementer addresses Pass 2 findings, invoke `crucible:verify` against the task's changes:
 - Code diff: `git diff <pre-task-sha>..HEAD`
 - Affected test files: test files touched or related to the task
 - Context: "Build task N: [task description]"
 
-The test-coverage skill audits existing tests for staleness (wrong assertions, misleading descriptions, dead tests, coincidence tests) and handles its own fix dispatch and revert-on-failure logic. It returns a structured report. Note: the diff includes review fix commits — the audit agent should focus on behavioral changes to source files, not changes that only touch test files.
+Verify's test-alignment mode audits existing tests for staleness (wrong assertions, misleading descriptions, dead tests, coincidence tests) and handles its own fix dispatch and revert-on-failure logic. It returns a structured report. Note: the diff includes review fix commits — the audit agent should focus on behavioral changes to source files, not changes that only touch test files.
 
 **Skip this step if** the task made no behavioral source changes (only `.md`, `.json`, config files).
 
 #### Test Gap Writer
 
-After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
+After the verify test-alignment audit completes (or is skipped), dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
 
-1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes + test-coverage audit report (if available)
-2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit).
+1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes + verify test-alignment report (if available)
+2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by verify's test-alignment mode).
 3. Tests should pass immediately (the behavior already exists from implementation)
 4. The test gap writer reports per-test PASS/FAIL results (see prompt template for report format)
 5. Commits new tests: `test: fill coverage gaps for task N`

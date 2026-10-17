@@ -74,16 +74,16 @@ is part of the tree warden reviews and the PR later carries.
 
 ### Step 2.5: Test Alignment Audit
 
-**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage — audit whether existing tests are still aligned with the changes on this branch. Invoke with:
+**RECOMMENDED SUB-SKILL:** Use `crucible:verify` in test-alignment mode to audit whether existing tests are still aligned with the changes on this branch. Invoke with:
 - Code diff: `git diff <base-branch>..HEAD`
 - Affected test files: test files in the diff or test files that import changed modules
 - Context: "Finish pre-merge audit for [branch description]"
 
-The test-coverage skill handles its own fix dispatch and revert-on-failure logic.
+Verify's test-alignment mode handles its own fix dispatch and revert-on-failure logic.
 
 **Skip this step when:**
 - The branch diff contains no behavioral source changes (only `.md`, `.json`, `.yaml`, config files)
-- Build told finish to skip Step 2.5 (test-coverage already ran per-task in Phase 3)
+- Build told finish to skip Step 2.5 (the verify test-alignment audit already ran per-task in Phase 3)
 
 ### Step 2.75: Forge Retrospective
 
@@ -474,7 +474,7 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
 - **crucible:quality-gate (standalone red-team mode)** — Adversarial full loop before presenting options. Finish has no typed artifact, so select the preserved standalone red-team loop rather than the typed-artifact gate.
 
 **Recommended:**
-- **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)
+- **crucible:verify** — Test alignment audit between code review and red-team (Step 2.5)
 - **crucible:getting-started** (`forge.md`) — Retrospective between test audit and red-team (Step 2.75)
 - **Safe PR merge subflow** — [merge.md](merge.md) handles merge execution with CI verification (Step 6, Option 2 or direct request).
 

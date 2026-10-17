@@ -24,14 +24,13 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 | source-driven-development | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | spec | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | temper | PASS | FAIL | PASS | PASS | PASS | FAIL |
-| test-coverage | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | test-driven-development | PASS | PASS | PASS | PASS | PASS | PASS |
 | verify | PASS | FAIL | PASS | PASS | PASS | FAIL |
 | warden | FAIL | FAIL | PASS | FAIL | PASS | FAIL |
 | worktree | PASS | PASS | PASS | PASS | PASS | PASS |
-| TOTAL | 20/25 | 11/25 | 24/25 | 20/25 | 20/25 | 8/25 |
+| TOTAL | 19/24 | 11/24 | 23/24 | 19/24 | 19/24 | 8/24 |
 
-## Violations (53)
+## Violations (52)
 
 - `audit` Body (1): 790 body lines (max 500)
 - `audit` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
@@ -58,7 +57,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `spec` Contents (1): skills/spec/contract-schema.md: >100 lines, no contents list in first 20
 - `spec` Frontmatter (1): description should use third-person, not first/second-person voice
 - `temper` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
-- `test-coverage` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
 - `warden` Body (1): 942 body lines (max 500)
 - `warden` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20

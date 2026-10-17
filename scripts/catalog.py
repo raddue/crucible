@@ -43,7 +43,7 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "Quality & Audit": [
         "delve", "audit", "siege", "quality-gate",
-        "test-coverage", "temper", "verify",
+        "temper", "verify",
         "finish", "warden",
     ],
     "Debugging": [

@@ -53,7 +53,7 @@ Task tool (general-purpose, model: opus):
       you only DIAGNOSE and PRIORITIZE gaps
     - Diff-scoped coverage ("did this change add tests?") -- not your job
     - Test STALENESS (tests that no longer match the code) -- route that to
-      /test-coverage, do not report it here
+      /verify, do not report it here
     - A single untested function in isolation (not systemic)
     - Reproducible bugs (instance bugs -> /delve)
     - Speculative gaps you can't point to specific code/seams for
@@ -108,7 +108,7 @@ Task tool (general-purpose, model: opus):
 
     - Do NOT author, write, or fix tests (audit only diagnoses + prioritizes)
     - Do NOT do diff-scoped coverage analysis
-    - Do NOT report test staleness -- route it to /test-coverage
+    - Do NOT report test staleness -- route it to /verify
     - Do NOT report a single-reproduction finding as a lens finding -- the
       Systemic-Only Rule routes it to /delve; record any you noticed in
       passing under "Out-of-scope instance bugs (noted for /delve)" in your

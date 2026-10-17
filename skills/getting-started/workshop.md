@@ -1,6 +1,6 @@
 # Workshop
 
-A curated tour of the headline Crucible skills — the workflows a user typically invokes directly. Crucible ships 25 skills total, including sub-skills dispatched internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the workflows a user typically invokes directly. Crucible ships 24 skills total, including sub-skills dispatched internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 ## Contents
 
@@ -40,7 +40,6 @@ A curated tour of the headline Crucible skills — the workflows a user typicall
 | `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/recon` (improvement discovery). Use when "this has accumulated cruft nobody's looked at in months." |
 | `/siege` | Security audit. Six parallel attacker-perspective Opus agents, iterates until zero Critical/High. Heavy — reserve for security PRs, scheduled reviews, or post-incident. |
 | `/recon` | Codebase investigation: task-scoped brief, whole-repo onboarding, persistent-map maintenance, or improvement discovery. Select mode from intent; redesign proposals route to `/design`. |
-
 
 > **`/delve` vs `/recon` — different machines.** `/delve` hunts concrete *instance bugs* in a specific diff or path (one defect, one reproduction). `/recon` maps unfamiliar code or discovers architectural friction, depending on selected mode. Reach for `/delve` when you have a **change** and want its bugs; reach for `/recon` when you have a **codebase** to understand or improve. Within the review trio: `/delve` = instance bugs (one-shot), `/audit` = systemic patterns, `/temper` = merge gate + iterative fix loop.
 
@@ -82,9 +81,9 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has 25 skills; this list curates ~15. Skills omitted here are either:
+Crucible has 24 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `inquisitor`, `checkpoint`, `verify`, plus quality-gate's red-team mode) — invoked indirectly, not part of the user-facing menu.
-- **Utility / meta** (e.g., `anvil` (including skill-suite audits), `replay`, `worktree`, `parallel`, `finish`, `distill`, `test-coverage`, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+- **Utility / meta** (e.g., `anvil` (including skill-suite audits), `replay`, `worktree`, `parallel`, `finish`, `distill`, `verify` test-alignment mode, temper's inbound feedback mode, getting-started's consensus mechanism, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 
@@ -92,4 +91,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the skills compose
-- `docs/skills.md` — full 25-skill catalog with eval deltas
+- `docs/skills.md` — full 24-skill catalog with eval deltas

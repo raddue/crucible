@@ -169,7 +169,7 @@ After all tasks complete:
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
 10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
-11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's warden call** (warden already ran in build Phase 4 at step 3 — this is the structural double-temper kill), **AND skip finish's Step 2.5 (test-coverage)** since test-coverage ran per-task in Phase 3. Tell finish to skip both.
+11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's warden call** (warden already ran in build Phase 4 at step 3 — this is the structural double-temper kill), **AND skip finish's Step 2.5 (verify test-alignment audit)** since the audit ran per-task in Phase 3. Tell finish to skip both.
 12. **Delete pipeline-active marker:** Remove `<build-scratch>/.pipeline-active`. This signals that the pipeline completed successfully. If deletion fails (permissions, missing file), log a warning but do not fail the pipeline.
 
 ### Session Metrics
@@ -346,7 +346,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 **Recon/approach-evaluation context:** Inherits recon/approach-evaluation context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
 
 **Phase 3 sub-skills (dispatched per-task):**
-- **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)
+- **crucible:verify** — Test-alignment mode audits existing tests after each task's test quality review (staleness, dead tests, coincidence tests)
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task

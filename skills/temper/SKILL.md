@@ -88,7 +88,7 @@ When in doubt: if the artifact is a code diff, use temper. If it is anything els
 | `shared/severity-verdict-contract.md` | Required | The `T = {CONFIRMED, PLAUSIBLE} × {Critical, Important}` gating rule and the severity/verdict vocabulary (I11 — temper defines none of its own) | None — abort; temper coins no scale or verdict |
 | Forge CLI (`gh` / `glab` / `bb`) | Optional | PR metadata fetch + optional Step 5 post-back | Probe in order; if all missing, fall through to git-plumbing and ask user for description |
 | `crucible-consensus` MCP server | Optional | External-model candidate feed via `external_review` (R1-only `external_candidates`, see External Model Review) | Skip silently — gather no external candidates (≡ `external_review=skip`) |
-| `crucible:test-coverage` | Optional | Test-alignment audit when behavioral changes are made | Skip; recommend manually |
+| `crucible:verify` | Optional | Test-alignment mode when behavioral changes are made | Skip; recommend manually |
 | `crucible:checkpoint` | Optional | **Fallback** per-round working-tree snapshot mechanism for the uncommitted-mode fix-delta derivation (§3.8); the **primary** mechanism is `git stash create` (no dependency), so checkpoint stays optional. Also a pre-fix rollback target when build wraps temper. | Skip silently — `git stash create` is the primary path |
 
 ## Invocation
@@ -451,21 +451,21 @@ Read [`references/round-example.md`](references/round-example.md) when tracing t
 
 ## Test Alignment
 
-When behavioral changes were made, consider dispatching `crucible:test-coverage` after temper completes. This catches stale tests, missing coverage, or assertion drift introduced by the fixes.
+When behavioral changes were made, consider dispatching `crucible:verify` in test-alignment mode after temper completes. This catches stale tests, missing coverage, or assertion drift introduced by the fixes.
 
 **Caller context determines who runs it:**
-- **Pipelines (build / debugging / finish):** the pipeline orchestrator dispatches `crucible:test-coverage` automatically — temper does not.
-- **Standalone / ad-hoc:** the user (or whoever invoked `/temper` directly) is responsible for the hand-off. Recommend `crucible:test-coverage` when the review noted behavioral changes that might affect existing tests, when the diff modified functions with dedicated test files, or when the reviewer said "tests should be updated" without specifics.
+- **Pipelines (build / debugging / finish):** the pipeline orchestrator dispatches `crucible:verify` in test-alignment mode automatically — temper does not.
+- **Standalone / ad-hoc:** the user (or whoever invoked `/temper` directly) is responsible for the hand-off. Recommend `crucible:verify` in test-alignment mode when the review noted behavioral changes that might affect existing tests, when the diff modified functions with dedicated test files, or when the reviewer said "tests should be updated" without specifics.
 
 This is the single canonical statement of the rule; the workflow sections below cross-link rather than restate.
 
 ## Integration with Workflows
 
-**Build pipeline (Phase 4):** Temper runs after each task. Build dispatches `crucible:test-coverage` automatically (see Test Alignment).
+**Build pipeline (Phase 4):** Temper runs after each task. Build dispatches `crucible:verify` in test-alignment mode automatically (see Test Alignment).
 
-**Standalone plan execution:** Temper after each batch (3 tasks). The user dispatches `crucible:test-coverage` afterward if behavioral changes were made.
+**Standalone plan execution:** Temper after each batch (3 tasks). The user dispatches `crucible:verify` in test-alignment mode afterward if behavioral changes were made.
 
-**Ad-hoc development:** Temper before merge, when stuck, after a complex bug fix. The user dispatches `crucible:test-coverage` afterward if behavioral changes were made.
+**Ad-hoc development:** Temper before merge, when stuck, after a complex bug fix. The user dispatches `crucible:verify` in test-alignment mode afterward if behavioral changes were made.
 
 **Migration note — pre-rename retrospectives.** `crucible:getting-started` (`forge.md`) retrospectives written before 2026-05-17 are tagged with `code_review`. Forge's consult-past-lessons step does not auto-alias; if you want the old lessons to surface for `temper`, query both keys. (Out of temper's scope to fix; flagged here so users know.)
 

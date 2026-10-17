@@ -74,7 +74,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     **Precondition:** The working tree should be clean when you start
     (prior batches are committed by the orchestrator, and the caller
-    commits before invoking test-coverage). If you detect uncommitted
+    commits before invoking verify in test-alignment mode). If you detect uncommitted
     changes before starting, report this to the caller and do not
     proceed.
 
