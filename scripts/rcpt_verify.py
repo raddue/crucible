@@ -2536,7 +2536,8 @@ def _v11_keyword_end(line, keyword):
     PR #714 review (Highs 1-2, Medium 2, Low 1). Anchored at line start
     (after ASCII spaces/tabs). ASCII characters must match the keyword
     EXACTLY (case and punctuation), so ordinary prose (`  Supersedes: x`,
-    `# tripwire: y`, `TRIPWIRE CHILD:`) is never a keyword line. A non-ASCII
+    `# tripwire: y`, `TRIPWIRE CHILD:`, `  tripwire-child: z`) is never a
+    keyword line. A non-ASCII
     character is never mandatory: it may be skipped (invisible insertion),
     match by its confusables/NFKD resolution (case-insensitive; `l`
     stands for `I` since UTS #39 maps capital I to `l`), or stand in as a

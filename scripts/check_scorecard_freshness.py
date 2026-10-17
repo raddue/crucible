@@ -19,13 +19,20 @@ def diff_report(committed: Path, generated: str) -> str:
 def main() -> int:
     with TemporaryDirectory() as tmp:
         target = Path(tmp) / "skill-practices-audit.md"
-        subprocess.run(["python3", str(ROOT / "scripts/check_skill_best_practices.py"),
-                        "--write-report", "--report-path", str(target)], cwd=ROOT, check=True,
-                       stdout=subprocess.DEVNULL)
-        diff = diff_report(ROOT / "docs/skill-practices-audit.md", target.read_text(encoding="utf-8"))
+        try:
+            subprocess.run(["python3", str(ROOT / "scripts/check_skill_best_practices.py"),
+                            "--write-report", "--report-path", str(target)], cwd=ROOT, check=True,
+                           stdout=subprocess.DEVNULL)
+        except subprocess.CalledProcessError as exc:
+            print(f"- scorecard generation failed: checker exited with status {exc.returncode}")
+            return 1
+        try:
+            diff = diff_report(ROOT / "docs/skill-practices-audit.md", target.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as exc:
+            print(f"- scorecard comparison failed: {exc}")
+            return 1
     if diff:
-        print(diff)
-        print(MESSAGE)
+        print(f"- docs/skill-practices-audit.md stale: {MESSAGE}")
         return 1
     print("OK — skill practices scorecard fresh")
     return 0

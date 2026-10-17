@@ -896,24 +896,41 @@ _overlap() {
     # changed paths matching this candidate's literal paths, not the whole
     # historical list. Verify exact equality: git's literal directory pathspec
     # also selects descendants. No persisted artifact scan before every Stop.
-    local specs=()
+    local specs=() tmp
+    tmp="$(mktemp)" || { echo "grudge-resolution-guard: could not create temporary file for historical overlap; allowing Stop without advancing checkpoint, grudge compliance NOT enforced" >&2; unset -n _aa; return 2; }
+    trap 'rm -f -- "$tmp"' EXIT
+
     for a in "${_aa[@]}"; do
       [ -n "$a" ] || continue
       specs+=(":(literal)$a")
       if [ "${#specs[@]}" -eq 128 ]; then
         _budget_ok || _budget_out
+        if ! _GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}" > "$tmp"; then
+          rm -f "$tmp"
+          trap - EXIT
+          unset -n _aa
+          return 2
+        fi
         while IFS= read -r -d '' b; do
-          if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
-        done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+          if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; trap - EXIT; unset -n _aa; return 0; fi
+        done < "$tmp"
         specs=()
       fi
     done
     if [ "${#specs[@]}" -gt 0 ]; then
       _budget_ok || _budget_out
+      if ! _GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}" > "$tmp"; then
+        rm -f "$tmp"
+        trap - EXIT
+        unset -n _aa
+        return 2
+      fi
       while IFS= read -r -d '' b; do
-        if [ -n "${_seen["k$b"]:-}" ]; then unset -n _aa; return 0; fi
-      done < <(_GIT_DIAGNOSTIC=1 _git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+        if [ -n "${_seen["k$b"]:-}" ]; then rm -f "$tmp"; trap - EXIT; unset -n _aa; return 0; fi
+      done < "$tmp"
     fi
+    rm -f "$tmp"
+    trap - EXIT
     _budget_ok || _budget_out
   fi
   unset -n _aa
@@ -929,11 +946,18 @@ for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
   [ -n "${SHA_GROUP[$n_sha]}" ] && continue
 
   bridged=""
+  overlap_rc=0
   for s in "${!SHA_GROUP[@]}"; do
     g="${SHA_GROUP[$s]}"
     case " $bridged " in *" $g "*) continue ;; esac
     if _overlap "$n_sha" "$s"; then
       bridged="$bridged $g"
+    else
+      overlap_rc=$?
+      if [ "$overlap_rc" -eq 2 ]; then
+        echo "grudge-resolution-guard: git diff-tree failed while checking historical overlap; allowing Stop without advancing checkpoint, grudge compliance NOT enforced" >&2
+        exit 0
+      fi
     fi
   done
 
