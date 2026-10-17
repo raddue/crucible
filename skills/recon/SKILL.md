@@ -50,7 +50,7 @@ Structured, parallel codebase investigation with a layered output model. Produce
 - Core scouts: standard (via Explore agents)
 - Judgment depth agents (impact-analysis, friction-scan, diagnostic-context): high
 - Mechanical depth agents (consumer-registry, subsystem-manifest, execution-readiness): standard
-- Claude Code tool calls map `standard` to `model: sonnet` and `high` to `model: opus`; other harnesses use supported mappings or omit unsupported model fields per `shared/model-tier-policy.md`.
+- Claude Code native aliases are `standard`→Sonnet and `high`→Opus; Jev-capable operators may optionally map profiles as documented in `shared/harness-adapter.md`. Other harnesses use supported mappings or omit unsupported model fields.
 - Orchestrator: runs on whatever model the session uses
 
 **Announce at start:** "Running recon [with task: X / full repo scan] [scope: Y / full repo]."

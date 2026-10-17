@@ -18,7 +18,7 @@ Audits whether existing tests need updating, removal, or modification after code
 
 **Technology-agnostic:** This skill works with any programming language and test framework. Examples use generic patterns. The audit agent adapts its checks to whatever language and testing conventions are present in the project.
 
-**Models:** Test audit and fix agents request `high`. The Claude Code examples use the current reference alias `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+**Models:** Test audit and fix agents request `high`. Dispatch examples use neutral `model_profile` requests; host adapters map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
 
 ## Why This Exists
 

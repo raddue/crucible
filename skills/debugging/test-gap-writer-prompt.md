@@ -4,7 +4,7 @@
 
 Use this template when dispatching a test gap writer after Phase 5 (red-team + code review) identifies missing test coverage for a fix.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):

@@ -5,10 +5,10 @@
 
 Use this template when dispatching the Consumer Wave Grouper agent in Phase 5.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
-Task tool (model: sonnet):
+Task tool (general-purpose, model: sonnet):
   description: "Group consumers into migration waves: [MIGRATION_DESCRIPTION]"
   prompt: |
     You are grouping consumers into migration waves — ordered batches where

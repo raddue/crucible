@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Structure Scout in Phase 2. This agent maps project layout, module boundaries, entry points, and build system. Feeds the `project_structure` core field.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Agent tool (subagent_type: Explore, model: sonnet):

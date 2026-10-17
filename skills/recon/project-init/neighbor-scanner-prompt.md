@@ -5,7 +5,7 @@
 
 Dispatch one Sonnet subagent per neighboring repository for a lightweight scan of purpose and interfaces.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Agent tool (subagent_type: Explore, model: sonnet):

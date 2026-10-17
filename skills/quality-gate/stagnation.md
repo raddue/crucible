@@ -8,7 +8,7 @@
 A single stagnation pipeline with three optional model tiers, all gated by `suppression_threshold`:
 
 1. **Orchestrator first-pass (always runs)** — local arithmetic check on weighted score and Fatal count. Cheapest; deterministic; runs every round but only escalates at round ≥ threshold (with sustained-regression and no-op-fix as the at-any-round exceptions).
-2. **Sonnet stagnation judge (runs at round ≥ threshold - 4, silent until threshold)** — semantic comparison of finding sets across rounds. Verdict: PROGRESS / STAGNATION / DIMINISHING_RETURNS. Silent dispatches seed comparison history (see Judge Dispatch).
+2. **`standard`-profile stagnation judge (runs at round ≥ threshold - 4, silent until threshold)** — semantic comparison of finding sets across rounds. Verdict: PROGRESS / STAGNATION / DIMINISHING_RETURNS. Silent dispatches seed comparison history (see Judge Dispatch).
 3. **Multi-model consensus (runs on Round 1 and every `max(1, suppression_threshold // 3)` rounds thereafter up to round 15, when consensus_query available)** — cross-model verdict on the same comparison inputs. Higher confidence; carries pre-threshold escalation power via the consensus carve-out (see Pre-Threshold Consensus Carve-Out).
 
 The three tiers share the same trigger (same-or-higher weighted score, no Fatal improvement) but produce distinct signals at different cost points. The orchestrator first-pass is the always-on rail; the judge adds semantic recurring/new classification; consensus adds cross-model unanimity weighting. Each tier's verdict is reflected in `round-N-score.md` and `round-N-comparison.md` regardless of whether it escalates.
@@ -83,7 +83,7 @@ The orchestrator dispatches a **persistence checker** between a non-clean red-te
 
 **Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
 
-**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Task with `subagent_type: crucible-qg-verifier` (reused — both the fix verifier and the persistence checker are Sonnet mechanical structural checks; the agent def pins **Sonnet**, `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`) and `persistence-checker-prompt.md` as the prompt. The persistence checker emits a JSON correspondence object, not an Evidence Receipt — the shared `crucible-qg-verifier` def is deliberately return-format-neutral so it does not conflict with that (the persistence checker is not a receipt-bearing role — its JSON is consumed directly by the orchestrator, written to `round-(N+1)-persistence.md` per the flow below, and is NOT run through the receipt linter; this is a pre-existing exemption that #352 does not change). Inputs supplied verbatim by the orchestrator:
+**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Task with `subagent_type: crucible-qg-verifier` (reused — both the fix verifier and the persistence checker are `standard`-profile mechanical structural checks; the agent requests `standard` via `agents/crucible-qg-verifier.md`; host-native binding stays in that definition) and `persistence-checker-prompt.md` as the prompt. The persistence checker emits a JSON correspondence object, not an Evidence Receipt — the shared `crucible-qg-verifier` def is deliberately return-format-neutral so it does not conflict with that (the persistence checker is not a receipt-bearing role — its JSON is consumed directly by the orchestrator, written to `round-(N+1)-persistence.md` per the flow below, and is NOT run through the receipt linter; this is a pre-existing exemption that #352 does not change). Inputs supplied verbatim by the orchestrator:
 (Same resolution-failure fallback and warning as the fix-verifier dispatch above —
 see Fix Verifier's Dispatch method.)
 
@@ -114,7 +114,7 @@ The persistence checker (above) catches a finding that *survives* a fix. This ch
 
 **Simpler decomposition considered (round 3, S5).** Folding this judgment into the existing persistence-checker dispatch — adding the fix diff as a fourth input to `persistence-checker-prompt.md`, with `fix_generated | ambiguous | pre-existing` as a per-correspondence field — was considered and NOT adopted this round. The two checks' triggers differ: persistence requires ≥1 round-N Unresolved finding, while this check must also fire on fully-Resolved rounds. A merged checker would need the persistence half to short-circuit to an empty correspondence list on the fully-Resolved branch (computed in-process instead of serialized through the `persistence_status` enum) — a real but small redesign, left to a follow-up rather than re-cut here so the reasoning is not lost if the merge is picked up later.
 
-**Dispatch.** Reuses `subagent_type: crucible-qg-verifier` (Sonnet — same mechanical-check role as the fix verifier and persistence checker; do not pass a call-level `model:`) with `fix-generated-defect-prompt.md` as the agent's instructions. Inputs supplied verbatim:
+**Dispatch.** Reuses `subagent_type: crucible-qg-verifier` (`standard` profile — same mechanical-check role as the fix verifier and persistence checker; Claude Code adapter binds profile using native `model:` setting) with `fix-generated-defect-prompt.md` as the agent's instructions. Inputs supplied verbatim:
 (Same resolution-failure fallback and warning as the fix-verifier dispatch above —
 see Fix Verifier's Dispatch method.)
 
@@ -163,14 +163,14 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 
 **Short-threshold behavior note (thresholds 4 and 5):** The silent-seed window only opens at `suppression_threshold ≥ 6`. For thresholds 4 and 5, the at-threshold judge dispatches without any prior `round-*-comparison.md` history. The judge's "recurring-Significant for 2 consecutive rounds" rule requires comparison history; with none, the judge's fail-open default classifies findings as PROGRESS or New rather than recurring, making STAGNATION effectively unreachable on the first at-threshold round. By round `threshold+1`, one comparison file exists and the judge can detect stuck patterns normally. This is an intentional trade-off: short-threshold artifacts (hypothesis in particular) prioritize fast convergence over early stagnation detection.
 
-**At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
+**At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — an agent requesting the `standard` profile that performs semantic comparison of findings across rounds. On Claude Code, its native selector is in `agents/crucible-qg-judge.md`; other hosts need a mapping or use operator/session default. If the `consensus_query` tool is not available in the environment, this step uses the standard single-agent dispatch described below.
 
-**Dispatch method:** Task tool, `subagent_type: crucible-qg-judge` (the agent def pins **Sonnet** — `agents/crucible-qg-judge.md`; do not pass a call-level `model:`). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
+**Dispatch method:** Task tool, `subagent_type: crucible-qg-judge` (requests `standard` via `agents/crucible-qg-judge.md`; host-native binding stays in that definition). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 **If `subagent_type: crucible-qg-judge` fails to resolve (agent defs not installed
 — see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose`
-on the orchestrator's inherited model and the Sonnet pin is not enforced; emit a
+on the orchestrator's inherited model and the `standard` profile is not enforced; emit a
 one-time visible warning of its own ("agent type `crucible-qg-judge` not installed;
-the judge is running on the inherited/session model — the Sonnet pin is NOT
+the judge is running on the inherited/session model — the `standard` profile is NOT
 enforced; install per harness-adapter §8") rather than degrading silently.**
 
 

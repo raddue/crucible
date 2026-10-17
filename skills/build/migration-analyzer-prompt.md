@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Migration Analyzer agent in Phase 1.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: Explore, model: opus):

@@ -5,7 +5,7 @@
 
 Dispatch a Sonnet subagent after task completion using this template.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Task tool (general-purpose, model: sonnet):

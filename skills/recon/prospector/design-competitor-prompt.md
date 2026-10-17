@@ -5,7 +5,7 @@
 
 Use this template when dispatching a competing design agent. The orchestrator fills in the bracketed sections. Three agents are dispatched in parallel, each with a different assigned constraint from the constraint menu.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: general-purpose, model: opus):

@@ -5,7 +5,7 @@
 
 Dispatch a Sonnet subagent during Tier 2 fan-in to synthesize neighbor scan results into a cross-repo topology map.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Task tool (general-purpose, model: sonnet):

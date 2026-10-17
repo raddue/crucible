@@ -4,7 +4,7 @@
 
 Use this template when dispatching a plan writer subagent in Phase 2.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

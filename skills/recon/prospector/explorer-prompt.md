@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Phase 1 organic exploration agent. The orchestrator fills in the bracketed sections.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: Explore, model: opus):

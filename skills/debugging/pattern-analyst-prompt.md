@@ -8,7 +8,7 @@ Use this template when dispatching a pattern analysis subagent during Phase 2 of
 
 **Dispatch after:** Synthesis agent has produced a root-cause analysis. Skip this agent if the synthesis report already identifies an obvious, high-confidence root cause with no ambiguity.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):

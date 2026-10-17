@@ -5,7 +5,7 @@
 
 Use this template when dispatching an innovation subagent.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

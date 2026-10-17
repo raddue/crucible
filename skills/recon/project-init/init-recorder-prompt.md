@@ -5,7 +5,7 @@
 
 Dispatch a Sonnet subagent for Tier 1 fan-in — merges multiple partition explorer outputs into cartographer format.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Task tool (general-purpose, model: sonnet):

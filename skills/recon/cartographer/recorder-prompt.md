@@ -5,7 +5,7 @@
 
 Dispatch a Sonnet subagent after significant codebase exploration to capture what was learned.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Task tool (general-purpose, model: sonnet):

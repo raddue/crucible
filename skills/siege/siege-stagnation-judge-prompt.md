@@ -6,7 +6,7 @@
 
 Use this template when dispatching the stagnation judge during Phase 4 Security Gate. The judge is a Sonnet agent performing semantic comparison of findings across rounds.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Task tool (general-purpose, model: sonnet):

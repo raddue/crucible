@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Consumer Mapper depth agent. Primary consumer: `/build` migration mode. Produces a structured registry of all consumers of a target symbol, module, or API for the `## Consumer Registry` section.
 
-Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+Requested profile: standard.
 
 ```
 Agent tool (subagent_type: Explore, model: sonnet):

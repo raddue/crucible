@@ -4,7 +4,7 @@
 
 Use this template when dispatching a test gap writer after Pass 2 (Test Review) identifies missing coverage.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Task tool (general-purpose, model: opus):

@@ -16,12 +16,16 @@ aliases remain valid during incremental migration. Link here — never copy
 | `fast` | Narrow lookup/structural mapping where speed dominates judgment | `haiku` |
 | `inherit` | Caller/session model decides; no profile preference | `inherit` |
 
-The role tables below preserve current provider aliases and measured history.
-Read `opus`, `sonnet`, and `haiku` there as today's Claude Code mapping of
-`high`, `standard`, and `fast`, not as universal runtime requirements. Other
-harnesses map profiles through `shared/harness-adapter.md`; where a harness has
-no supported mapping, omit the model parameter and use the operator/session
-default rather than inventing a provider-specific ID.
+Skills request neutral profile intents (`high`, `standard`, `fast`, or
+`inherit`); `model_profile` remains policy/manifest vocabulary, not native tool
+syntax. Actual provider selection and effort mapping are host/operator-owned;
+Crucible records intent but does not select or enforce model/effort. See
+`shared/harness-adapter.md` for host selector notes and the maintainer-selected
+target mapping for any future optional Jev integration. The maintainer superseded
+#651's original Haiku→Luna/medium target with `fast`/Haiku→Luna/low to match
+Jev's current worker route. This target is documentation, not implemented
+routing. Jev is not required to use Crucible. If a host lacks a configured
+mapping, use operator/session default; no provider ID is inferred.
 
 > **Tier names, not versions** (last checked 2026-10-10). The pins in this repo
 > are tier names and profile names — `opus`/`high`, `sonnet`/`standard`,
@@ -59,21 +63,12 @@ continue unrelated tasks.
 `scripts/check_model_pins.py` is an author-time repository check; it is not a
 runtime dispatch gate and must not be used to stop a live dispatch.
 
-> **Tier names, not versions** (last checked 2026-10-10). The pins in this repo
-> are tier names — `opus`, `sonnet`, `haiku`, `fable` — never a versioned id.
-> Provider-config examples are the exception: consensus membership carries raw
-> provider ids by design (residual (b)). Where a version or a cost multiple
-> appears below, it is context for a measurement or a fallback floor, not a pin,
-> and it drifts behind on every provider release: the Claude line was Fable 5.1 /
-> Opus 5.5 / Sonnet 5.5 / Haiku 5.5 at that date. Re-derive the Fable cost
-> multiple on each release.
-
 ## TL;DR
 
-- **The `high` profile is the default** for every reasoning role except three roles
-  that are not Opus-pinned — `crucible-qg-fix` (Sonnet, below), the
-  standalone `/quality-gate` red-team mode fix dispatch, and dependency-audit's inline path
-  (the latter two unpinned/session, residual (a)); the `standard` profile for cheap
+- **The `high` profile is the requested default** for reasoning roles except
+  `crucible-qg-fix` (`standard`), the standalone `/quality-gate` red-team mode
+  fix dispatch, and dependency-audit's inline path (the latter two inherit the
+  operator/session model, residual (a)); `standard` is requested for cheap
   mechanical checks (`crucible-qg-judge` /
   `crucible-qg-verifier`) and for the fix agent (`crucible-qg-fix` — the
   main-loop fix output is re-reviewed on single-model rounds that reach a
@@ -141,13 +136,12 @@ a PR-time gate, not an author-time one).
 
 **It ENFORCES:** fable-family pins (`fable`, any `claude-fable-*` id,
 case-insensitive) in the static pin-surface forms — line-anchored
-`model:`/`model_profile:`, inline `Task tool (... model:`/`model_profile: ...)`,
-inline `Agent tool (... model:`/`model_profile: ...)` — under the two rules
-above (marked-file pin ban + default-deny marker requirement on the
-security-surface set). The neutral `model_profile:` key is scanned so migrating
-a security-named file to profile vocabulary cannot evade the marker
-requirement. That is the entire author-time enforcement surface; it is not a
-runtime dispatch gate.
+`model:`, inline `Task tool (... model: ...)`, inline `Agent tool (... model: ...)` —
+under the two rules above (marked-file pin ban + default-deny marker requirement
+on the security-surface set). It scans neutral `model_profile:` tokens for the
+same security-marker coverage, but such tokens are intent, not runtime bindings.
+This is the entire author-time enforcement surface; it is not a runtime
+selection gate.
 
 **It does NOT enforce (disclosed residuals — operator convention, not
 checker guarantee):**

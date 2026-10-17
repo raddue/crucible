@@ -5,7 +5,7 @@
 
 Use this template when dispatching the Diagnostic Gatherer depth agent. Primary consumer: `/debugging`. Produces call chains, error context, and data flow traces for the `## Diagnostic Context` section.
 
-Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+Requested profile: high.
 
 ```
 Agent tool (subagent_type: Explore, model: opus):
