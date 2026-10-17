@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fleet-file CRUD for the Herdr orchestrator skill (skills/orchestrator/SKILL.md).
+"""Fleet-file CRUD for machine-local Herdr orchestration.
 
 The skill's step 2 tells the agent to keep worker state in one JSON file
 ("rewritten on every spawn, rotation, and close"). That hand-editing is the
