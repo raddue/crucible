@@ -47,7 +47,7 @@ fields map onto it. The authored source of truth is the Claude-Code `name` + `de
 |---|---|---|---|---|
 | Skill identifier | `name:` | (file name `<name>.md`; no `name` key) | prompt metadata `name`/title | command/rule name |
 | Trigger + one-line purpose | `description:` (triggers live here) | `description:` | prompt metadata description | rule description |
-| Dispatch agent selection | model-critical roles use named agent types (`agents/<role>.md`), whose host-native selector is documented below; profile requests remain neutral `model_profile` policy vocabulary | `agent:` (named agent profile), resolved by operator/host configuration | n/a | n/a |
+| Dispatch agent selection | model-critical roles use named agent types (`agents/<role>.md`), whose native selector is host-specific (Claude Code details in Mapping 1b); profile requests remain neutral | `agent:` (named agent profile), resolved by operator/host configuration | n/a | n/a |
 | "this command spawns a subagent" | n/a (decided in body) | `subtask: true` | n/a (sequential) | n/a (sequential) |
 | Argument substitution | body reads invocation args | `$ARGUMENTS` token | prompt arg convention | command arg convention |
 | File include | body reads paths via tools | `@file` include | prompt include | rule include |
@@ -63,13 +63,14 @@ so that no harness's frontmatter loader parses or strips it.
 <!-- CANONICAL: shared/model-tier-policy.md -->
 ## 2b. Mapping 1b — Per-role model tier intent and host bindings
 
-The quality-gate / red-team loop is **recall-critical**: historical measurements found an Opus
-reviewer surfaced Fatals missed by a Sonnet reviewer. Role intent therefore requests the `high`
-profile for red-team and `standard` for mechanical/fix roles, independent of orchestrator tier.
-Crucible does not enforce that request across hosts; this mapping records native host bindings where
-known and the limitations where they are not.
+The quality-gate / red-team loop is **recall-critical**: historical measurements found stronger
+reviewers surfaced Fatals missed by weaker reviewers. Role intent requests `high` for red-team and
+`standard` for mechanical/fix roles, independent of orchestrator tier. Host enforcement varies:
+Claude Code can bind roles through native agent selectors; Pi gate roles fail closed per
+`shared/dispatch-convention.md`; other hosts may use operator/session defaults. This mapping records
+known host bindings and limitations; Crucible does not globally enforce profile-to-model selection.
 
-**Profile requests.** Neutral tiers (`high`, `standard`, `fast`, `inherit`) express role intent only; Crucible does not select or enforce provider models. `model_profile` is policy/manifest vocabulary, not native tool syntax. Host-specific selectors are documented in the table below; operator configuration owns their actual mapping. No Jev integration ships in Crucible, and Jev remains optional/off by default. The maintainer-selected target mapping for any future optional Jev integration is `high`→Sol/high, `standard`→Luna/xhigh, `fast`/Haiku→Luna/low; the last supersedes #651's original Haiku→Luna/medium request to match Jev's current worker route. This target is documentation only: no Jev per-dispatch API or model/effort verification is integrated here. Until a host adapter applies a request, report it as unverified and preserve no-stop dispatch behavior.
+**Profile requests.** Neutral tiers (`high`, `standard`, `fast`, `inherit`) express role intent; `model_profile` is policy/manifest vocabulary, not native tool syntax. Crucible does not globally select providers. Host-specific selectors and enforcement are documented below; operator configuration owns actual mappings. No Jev integration ships in Crucible, and Jev remains optional/off by default. The maintainer-selected target mapping for any future optional Jev integration is `high`→Sol/high, `standard`→Luna/xhigh, `fast`/Haiku→Luna/low; the last supersedes #651's original Haiku→Luna/medium request. This target is documentation only; no Jev per-dispatch API or model/effort verification is integrated. Where hosts use defaults, profile application is unverified and no-stop dispatch behavior remains.
 
 **Role → profile (authored intent; host-local concrete mappings are operator configuration):**
 
@@ -93,7 +94,11 @@ cross-project reach, a consuming project's own same-named `<project>/.claude/age
 silently shadow the Crucible one. The `crucible-` prefix on every agent-type `name` / `subagent_type`
 makes that collision implausible — it is the deliberate guard against the shadow.
 
-**Host-specific syntax.** Native selectors in host examples document how each host can express a profile request; they do not make Jev or any model-selection service mandatory. Operators may configure models directly, or opt into Jev where available. Claude Code agent defs retain native selectors for supported bindings. Crucible does not consume Jev routes; any future Jev adapter must be separately specified, opt-in, and return resolved model/effort or unavailable. Other hosts may map profiles or use operator/session defaults; profile intent remains unverified when model choice cannot be applied or observed.
+**Claude Code selector precedence.** `CLAUDE_CODE_SUBAGENT_MODEL` env > call-level `model:` > agent-definition `model:` > session inherit. Agent definitions bind the four Crucible gate-role selectors below the call-level selector; the user-level symlink install is required for those definitions to resolve. An installed host mapping is not a Crucible runtime guarantee, and other hosts must use their own adapter or operator/session defaults.
+
+**Global override caution.** `CLAUDE_CODE_SUBAGENT_MODEL` takes precedence over the native red-team selector and can change its model. Gate operators who rely on the Claude Code defaults should leave this unset or verify the observed model. If overriding profiles, the operator owns that choice.
+
+**Optional Jev boundary.** Jev does not integrate with Crucible dispatch here. The target pairs above are documentation only; any future Jev adapter must be separately specified, opt-in, and report resolved model/effort or unavailable. Jev is not required.
 
 **Prose model words in skill bodies are descriptive, not binding.** Change a role's requested tier in the profile-intent declaration; host-local binding stays outside Crucible policy.
 
@@ -101,7 +106,7 @@ makes that collision implausible — it is the deliberate guard against the shad
 
 | Harness | How the per-role tier is expressed | Status |
 |---|---|---|
-| **Claude Code** | `~/.claude/agents/crucible-<role>.md` uses native `model:` selectors (symlinked from `<repo>/agents/`); high→Opus, standard→Sonnet, fast→Haiku where those selectors are present. Skill prose states neutral requested tier. | **Confirmed** native binding; Jev is optional; operator config may override. |
+| **Claude Code** | `~/.claude/agents/crucible-<role>.md` uses native `model:` selectors (symlinked from `<repo>/agents/`); high→Opus, standard→Sonnet, fast→Haiku where those selectors are present. Skill prose states requested tier. | Native binding exists; operator may override via `CLAUDE_CODE_SUBAGENT_MODEL`. Verify observed model when a run requires confirmation. |
 | **OpenCode** | An `agent:` profile per role, named with the intended profile; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #337 confirms. If it cannot, OpenCode degrades to the operator-default floor below without stopping dispatch. |
 | **Codex / Cursor** | no first-class per-agent model pin | **Unverified profile:** omit unsupported profile/model fields; model = whatever the harness runs or operator configures. Record actual model when available and disclose profile intent is unverified. No recall guarantee is provided by Crucible on this host. |
 | **Pi** | `subagents.agentOverrides.<role>.model` + `thinking` (operator-configured profile-to-model mapping) | No Crucible runtime enforcement; without an external mapper, use session/operator default and disclose unverified profile intent. Jev remains optional and its future integration is not implemented here. |
