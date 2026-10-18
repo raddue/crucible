@@ -46,6 +46,16 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual((self.target / "rcpt_verify.py").stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.target.stat().st_mode & 0o777, 0o755)
 
+    def test_missing_default_parent_names_remedy(self):
+        result = self.run_install(target="/usr/local/nonexistent/crucible")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Create it first: sudo install -d -o root -g root -m 0755", result.stderr)
+
+    def test_override_target_discloses_consumer_docs_update(self):
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("update skills/shared/return-convention.md", result.stderr)
+
     def test_unsafe_target_ancestor(self):
         parent = self.base / "writable"
         parent.mkdir(mode=0o777)

@@ -841,6 +841,10 @@ class TestV11Extension(unittest.TestCase):
         self.assertIsNotNone(parsed["tripwire"])
         self.assertEqual(parsed["supersedes"], "none")
 
+    def test_v11_keyword_requires_exact_ascii_case(self):
+        rv = _import_rv()
+        self.assertIsNone(rv._v11_keyword_end("tripwire-child: none", "TRIPWIRE-CHILD:"))
+
 
 class TestTier2Ledger(unittest.TestCase):
     """Tier-2 part-3 receipt-ledger binding (#369 PR-B): each DISPATCHED TRACE line

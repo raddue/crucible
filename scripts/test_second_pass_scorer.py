@@ -113,7 +113,7 @@ class TestUnicodeWhitespaceTitlesAreDistinctEntries(unittest.TestCase):
 
 class TestDashBoundaryRequiresWhitespace(unittest.TestCase):
     """SIEGE-FA-2 (PR #583 warden gate): both prose homes
-    (quality-gate/SKILL.md:324, red-team-prompt.md:156) state explicitly that
+    (`skills/quality-gate/loop.md`'s Score source block) states explicitly that
     the severity-token dash boundary requires whitespace before the dash — "a
     spaced dash counts; an unspaced one does not" — unlike the punctuation
     boundary (`(`, `[`, `,`, `.`, `:`, `;`), which allows optional whitespace.

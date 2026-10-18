@@ -211,7 +211,7 @@ Per leg:
   loop). quality-gate's `code` fixes are **working-tree edits, never committed**: the
   fix agent's capabilities are `apply-edits` + `run-tests` with no git step
   (`quality-gate/loop.md`), those edits run against the working tree, the pre-qg-fix
-  **checkpoint snapshots the working directory as rollback** (`:460` — which only makes
+  **checkpoint snapshots the working directory as rollback** (which only makes
   sense because code fixes mutate that tree), and there is no `git commit` anywhere in
   quality-gate's directory. The leg is invoked so its internal
   siege auto-dispatch runs (warden does **not** suppress it) — warden's second siege

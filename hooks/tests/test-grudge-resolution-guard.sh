@@ -2791,12 +2791,14 @@ check 411 "the warden suite runs its full pinned test count — contract:hook:in
   "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" >/dev/null 2>&1; echo $?)"
 
 # INV-T30 — diff-tree failure must not advance candidate checkpoint.
+# contract:hook:inv-t30 checks=7
 hook_case t30
 printf 'VALUE = 0\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 printf 'VALUE = 1\n' > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): preserve checkpoint on diff failure"
 T30_FIX="$(sha_of "$HC_REPO" HEAD)"
+T30_BASE="$(sha_of "$HC_REPO" HEAD~1)"
 run_hook s30
-check 412 "control: candidate blocks before injected failure" 2 "$RC"
+check 415 "control: candidate blocks before injected failure — contract:hook:inv-t30" 2 "$RC"
 T30_CHECKPOINT="$(st "$HC_REPO" s30 '.last_checked_sha')"
 T30_FILES="$(guard_dir "$HC_REPO")/$T30_FIX.files"
 cp "$T30_FILES" "$HC_ROOT/original.files"
@@ -2811,8 +2813,37 @@ chmod +x "$HC_ROOT/bin/git"
 HOOK_ENV="PATH=$HC_ROOT/bin:$PATH"
 run_hook s30 true
 HOOK_ENV=""
-check 413 "failed diff-tree allows without advancing checkpoint" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
-check 414 "partial diff-tree output does not replace persisted paths" yes "$(cmp -s "$HC_ROOT/original.files" "$T30_FILES" && echo yes || echo no)"
+check 416 "failed diff-tree allows without advancing checkpoint — contract:hook:inv-t30" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
+check 417 "partial diff-tree output does not replace persisted paths — contract:hook:inv-t30" yes "$(cmp -s "$HC_ROOT/original.files" "$T30_FILES" && echo yes || echo no)"
+cat > "$HC_ROOT/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == *"diff-tree"* ]]; then exit 1; fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$HC_ROOT/bin/git"
+HOOK_ENV="PATH=$HC_ROOT/bin:$PATH"
+run_hook s30 true
+HOOK_ENV=""
+check 418 "empty failed diff-tree allows without advancing checkpoint — contract:hook:inv-t30" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
+check 419 "empty failed diff-tree reports failure — contract:hook:inv-t30" yes "$(grep -Fq 'diff-tree failed' "$TMPROOT/last-stderr.txt" && echo yes || echo no)"
+
+# Keep candidate _load_files healthy; fail only historical SHA diff-tree in _overlap.
+STATE_FILE="$(guard_dir "$HC_REPO")/s30.json"
+jq --arg sha "$T30_BASE" '.sha_group = {($sha): $sha}' "$STATE_FILE" > "$STATE_FILE.tmp"
+mv "$STATE_FILE.tmp" "$STATE_FILE"
+cat > "$HC_ROOT/bin/git" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ "\$arg" == "$T30_BASE" ]]; then exit 1; fi
+done
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$HC_ROOT/bin/git"
+HOOK_ENV="PATH=$HC_ROOT/bin:$PATH"
+run_hook s30 true
+HOOK_ENV=""
+check 420 "historical overlap diff-tree failure allows without advancing checkpoint — contract:hook:inv-t30" "$T30_CHECKPOINT" "$(st "$HC_REPO" s30 '.last_checked_sha')"
+check 421 "historical overlap failure is diagnosed — contract:hook:inv-t30" yes "$(has "$ERR" 'failed while checking historical overlap')"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
@@ -2826,7 +2857,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=419
+EXPECTED_CHECKS=423
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
