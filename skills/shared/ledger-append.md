@@ -248,6 +248,10 @@ the honest data allows; the plan does not add a count-based cap it cannot make s
 (a 32-entry cap does not bound total bytes across roles or long `ran` identifiers
 anyway).
 
+### `model_assurance` shape (#746, additive optional)
+
+Tier-A quality-gate rows may carry `"model_assurance": {"state": "verified|configured|unknown", "inventory": "<path>", "digest": "<sha256 hex>"}` sourced from the terminal marker's `ModelAssurance` and `ModelAssuranceInventory` fields. Additive and display-only: `schema_version` stays 2, `append()` preserves the extra key, and the inventory file, not the ledger row, is the proof of record — this field's emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the central ledger may be disabled (`CRUCIBLE_CALIBRATION_DISABLED=1`) without affecting assurance. Never archive raw provider transcripts or credentials in it. The terminal-round-only `model_resolution` field keeps its original shape and scope.
+
 ### `predicted_falsifier` protocol (predicted-falsifier prediction market, Phase 7)
 
 A pre-registered, machine-checkable predicate co-emitted with each Tier A

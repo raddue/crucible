@@ -48,7 +48,11 @@ Mode: <standard | full>
 ResidualSignificant: <count on terminal qualifying fresh-review set, deduplicated by finding identity; full PASS is always 0>
 ResidualMinor: <count on terminal qualifying fresh-review set, deduplicated by finding identity>
 Timestamp: <ISO-8601>
-RunID: <quality-gate run-id>
+RunID: <quality-gate run-id — identical to the model-assurance inventory's run_id; never write a duplicate RunID field>
+MarkerFinality: chunk-milestone | final-integration
+FinalArtifactHash: <sha256-hex of the accepted artifact bytes (single document) or canonical manifest (multi-file gate), frozen after all fixes>
+ModelAssurance: verified | configured | unknown
+ModelAssuranceInventory: <inventory-path> sha256:<inventory-digest>
 Severity-Histogram: <json — e.g., {"fatal":0,"significant":0,"minor":0,"nit":0}>
 Gated-Files: <json-list — e.g., ["src/foo.py","src/bar.py"]>
 Highest-Finding: "<one-line quote of the most severe finding, or empty string if none>"
@@ -177,7 +181,7 @@ the **receipt's** directory: the receipt legitimately lives in the dispatch root
 piped to the linter as `-` (`skills/quality-gate/loop.md`), so comparing the two is
 unsatisfiable for the normal layout and would stop every integration round instead of
 verifying co-location (F1, round 17). A missing `$FINDINGS_ROOT` refuses the round, naming
-the unpinned-root gap rather than emitting a record no linter root covers.
+the missing-root gap rather than emitting a record no linter root covers. (#746: the integration findings root is now pinned to `<scratch-dir>/cross-chunk/` — artifact-preflight.md › Cross-chunk layout — so `$FINDINGS_ROOT` for the integration round is that directory.)
 
 **Row unit (S5, round 2).** The Tier-A ledger row is emitted **once per gate
 run** (`skills/quality-gate/recovery.md`), but `model_resolution` describes
@@ -293,6 +297,8 @@ hidden behind an undocumented array element. See
 `skills/shared/ledger-append.md`'s `model_resolution` shape section.
 
 
+**`model_assurance` emit (optional, #746).** Tier-A rows may carry `"model_assurance": {"state": "<ModelAssurance>", "inventory": "<path>", "digest": "<sha256>"}` sourced from the terminal marker's `ModelAssurance`/`ModelAssuranceInventory` fields, per `skills/shared/ledger-append.md`'s `model_assurance` shape section. Display-only: this emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the terminal-round-only `model_resolution` above keeps its original shape and scope.
+
 **`predicted_falsifier` (Phase 7 prediction market).** When constructing the entry, set `predicted_falsifier` to a pre-registered, machine-checkable predicate ONLY when `verdict ∈ {PASS, FAIL}` AND `artifact_type == "code"`; otherwise `null` (all escalation verdicts — STAGNATION/ESCALATED/ARCHITECTURAL/SUSTAINED_REGRESSION — and all non-code artifact types). In one sentence, describe the future evidence that would prove this verdict wrong, using the canonical grammar where possible: `{verb} touching {file-or-glob[,file-or-glob,...]} within {N}d` (e.g., `fix touching src/auth/token.ts within 30d`). Free-form prose is permitted but counts as "unparseable" for auto-checking. Max 256 chars. Full grammar (three forms, verbs, glob/hash/token variants) is the canonical `predicted_falsifier` protocol in `skills/shared/ledger-append.md`. Do NOT write the retired `"<DEFERRED:pre-phase-7>"` sentinel.
 
 **MarkerVersion semantics:** Every verdict marker written by this version of the gate or later carries `MarkerVersion: 2` as its first line. Consumers gate version-aware parsing on this stamp:
@@ -305,6 +311,8 @@ The convergence-log mirrors this stamp via `marker_version` (see Convergence Tel
 **ArtifactHash semantics:** `ArtifactHash` is the sha256 hex of the FULL pre-chunking artifact's bytes, computed once at gate start. For non-chunked gates this is the single artifact's hash. For chunked gates, every per-chunk verdict marker AND the cross-chunk integration round's marker carry the **same** `ArtifactHash` — it identifies the artifact across all chunks of a single gate run AND across multiple gate runs on the same byte content (regardless of chunking strategy). Forge consumers use `ArtifactHash` for same-artifact cross-run comparison, including the revisit trigger for the `tail-rubric-already-applied` skip.
 
 `ChunkHash` (chunked gates only): sha256 hex of the specific chunk's bytes. Present on per-chunk markers in chunked gates only. **Omitted from non-chunked-gate markers and from the cross-chunk integration round's marker.** `ArtifactHash` is the canonical cross-run identifier; `ChunkHash` is internal-only for per-chunk recovery scenarios.
+
+**Model-assurance fields (#746).** Per-chunk markers on a chunked gate are `MarkerFinality: chunk-milestone`; only the marker emitted after the complete integration is `final-integration`, and only after every manifest-listed chunk has terminal status and all mandatory cross-chunk consensus membership is consumed (loop.md › Model Assurance Inventory). Callers selecting a PASS marker must verify final-integration status, the complete chunk roster, and exact run/artifact binding — never select latest PASS by timestamp, and a chunk milestone's local assurance is non-qualifying: it must never be selected or displayed as whole-gate high assurance. Before terminal marker emit, reconcile the run inventory, the final artifact, and the explicit chunk/consensus roster; bind `RunID` to the inventory's run ID and `ModelAssuranceInventory` to its path and SHA-256 digest. `FinalArtifactHash` is frozen **after** all fixes including the post-PASS Minor quick-fix, before marker emit; `ArtifactHash` stays the pre-gate input hash and is never used for accepted-output comparison. `ModelAssurance` is the weakest state over the run-wide inventory's consumed critical invocations; missing or incomplete evidence downgrades this field, never the Verdict. Non-PASS exits write the same fields truthfully. Display `HIGH-ASSURANCE QG PASS` only for a `final-integration` marker with `ModelAssurance: verified`; otherwise label the result `PASS (QG model assurance: configured|unknown)`.
 
 **Verdict enum semantics:**
 - `PASS`: gate exited cleanly under active mode (`0 Fatal` on standard's required fresh reverify; `0 Fatal, 0 Significant` on full)

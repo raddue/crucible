@@ -159,6 +159,8 @@ run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
 run python3 scripts/check_qg_closure_modes.py --selftest
 run python3 scripts/check_qg_closure_modes.py
+run python3 scripts/check_qg_model_assurance_contract.py --selftest
+run python3 scripts/check_qg_model_assurance_contract.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
