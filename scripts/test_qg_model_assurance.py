@@ -767,6 +767,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         self.assertFalse(self.allowed(expected_gated=['new.md']))
         self.assertFalse(self.allowed(expected_gated=['a.txt', 'new.md']))  # code caller: a changed path never gated
         self.assertTrue(self.allowed(expected_gated=('a.txt',)))
+        self.assertTrue(self.allowed(expected_gated=['a.txt', '']))  # trailing NUL of `-z` output
+        self.assertFalse(self.allowed(expected_gated=['']))
         for missing in (None, [], (), set(), 'a.txt', [None], [b'a.txt'], [1]):
             with self.subTest(missing=missing):
                 self.assertFalse(self.allowed(expected_gated=missing))

@@ -158,7 +158,7 @@ def gated_hash(data: dict, root: Path) -> str:
     persisted `gated.mode`, never guessed by the caller.
 
     Hashes the working tree at `root`; a caller revalidating a commit must have a clean tree at
-    that commit. The hash binds `root`, so a different checkout fails closed.
+    that commit. In manifest mode the hash binds `root`, so a different checkout fails closed (document mode hashes raw bytes only).
     """
     gated = data['gated']
     return artifact_hash(root, gated['paths'], deleted=frozenset(gated['deleted']),
@@ -257,7 +257,7 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     `expected_gated` (required for `qg-verified`) is the caller's own list of paths this action
     authorizes (design/plan: the path from the phase sub-skill's linted receipt or the orchestrator's
     in-context output, never re-read from the ledger; code: `git -C <root> diff --no-renames --no-relative --name-only -z
-    <base>..HEAD` split on NUL); it must be a non-empty list/tuple/set of strings, each in the inventory's
+    <base>..HEAD` split on NUL, dropping empty entries: `-z` output ends with a NUL); it must be a non-empty list/tuple/set of strings, each in the inventory's
     `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
     `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
@@ -270,8 +270,11 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     # and a None final hash would otherwise silently turn the terminal read into a provisional one.
     if not (_hex64(current_final_hash) and _hex64(digest) and _hex64(marker.get('FinalArtifactHash'))):
         return False
-    if (not isinstance(expected_gated, (list, tuple, set, frozenset)) or not expected_gated
+    if (not isinstance(expected_gated, (list, tuple, set, frozenset))
             or any(not isinstance(item, str) for item in expected_gated)):
+        return False
+    expected_gated = {item for item in expected_gated if item}  # the trailing NUL of `-z` yields one ''
+    if not expected_gated:
         return False
     if marker.get('MarkerFinality') != 'final-integration' or marker.get('FinalArtifactHash') != current_final_hash:
         return False
@@ -445,7 +448,7 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
                 return 'unknown'  # wrong binding, or a bridged response counted twice
             seen.add(line['id'])
             if line.get('replay') or line.get('rollback'):
-                continue
+                return 'unknown'  # the design defines no replay/rollback semantics: never let one stand in for a consumed original
             if line['disposition'] not in ('consumed', 'unused'):
                 return 'unknown'
             if line['disposition'] == 'consumed':
