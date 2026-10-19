@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 
-from qg_model_assurance import artifact_hash, configured_assurance, write_inventory, read_inventory, assurance_state, action_allowed, reconcile_evidence
+from qg_model_assurance import artifact_hash, configured_assurance, write_inventory, read_inventory, assurance_state, action_allowed, reconcile_evidence, caller_allowed
 
 
 def reference_hash(root, entries):
@@ -158,8 +158,8 @@ class InventoryTest(unittest.TestCase):
                 write_inventory(self.path, data)
 
 
-class EvidenceReconciliationTest(unittest.TestCase):
-    """Host-adapter evidence contract; synthetic evidence stays unknown absent trusted origin."""
+class EvidenceFixture:
+    """Shared host-evidence bundle; synthetic evidence stays unknown absent trusted origin."""
     POLICY = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
 
     def setUp(self):
@@ -219,6 +219,7 @@ class EvidenceReconciliationTest(unittest.TestCase):
                                   self.allowlist if allowlist is None else allowlist,
                                   self.POLICY if policy is None else policy)
 
+class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
     def test_complete_protected_evidence_verifies(self):
         self.assertEqual(self.reconcile(), 'verified')
 
@@ -305,6 +306,46 @@ class EvidenceReconciliationTest(unittest.TestCase):
         self.assertFalse(action_allowed('qg-verified', marker, path, digest, 'b' * 64,
                                         evidence=self.evidence, allowlist={}, policy=self.POLICY))
         self.assertTrue(action_allowed('none', marker, path, digest, 'b' * 64))
+
+class CallerOptInTest(EvidenceFixture, unittest.TestCase):
+    """Persisted RequiredModelAssurance at build/Warden caller boundaries."""
+
+    def proof(self, **marker_extra):
+        path = Path(self.tmp.name, 'caller-inv.json')
+        digest = write_inventory(path, self.data)
+        marker = {'Verdict': 'PASS', 'MarkerFinality': 'final-integration', 'RunID': 'run-1',
+                  'ArtifactHash': 'a' * 64, 'FinalArtifactHash': 'b' * 64, 'ModelAssurance': 'verified',
+                  'ModelAssuranceInventory': f'{path} sha256:{digest}', **marker_extra}
+        return marker, path, digest
+
+    def test_legacy_and_none_never_engage(self):
+        for requirement in (None, '', 'none'):
+            self.assertTrue(caller_allowed(requirement, {}, None, None, None))
+        marker = {'Verdict': 'FAIL'}
+        frozen = dict(marker)
+        self.assertTrue(caller_allowed('none', marker, None, None, None))
+        self.assertEqual(marker, frozen)  # the predicate never rewrites artifact verdict state
+
+    def test_unsupported_values_block_only_opted_in_action(self):
+        marker, path, digest = self.proof()
+        trusted = {'evidence': self.evidence, 'allowlist': self.allowlist, 'policy': self.POLICY}
+        self.assertFalse(caller_allowed('warden-verified', marker, path, digest, 'b' * 64, **trusted))
+        self.assertFalse(caller_allowed('verified', marker, path, digest, 'b' * 64, **trusted))
+
+    def test_qg_verified_requires_full_proof_tuple(self):
+        marker, path, digest = self.proof()
+        trusted = {'evidence': self.evidence, 'allowlist': self.allowlist, 'policy': self.POLICY}
+        self.assertTrue(caller_allowed('qg-verified', marker, path, digest, 'b' * 64,
+                                       expected_run_id='run-1', **trusted))
+        self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64,
+                                        expected_run_id='run-2', **trusted))
+        self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64))
+        milestone = self.proof(MarkerFinality='chunk-milestone')[0]
+        self.assertFalse(caller_allowed('qg-verified', milestone, path, digest, 'b' * 64, **trusted))
+        self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'c' * 64, **trusted))
+        self.assertFalse(caller_allowed('qg-verified', marker, path, 'e' * 64, 'b' * 64, **trusted))
+        os.unlink(path)
+        self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64, **trusted))
 
 if __name__ == '__main__':
     unittest.main()

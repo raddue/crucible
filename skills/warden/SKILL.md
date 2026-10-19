@@ -522,6 +522,20 @@ So:
   warden's run-id and therefore **never matches build's PipelineID filter**.
 - warden writes the **one** `gate-verdict-*.md` that carries **build's** PipelineID
   (and `Phase: code`), stamped with warden's **aggregate** verdict.
+- warden records the quality-gate leg's assurance **separately** from that
+  aggregate (#746): the QG-leg proof tuple (`RunID`, pre-gate `ArtifactHash`,
+  `FinalArtifactHash`, inventory path + SHA-256 digest) persists in the run
+  state/handoff that authorizes push, and status display names it `QG-leg model
+  assurance: <state>`. Warden's aggregate PASS keeps its ordinary label — warden
+  can never claim whole-run `verified` from QG evidence alone, and whole-Warden
+  opt-in (`warden-verified`) stays unavailable until a distinct durable
+  Warden-wide proof object and expected-leg roster cover every used temper,
+  delve, and warden-owned siege/inquisitor leg. A persisted
+  `RequiredModelAssurance: qg-verified` gates the push handoff through the
+  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`) against
+  the QG leg only, revalidated on push and recovery; `warden-verified` found in
+  persisted state blocks that opted-in action pending explicit user resolution
+  and is never treated as `none`.
 - build's Verdict Marker Verification **read** logic — glob → PipelineID-filter →
   PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** and now resolves
   **deterministically**: its filter surfaces exactly one marker (warden's

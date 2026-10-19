@@ -40,6 +40,7 @@ PipelineID: <build-YYYYMMDD-HHMMSS>
 Goal: <user request>
 Mode: <feature | refactor>
 QualityGateMode: <standard | full>
+RequiredModelAssurance: <none | qg-verified>
 
 ## Phase 1: Design
 Status: NOT_STARTED
@@ -56,10 +57,19 @@ Status: NOT_STARTED
 
 **Format constraints:**
 - One key-value pair per line: `Key: value`
-- Fixed key names: `Status`, `Gate`, `Artifact`, `Tasks`, `Reason`, `Acknowledged`, `PipelineID`
+- Fixed key names: `Status`, `Gate`, `Artifact`, `Tasks`, `Reason`, `Acknowledged`, `PipelineID`, `RequiredModelAssurance`, `QGModelAssurance`, `QGProofTuple`
 - Status values: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `COMPLETE`, `FAIL`, `SKIPPED`, `INFERRED`
 - Phase headers are `## Phase N: Name` — always 4 phases, always in order
 - No prose, no paragraphs, no nested structure
+
+**Model-assurance opt-in (#746).** The header field `RequiredModelAssurance` persists the caller's explicit opt-in, immutable for the run: `none` (an absent field is legacy `none`) or `qg-verified`. Build never writes `warden-verified`; if it is found in persisted state it blocks only the opted-in action pending explicit user resolution (no Warden-wide proof contract exists) and is never treated as `none`. When a phase's quality gate passes, record alongside `Status: PASS`, before the verdict marker is deleted:
+
+```
+QGModelAssurance: <verified | configured | unknown>
+QGProofTuple: RunID=<id>; ArtifactHash=<sha256>; FinalArtifactHash=<sha256>; Inventory=<path>; InventoryDigest=<sha256>
+```
+
+sourced from the marker's `ModelAssurance`, `RunID`, `ArtifactHash`, `FinalArtifactHash`, and `ModelAssuranceInventory` fields. `Status: PASS` remains artifact closure only and never satisfies this separate opt-in predicate.
 
 ### Ledger Initialization
 
@@ -67,7 +77,7 @@ Runs during build startup, after mode detection but before Phase 1 begins:
 
 1. Check for existing ledger at `<build-scratch>/build-gate-ledger.md`
 2. If found: run Run Isolation checks (see below)
-3. If not found (or user chose "start fresh"): write new ledger at `<build-scratch>/build-gate-ledger.md` including `Run`, `PipelineID`, `Goal`, `Mode`, and `QualityGateMode` header fields, then all four phases with `Status: NOT_STARTED`. `QualityGateMode` is `standard` unless the caller explicitly selected `full`; reject any other value before dispatch.
+3. If not found (or user chose "start fresh"): write new ledger at `<build-scratch>/build-gate-ledger.md` including `Run`, `PipelineID`, `Goal`, `Mode`, and `QualityGateMode` header fields, then all four phases with `Status: NOT_STARTED`. `QualityGateMode` is `standard` unless the caller explicitly selected `full`; reject any other value before dispatch. `RequiredModelAssurance` persists the caller's explicit opt-in (absent = legacy `none`); recovery reuses the persisted policy and never silently defaults a persisted `qg-verified` to `none`.
 4. The ledger MUST exist before Phase 1 transitions to `IN_PROGRESS`
 
 After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID and `QualityGateMode` into active in-memory state. This is a defensive consistency practice — ensures in-memory values always match persisted values. Every quality-gate retry, compaction recovery, and resume reuses that immutable `QualityGateMode`; never silently defaults an explicit `full` run to `standard`.
@@ -105,6 +115,8 @@ Before each phase transition, read `<build-scratch>/build-gate-ledger.md` and ch
 - **Phase 1 exception:** Phase 1 (Design) has no predecessor gate — it always starts.
 - **Phase 3 exception:** Phase 3 transitions to `COMPLETE` (not `PASS`) when all tasks are done and per-task code reviews pass. `COMPLETE` satisfies the gate requirement for Phase 4. No verdict marker is required for Phase 3.
 
+**Assurance opt-in predicate (#746).** Before each next-phase transition, push handoff, and recovery-driven action, when the ledger persists `RequiredModelAssurance: qg-verified`, call the shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`) with the persisted QG-leg proof tuple, the retained inventory file, and the current accepted artifact bytes; for code artifacts, revalidate the exact gated path set against the committed tree at the commit boundary and again before push. Missing or mismatched run, artifact, inventory path, digest, attestation evidence, or a non-final marker blocks only the opted-in action — `Status: PASS` and ordinary phase-gate semantics are unchanged — and asks for fresh gating or user resolution. `RequiredModelAssurance: none` or absent requires nothing.
+
 ### Verdict Marker Verification
 
 After quality-gate returns with a verdict, verify the verdict marker before writing to the ledger:
@@ -112,8 +124,8 @@ After quality-gate returns with a verdict, verify the verdict marker before writ
 1. Glob for verdict markers: `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md` (project-wide directory; filter by active PipelineID, never delete other markers).
 2. Filter by `PipelineID` match — only markers with the current build's PipelineID
 3. Sort by the `Timestamp` field value inside the marker file (parsed as ISO-8601), take the most recent
-4. Verify: marker exists, `Verdict` is `PASS`, `PipelineID` matches current build's PipelineID
-5. If verification passes: write `PASS` to the ledger with `Gate` timestamp and `Artifact` path
+4. Verify: marker exists, `Verdict` is `PASS`, `PipelineID` matches current build's PipelineID, and `MarkerFinality` is `final-integration` — a `chunk-milestone` marker never satisfies a phase gate, and the PASS marker is selected by this binding (finality, complete chunk roster, run/artifact), not by recency alone
+5. If verification passes: write `PASS` to the ledger with `Gate` timestamp and `Artifact` path, and record `QGModelAssurance`/`QGProofTuple` from the marker's fields before step 7 deletes it
 6. If verification fails:
    - **Normal flow** (marker missing/mismatched after a just-run gate): do NOT write PASS. Output warning and re-invoke warden on the same artifact (the full reviewer set — NOT bare `quality-gate`, else recovery downgrades to red-team-only and the I-W7 fail-open re-opens).
    - **INFERRED recovery** (PipelineID mismatch or missing marker on an INFERRED phase): prompt the user for the artifact path, then offer to run the gate or type SKIP GATE.
@@ -189,3 +201,4 @@ Phase 4: Completion
 - **Ledger exists, handoff manifest missing:** Use namespaced ledger to determine which phase to resume from. Prompt: "Gate ledger shows Phase N passed, but the phase handoff context was lost. Confirm resume from Phase N+1?" If PASS but no handoff, also prompt for Phase N inputs (design doc path, plan path, etc.) before proceeding.
 - **Handoff manifest exists, ledger missing:** Reconstruct ledger from manifests in `<build-scratch>`. Mark the current phase as `INFERRED` (not `PASS`). Mark predecessor phases as `PASS` (handoff existence proves the boundary was crossed). Generate a new PipelineID and write it to the reconstructed ledger header. After writing, re-read the ledger header to extract the PipelineID into active state. INFERRED phases trigger the gate-blocked check — the orchestrator must run a fresh quality gate (with matching PipelineID) or the user must type SKIP GATE.
 - **Both missing:** Fresh start in `<build-scratch>`. Prompt user.
+- **Model assurance on recovery (#746):** A persisted `RequiredModelAssurance` survives reconstruction and is reused as-is; a reconstructed ledger without it keeps legacy `none` behavior. If the requirement persists but the QG-leg tuple, inventory file, or referenced evidence is missing or unknown, block only the opted-in action and request fresh gating or user resolution — never advance from `Status: PASS` alone, and no silent PASS-to-verified upgrade.

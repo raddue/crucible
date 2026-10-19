@@ -33,7 +33,7 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 This body is the entry point and table of contents. Phase detail lives in flat reference files one level below; read each one at the moment its phase or protocol starts — do not skip a referenced file:
 
 - [references/runtime-protocols.md](references/runtime-protocols.md) — Mock Dispatch Mode (eval-gate), Cairn (Layer 3), Tripwire Manifest Sweep (Layer 2). Read at startup.
-- [references/gate-ledger.md](references/gate-ledger.md) — Gate Ledger Protocol: PipelineID, ledger format, run isolation, Verdict Marker Verification, skip escape hatch, state machine, ledger compaction recovery. Read before Phase 1.
+- [references/gate-ledger.md](references/gate-ledger.md) — Gate Ledger Protocol: PipelineID, ledger format, run isolation, Verdict Marker Verification, skip escape hatch, state machine, RequiredModelAssurance opt-in and the QG-leg assurance predicate, ledger compaction recovery. Read before Phase 1.
 - [references/pipeline-status.md](references/pipeline-status.md) — Pipeline Status file, health state machine, Compaction Recovery, Compression State Block, Phase Handoff Manifest.
 - [references/phase-1-design.md](references/phase-1-design.md) — Phase 1: Design (Step -1 resume detection and pipeline-active marker through Phase Handoff 1 → 2, including refactor-mode blast radius).
 - [references/phase-2-plan.md](references/phase-2-plan.md) — Phase 2: Plan.

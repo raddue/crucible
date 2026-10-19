@@ -193,6 +193,29 @@ def _protected(path: Path, *, key: bool = False) -> bool:
         return False
     return info.st_uid == os.getuid()
 
+def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest: str | None,
+                   current_final_hash: str | None, expected_run_id: str | None = None,
+                   evidence: dict | None = None, allowlist: dict | None = None,
+                   policy: dict | None = None) -> bool:
+    """Persisted opt-in predicate at phase/push/recovery boundaries.
+
+    A missing or `none` requirement keeps legacy behavior and never engages the
+    proof tuple; `Status: PASS` stays artifact closure and is never rewritten.
+    Unsupported values — including `warden-verified`, whose Warden-wide proof
+    contract does not exist — fail closed and block only the opted-in action.
+    """
+    if requirement in (None, '', 'none'):
+        return True
+    if requirement != 'qg-verified':
+        return False
+    if expected_run_id is not None and marker.get('RunID') != expected_run_id:
+        return False
+    try:
+        return action_allowed('qg-verified', marker, inventory_path, digest, current_final_hash,
+                              evidence=evidence, allowlist=allowlist, policy=policy)
+    except (KeyError, TypeError, ValueError, OSError):
+        return False
+
 def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None, policy: dict | None) -> str:
     """Reconcile host-owned evidence against the inventory; anything unproven is unknown.
 

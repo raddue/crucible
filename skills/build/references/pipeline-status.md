@@ -61,6 +61,7 @@ Append after the shared header:
 - Plan: PASSED (1 round)
 - Task tiers: 1x T1, 1x T2, 1x T3
 - Code: not yet reached
+- QG-leg model assurance: <verified | configured | unknown> (from persisted `QGModelAssurance` — the quality-gate leg only, never a build-wide or Warden-wide claim)
 
 ## Checkpoints
 - Last checkpoint: pre-wave-3 (12:45:30)
