@@ -224,15 +224,29 @@ def _behavior_fixtures() -> list[str]:
         with mock.patch.object(qma.os, "getuid", return_value=case.real_uid):
             if case.reconcile() != "unknown":
                 errors.append("fixture: reviewer-uid-owned evidence produced a verified state")
-        # Rejection: a privileged reviewer (uid 0 real or effective, or CAP_DAC_OVERRIDE) can rewrite
-        # adapter-owned files, so ownership cannot certify them.
+        # Rejection: a reviewer not provably unprivileged (uid 0, any capability, NoNewPrivs 0, unreadable
+        # status) can rewrite adapter-owned files, so ownership cannot certify them.
         for name in ("getuid", "geteuid"):
             with mock.patch.object(qma.os, name, return_value=0):
                 if case.reconcile() != "unknown":
                     errors.append(f"fixture: uid-0 reviewer ({name}) produced a verified state")
-        with mock.patch.object(qma, "_privileged_reviewer", return_value=True):
+        status = pathlib.Path(case.tmp.name, "status")
+        for label, text in (("non-DAC capability", fx.STATUS_OK.replace("CapEff:\t0000000000000000", "CapEff:\t0000000000000001")),
+                            ("NoNewPrivs 0", fx.STATUS_OK.replace("NoNewPrivs:\t1", "NoNewPrivs:\t0")),
+                            ("CapPrm", fx.STATUS_OK.replace("CapPrm:\t0000000000000000", "CapPrm:\t0000000000000004"))):
+            status.write_text(text)
             if case.reconcile() != "unknown":
-                errors.append("fixture: CAP_DAC_OVERRIDE reviewer produced a verified state")
+                errors.append(f"fixture: {label} reviewer produced a verified state")
+        status.write_text(fx.STATUS_OK)
+        # Rejection: turns that contradict the row's request (or mix models) are never verified.
+        wide = {**case.POLICY, "provider/b": {"effort": "xhigh", "route": "r2"}}
+        case.put_record("review", {"id": "review", "result_digest": "1" * 64,
+                                   "turns": [{"model": "provider/b", "effort": "xhigh", "route": "r2"}]})
+        if case.reconcile(evidence=case.signed(), policy=wide) != "unknown":
+            errors.append("fixture: turns contradicting the row request produced a verified state")
+        case.put_record("review", {"id": "review", "result_digest": "1" * 64, "turns": [case.TURN]})
+        if case.reconcile(evidence=case.signed()) != "verified":
+            errors.append("fixture: restored evidence did not reconcile to verified")
         # Property: every top-level canonical field and each record digest is under the signature.
         base = qma.canonical_evidence(case.data, case.journal, case.records)
         for key, val in (("run_id", "run-2"), ("artifact_hash", "f" * 64), ("final_artifact_hash", "f" * 64)):
@@ -313,7 +327,11 @@ _MUTANTS = {
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],",
         "    records = {k: {'path': v['path']} for k, v in records.items()}\n"
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],"),
-    "privileged reviewer check removed": (" or _privileged_reviewer():", ":"),
+    "unprivileged reviewer check removed": (" or not _unprivileged_reviewer():", ":"),
+    "turn equals request check removed": ("any(not isinstance(turn, dict) or any(turn.get(key) != request[key]",
+                                          "any(not isinstance(turn, dict) or any(False"),
+    "evidence file size cap removed": ("if len(raw) > MAX_INVENTORY_BYTES:\n        raise ValueError('evidence file",
+                                       "if False:\n        raise ValueError('evidence file"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
                                   "if False:"),
 }

@@ -311,6 +311,9 @@ class FakeAdapter:
         return hmac.compare_digest(self.sign(canonical), origin['hmac'])
 
 
+STATUS_OK = 'Name:\tx\nCapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t1\n'
+
+
 class EvidenceFixture:
     """Shared host-evidence bundle starting from a verified configuration; each rejection
     test flips exactly one field. The reviewer's uid is patched so files owned by the real
@@ -329,11 +332,11 @@ class EvidenceFixture:
         patcher = mock.patch.object(qma.os, 'getuid', return_value=self.real_uid + 1)
         patcher.start()
         self.addCleanup(patcher.stop)
-        # Run identically under any uid or capability set: the reviewer is an unprivileged uid with no CapEff.
+        # Run identically under any uid or capability set: the reviewer is an unprivileged uid, no caps, NoNewPrivs 1.
         mock.patch.object(qma.os, 'geteuid', return_value=self.real_uid + 1).start()
         self.addCleanup(mock.patch.stopall)
         caps = Path(self.tmp.name, 'status')
-        caps.write_text('Name:\tx\nCapEff:\t0000000000000000\n')
+        caps.write_text(STATUS_OK)
         mock.patch.object(qma, '_PROC_STATUS', str(caps)).start()
         self.data = {
             'version': 1, 'run_id': 'run-1', 'artifact_hash': 'a' * 64,
@@ -341,8 +344,8 @@ class EvidenceFixture:
             'roster': {'kind': 'chunked', 'chunks': ['c1', 'c2'], 'terminal': {'c1': 'PASS', 'c2': 'PASS'},
                        'consensus': []},
             'invocations': [
-                {'id': 'review', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'},
-                {'id': 'synthesis', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'},
+                {'id': 'review', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review', 'request': dict(self.TURN)},
+                {'id': 'synthesis', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review', 'request': dict(self.TURN)},
                 {'id': 'failed-member', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'unused', 'assurance': 'unknown', 'kind': 'review'},
             ],
         }
@@ -404,17 +407,27 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         for name in ('getuid', 'geteuid'):  # uid 0, real or effective, can rewrite any adapter-owned file
             with mock.patch.object(qma.os, name, return_value=0):
                 self.assertEqual(self.reconcile(), 'unknown', name)
-        with mock.patch.object(qma, '_privileged_reviewer', return_value=True):
-            self.assertEqual(self.reconcile(), 'unknown')  # e.g. CAP_DAC_OVERRIDE
+        with mock.patch.object(qma, '_unprivileged_reviewer', return_value=False):
+            self.assertEqual(self.reconcile(), 'unknown')
         status = Path(self.tmp.name, 'cap-status')
         with mock.patch.object(qma.os, 'getuid', return_value=1), mock.patch.object(qma.os, 'geteuid', return_value=1), \
                 mock.patch.object(qma, '_PROC_STATUS', str(status)):
-            status.write_text('Name:\tx\nCapEff:\t0000000000000002\n')
-            self.assertTrue(qma._privileged_reviewer())
-            status.write_text('Name:\tx\nCapEff:\t0000000000000000\n')
-            self.assertFalse(qma._privileged_reviewer())
+            status.write_text(STATUS_OK)
+            self.assertTrue(qma._unprivileged_reviewer())
+            for label, text in (
+                    ('CapEff', STATUS_OK.replace('CapEff:\t0000000000000000', 'CapEff:\t0000000000000002')),
+                    ('CapEff non-DAC bit', STATUS_OK.replace('CapEff:\t0000000000000000', 'CapEff:\t0000000000200000')),
+                    ('CapPrm', STATUS_OK.replace('CapPrm:\t0000000000000000', 'CapPrm:\t0000000000000001')),
+                    ('CapAmb', STATUS_OK.replace('CapAmb:\t0000000000000000', 'CapAmb:\t0000000000000001')),
+                    ('NoNewPrivs 0', STATUS_OK.replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0')),
+                    ('NoNewPrivs absent', STATUS_OK.replace('NoNewPrivs:\t1\n', '')),
+                    ('CapAmb absent', STATUS_OK.replace('CapAmb:\t0000000000000000\n', ''))):
+                status.write_text(text)
+                self.assertFalse(qma._unprivileged_reviewer(), label)
+                self.assertEqual(self.reconcile(), 'unknown', label)
             status.unlink()
-            self.assertFalse(qma._privileged_reviewer())  # unreadable falls back to the uid test
+            self.assertFalse(qma._unprivileged_reviewer())  # unreadable status fails closed
+            self.assertEqual(self.reconcile(), 'unknown')
 
     def test_record_rewritten_after_signing(self):
         evidence = self.signed()
@@ -522,11 +535,63 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
                                 for i in range(qma.MAX_INVOCATIONS)]
         self.assertEqual(self.reconcile(evidence=self.signed(journal=flood)), 'unknown')
 
-    def test_multi_turn_mismatch_and_mixed_effort(self):
+    def test_multi_turn_unapproved_values_unknown(self):
         for turns in ([self.TURN, {**self.TURN, 'model': 'provider/other'}], [{**self.TURN, 'effort': 'low'}],
                       [{**self.TURN, 'route': 'other'}], []):
             self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': turns})
             self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
+
+    def _two_model_case(self, turns, request=None):
+        policy = {**self.POLICY, 'provider/b': {'effort': 'xhigh', 'route': 'r2'}}
+        other = {'model': 'provider/b', 'effort': 'xhigh', 'route': 'r2'}
+        self.data['invocations'][0]['request'] = request or dict(self.TURN)
+        self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': [t(other, self.TURN) for t in turns]})
+        return self.reconcile(evidence=self.signed(), policy=policy)
+
+    def test_mixed_approved_models_unknown(self):
+        # Both IDs are approved by policy, but one invocation must not switch model/effort/route between turns.
+        self.assertEqual(self._two_model_case([lambda o, b: b, lambda o, b: b]), 'verified')
+        self.assertEqual(self._two_model_case([lambda o, b: b, lambda o, b: o]), 'unknown')
+
+    def test_turns_contradict_request_unknown(self):
+        # A silent substitution to another approved ID: turns are all approved but differ from the request.
+        self.assertEqual(self._two_model_case([lambda o, b: o, lambda o, b: o]), 'unknown')
+        self.assertEqual(self._two_model_case([lambda o, b: b], request={'model': 'provider/b', 'effort': 'xhigh', 'route': 'r2'}), 'unknown')
+        row = self.data['invocations'][0]
+        for bad in (None, 'provider/model', {'model': 'provider/model', 'effort': 'high'}, {**self.TURN, 'route': ''}):
+            row['request'] = bad
+            self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': [self.TURN]})
+            self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown', bad)
+        row['request'] = dict(self.TURN)
+
+    def test_effortless_turn_or_policy_unknown(self):
+        bare = {'model': 'provider/model'}
+        self.data['invocations'][0]['request'] = dict(bare)
+        self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': [bare]})
+        self.assertEqual(self.reconcile(evidence=self.signed(), policy={'provider/model': {}}), 'unknown')
+        self.assertEqual(configured_assurance(bare, {'provider/model': {}}), 'unknown')
+        self.assertEqual(configured_assurance({**self.TURN, 'effort': ''}, {'provider/model': {**self.TURN, 'effort': ''}}),
+                         'unknown')
+        self.data['invocations'][0]['request'] = dict(self.TURN)
+        self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': [{'model': 'provider/model'}]})
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')  # turn observed no effort/route
+
+    def test_adapter_error_and_bool_version_unknown(self):
+        class Boom(FakeAdapter):
+            def authenticate(self, origin, canonical):
+                raise RuntimeError('adapter down')
+        boom = Boom({self.real_uid})
+        self.assertEqual(self.reconcile(adapter=boom), 'unknown')
+        self.assertEqual(marker_assurance(self.data, self.POLICY, evidence=self.evidence, allowlist=self.allowlist,
+                                          host_adapter=boom), 'unknown')
+        self.data['version'] = True
+        self.assertEqual(self.reconcile(), 'unknown')
+
+    def test_evidence_file_size_cap(self):
+        path = self.dir / 'journal.jsonl'
+        path.write_text(path.read_text() + ' ' * qma.MAX_INVENTORY_BYTES)
+        with self.assertRaises(ValueError):
+            qma._read_protected(path, frozenset({self.real_uid}), {})
 
     def test_injected_duplicate_or_replayed_journal(self):
         injected = self.journal + [{'id': 'ghost', 'run_id': 'run-1', 'disposition': 'consumed', 'result_digest': '4' * 64}]
@@ -616,7 +681,8 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
 
     def test_look_harder_demotion_and_consensus_membership(self):
         self.data['invocations'].append({'id': 'look-harder', 'parent': 'run-1', 'scope': 'c1',
-                                         'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'})
+                                         'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review',
+                                         'request': dict(self.TURN)})
         self.journal.append({'id': 'look-harder', 'run_id': 'run-1', 'disposition': 'consumed', 'result_digest': '5' * 64})
         self.put_record('look-harder', {'id': 'look-harder', 'result_digest': '5' * 64, 'turns': [self.TURN]})
         self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')

@@ -115,7 +115,7 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
         chunks, status, consensus = roster['chunks'], roster['terminal'], roster['consensus']
         gated = data.get('gated')
         valid = (
-            data['version'] == 1 and isinstance(data['run_id'], str) and bool(data['run_id'])
+            type(data['version']) is int and data['version'] == 1 and isinstance(data['run_id'], str) and bool(data['run_id'])
             and _hex64(data['artifact_hash'])
             and roster['kind'] in ('single-artifact', 'chunked')
             and isinstance(chunks, list) and bool(chunks) and len(chunks) == len(set(chunks))
@@ -212,7 +212,7 @@ def read_inventory(path: Path, digest: str | None, run_id: str, artifact: str, f
                 terminal and data['final_artifact_hash'] != final_artifact):
             raise ValueError('QG assurance inventory binding mismatch')
         return data
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, RecursionError, json.JSONDecodeError) as exc:
         raise ValueError('QG assurance inventory unavailable or malformed') from exc
 
 
@@ -283,34 +283,42 @@ def configured_assurance(request: dict | None, policy: dict | None) -> str:
         return 'unknown'
     model = request.get('model')
     approved = policy.get(model) if isinstance(model, str) else None
+    # A missing key never matches a missing key: effort and route must be observed non-empty strings on both sides.
     return ('configured' if isinstance(approved, dict)
-            and all(request.get(key) == approved.get(key) for key in ('effort', 'route')) else 'unknown')
+            and all(isinstance(request.get(key), str) and request[key] and request[key] == approved.get(key)
+                    for key in ('effort', 'route')) else 'unknown')
 
 
 _PROC_STATUS = '/proc/self/status'
 
 
-def _privileged_reviewer() -> bool:
-    """True when the reviewer process can write any file regardless of ownership: real or effective
-    uid 0, or `CAP_DAC_OVERRIDE` in `CapEff` (Linux `/proc/self/status`; unreadable falls back to the uid test)."""
+def _unprivileged_reviewer() -> bool:
+    """Positive invariant: True only when this process provably cannot write a file it does not own.
+
+    Real and effective uid non-zero, `/proc/self/status` readable (Linux), `CapEff`, `CapPrm` and
+    `CapAmb` all zero, and `NoNewPrivs: 1` (no setuid/sudo escalation). Anything else, including an
+    unreadable status file or a non-Linux host, is False so `reconcile_evidence` fails closed.
+    The predicate measures the verifying process only: a host adapter must run reviewer children
+    under the same or stricter constraints and attest that as part of its allowlisted contract
+    (a contract requirement, not something this module checks).
+    """
     if os.getuid() == 0 or os.geteuid() == 0:
-        return True
+        return False
     try:
         with open(_PROC_STATUS, encoding='ascii') as status:
-            for line in status:
-                if line.startswith('CapEff:'):
-                    return bool(int(line.split()[1], 16) & (1 << 1))  # CAP_DAC_OVERRIDE
-    except (OSError, ValueError, IndexError):
-        pass
-    return False
+            fields = dict(line.split(':', 1) for line in status if ':' in line)
+        caps = [int(fields[key].split()[0], 16) for key in ('CapEff', 'CapPrm', 'CapAmb')]
+        return not any(caps) and fields['NoNewPrivs'].split()[0] == '1'
+    except (OSError, ValueError, IndexError, KeyError):
+        return False
 
 
 def _read_protected(path, owners, parent_checked: dict) -> bytes:
     """Open once without following symlinks; the file must be a non-group/other-writable
     regular file owned by one of the adapter's `owners` (uids other than the reviewer's).
-    Ownership only keeps files out of an unprivileged reviewer's reach: a uid-0 or
-    `CAP_DAC_OVERRIDE` reviewer can write them anyway, so `reconcile_evidence` returns
-    `unknown` for such a reviewer (`_privileged_reviewer`)."""
+    Ownership only keeps files out of an unprivileged reviewer's reach: any privileged
+    reviewer can write them anyway, so `reconcile_evidence` returns `unknown` unless
+    `_unprivileged_reviewer()` holds."""
     path = Path(path)
     parent = path.parent
     if parent not in parent_checked:
@@ -365,8 +373,9 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
     `.authenticate(origin, canonical) -> bool`) that is on the human-approved allowlist
     and authenticates origin out of the reviewer's reach; evidence files owned by one of
     the adapter's uids and not child-writable; per-row attestation digests pinned by the
-    inventory (hence by the marker's inventory digest); and per-turn exact-ID
-    model/effort/route proof for every consumed invocation, and no consensus row (a roster
+    inventory (hence by the marker's inventory digest); and one exact-ID
+    model/effort/route request per consumed row that the policy approves and that every observed
+    turn equals (so mixed, rewritten or effort-unobserved turns are never verified), and no consensus row (a roster
     with consensus membership, or a consumed row or journal line whose `kind` starts `consensus`, is
     capped at `unknown` until the consensus API exposes stable member identity). With no adapter (the portable
     default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
@@ -384,8 +393,8 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
         if approved['version'] != host_adapter.version:
             return 'unknown'
         owners = frozenset(host_adapter.owner_uids)
-        if not owners or os.getuid() in owners or _privileged_reviewer():
-            return 'unknown'  # evidence the reviewer's own uid owns, or a privileged reviewer can write, is reviewer-writable
+        if not owners or os.getuid() in owners or not _unprivileged_reviewer():
+            return 'unknown'  # evidence the reviewer's own uid owns, or a not-provably-unprivileged reviewer can write, is reviewer-writable
         records = evidence['records']
         checked: dict = {}
         if evidence['run_id'] != data['run_id']:
@@ -395,7 +404,11 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
         if len(lines) > MAX_INVOCATIONS:
             return 'unknown'
         canonical = canonical_evidence(data, lines, records)
-        if host_adapter.authenticate(evidence['origin'], canonical) is not True:
+        try:
+            authenticated = host_adapter.authenticate(evidence['origin'], canonical) is True
+        except Exception:  # noqa: BLE001 - any adapter error downgrades, never escapes
+            return 'unknown'
+        if not authenticated:
             return 'unknown'
         consumed, seen, results = set(), set(), {}
         for line in lines:
@@ -424,12 +437,17 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
                     or attestation.get('result_digest') != results[row['id']]:
                 return 'unknown'  # evidence must be the exact bytes the inventory pins
             record = json.loads(raw)
+            request = row.get('request')
+            if not isinstance(request, dict) or not all(isinstance(request.get(key), str) and request[key]
+                                                         for key in ('model', 'effort', 'route')):
+                return 'unknown'  # the dispatch's own request is the reference every turn must equal
             if (record['id'] != row['id'] or record['result_digest'] != results[row['id']]
-                    or not record['turns']
-                    or any(configured_assurance(turn, policy) != 'configured' for turn in record['turns'])):
+                    or not record['turns'] or configured_assurance(request, policy) != 'configured'
+                    or any(not isinstance(turn, dict) or any(turn.get(key) != request[key] for key in ('model', 'effort', 'route'))
+                           for turn in record['turns'])):
                 return 'unknown'
         return 'verified'
-    except (KeyError, TypeError, ValueError, OSError, AttributeError, json.JSONDecodeError):
+    except (KeyError, TypeError, ValueError, OSError, AttributeError, RecursionError, json.JSONDecodeError):
         return 'unknown'
 
 
