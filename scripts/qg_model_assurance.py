@@ -183,6 +183,11 @@ def write_inventory(path: Path, data: dict, *, terminal: bool = False) -> str:
         os.replace(name, path)
         with path.open('rb') as saved:
             os.fsync(saved.fileno())
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
         digest = hashlib.sha256(raw).hexdigest()
         read_inventory(path, digest, data['run_id'], data['artifact_hash'],
                        data['final_artifact_hash'] if terminal else None)
@@ -247,10 +252,17 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
                    current_final_hash: str, evidence: dict | None = None,
                    allowlist: dict | None = None, policy: dict | None = None,
                    host_adapter=None) -> bool:
-    """Caller predicate: opt-in needs reconciled host evidence; portable default blocks."""
+    """Caller predicate: opt-in needs reconciled host evidence; portable default blocks.
+
+    `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
+    missing one (for example after a `gated_hash` failure) returns False."""
     if requirement == 'none':
         return marker.get('Verdict') == 'PASS'
     if requirement != 'qg-verified' or marker.get('Verdict') != 'PASS':
+        return False
+    # Every binding input must be a real digest: a None/absent value never matches a None/absent value,
+    # and a None final hash would otherwise silently turn the terminal read into a provisional one.
+    if not (_hex64(current_final_hash) and _hex64(digest) and _hex64(marker.get('FinalArtifactHash'))):
         return False
     if marker.get('MarkerFinality') != 'final-integration' or marker.get('FinalArtifactHash') != current_final_hash:
         return False
@@ -348,6 +360,8 @@ def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest
     proof tuple; `Status: PASS` stays artifact closure and is never rewritten.
     Unsupported values — including `warden-verified`, whose Warden-wide proof
     contract does not exist — fail closed and block only the opted-in action.
+    For `qg-verified`, `digest` and `current_final_hash` of `None` block the action: a
+    `gated_hash` failure is never passed on as `None` (it blocks only the opted-in action).
     `evidence`, `allowlist`, `policy` and `host_adapter` come from the host adapter's
     own protected store, never from the ledger or the reviewer.
     """
@@ -393,7 +407,7 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
         if approved['version'] != host_adapter.version:
             return 'unknown'
         owners = frozenset(host_adapter.owner_uids)
-        if not owners or os.getuid() in owners or not _unprivileged_reviewer():
+        if not owners or {os.getuid(), os.geteuid()} & owners or not _unprivileged_reviewer():
             return 'unknown'  # evidence the reviewer's own uid owns, or a not-provably-unprivileged reviewer can write, is reviewer-writable
         records = evidence['records']
         checked: dict = {}

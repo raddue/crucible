@@ -530,16 +530,48 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         relocated = {**self.evidence, 'journal_path': str(link / 'journal.jsonl')}
         self.assertEqual(self.reconcile(evidence=relocated), 'unknown')
 
+    def test_geteuid_owner_unknown(self):
+        with mock.patch.object(qma.os, 'geteuid', return_value=self.real_uid):
+            self.assertEqual(self.reconcile(), 'unknown')
+
+    def test_all_unused_inventory_never_configured(self):
+        for row in self.data['invocations']:
+            row['disposition'] = 'unused'
+        self.assertEqual(assurance_state(self.data, self.POLICY), 'unknown')
+
+    def test_inventory_row_cap(self):
+        rows = [{'id': f'r{i}', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'unused', 'assurance': 'unknown', 'kind': 'review'}
+                for i in range(qma.MAX_INVOCATIONS + 1)]
+        with self.assertRaises(ValueError):
+            qma._validate_inventory({**self.data, 'invocations': rows}, terminal=True)
+        qma._validate_inventory({**self.data, 'invocations': rows[:-1]}, terminal=True)
+
     def test_journal_over_cap_unknown(self):
         flood = self.journal + [{'id': f'x{i}', 'run_id': 'run-1', 'disposition': 'unused', 'result_digest': '3' * 64}
                                 for i in range(qma.MAX_INVOCATIONS)]
         self.assertEqual(self.reconcile(evidence=self.signed(journal=flood)), 'unknown')
 
-    def test_multi_turn_unapproved_values_unknown(self):
+    def test_turns_differing_from_approved_request_unknown(self):
         for turns in ([self.TURN, {**self.TURN, 'model': 'provider/other'}], [{**self.TURN, 'effort': 'low'}],
                       [{**self.TURN, 'route': 'other'}], []):
             self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': turns})
             self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
+
+    def test_request_policy_approval_required(self):
+        # Request and every turn agree, so only the policy approval of the request can reject them.
+        def case(request, policy=None):
+            for row in self.data['invocations'][:2]:
+                row['request'] = dict(request)
+            for name, digest in (('review', '1' * 64), ('synthesis', '2' * 64)):
+                self.put_record(name, {'id': name, 'result_digest': digest, 'turns': [request]})
+            return self.reconcile(evidence=self.signed(), policy=policy)
+        self.assertEqual(case(self.TURN), 'verified')  # baseline: approved ID at approved effort
+        self.assertEqual(case({**self.TURN, 'model': 'provider/cheap-haiku'}), 'unknown')
+        self.assertEqual(case({**self.TURN, 'effort': 'low'}), 'unknown')
+        self.assertEqual(case(self.TURN, policy={}), 'unknown')
+        for row in self.data['invocations'][:2]:
+            row['request'] = dict(self.TURN)
+        self.assertEqual(reconcile_evidence(self.data, self.evidence, self.allowlist, None, host_adapter=self.adapter), 'unknown')
 
     def _two_model_case(self, turns, request=None):
         policy = {**self.POLICY, 'provider/b': {'effort': 'xhigh', 'route': 'r2'}}
@@ -731,6 +763,18 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
     def test_unsupported_values_block_only_opted_in_action(self):
         self.assertFalse(self.allowed(requirement='warden-verified'))
         self.assertFalse(self.allowed(requirement='verified'))
+
+    def test_none_bindings_block(self):
+        # None never matches None: a gated_hash failure (None) or an absent marker field blocks, never falls into a provisional read.
+        bare = {k: v for k, v in self.marker.items() if k != 'FinalArtifactHash'}
+        self.assertFalse(self.allowed(marker=bare, final=None))
+        self.assertFalse(self.allowed(final=None))
+        self.assertFalse(caller_allowed('qg-verified', self.marker, self.path, None, 'b' * 64, **self.trusted))
+        no_digest = {**bare, 'ModelAssuranceInventory': f'{self.path} sha256:None'}
+        self.assertFalse(caller_allowed('qg-verified', no_digest, self.path, None, None, **self.trusted))
+        self.assertFalse(caller_allowed('qg-verified', {**self.marker, 'ModelAssuranceInventory': f'{self.path} sha256:None'},
+                                        self.path, None, 'b' * 64, **self.trusted))
+        self.assertTrue(caller_allowed('none', {'Verdict': 'PASS'}, None, None, None))  # ordinary PASS is untouched
 
     def test_each_single_flip_blocks(self):
         flips = {

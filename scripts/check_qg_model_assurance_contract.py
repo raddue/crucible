@@ -78,6 +78,9 @@ GATE_LEDGER_REQUIRED = {
     "changed paths within gated set": "is in the inventory's `gated.paths`",
     "reconstruction keys on manifest opt-in line": "`**RequiredModelAssurance:** qg-verified` header line",
     "inventory or tuple is not an opt-in signal": "is not an opt-in signal",
+    "gated_hash failure never passed as None": "is never passed to the predicate as `None`",
+    "warden-verified blocks only the opted-in action": "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution",
+    "warden-verified never treated as none": "and is never treated as `none`",
 }
 
 LEDGER_REQUIRED = {
@@ -150,6 +153,9 @@ _GOOD_GATE_LEDGER = "\n".join([
     "is in the inventory's `gated.paths`",
     "takes the requirement from the manifests' `**RequiredModelAssurance:** qg-verified` header line",
     "A retained inventory or a `QGProofTuple` is not an opt-in signal",
+    "is never passed to the predicate as `None`",
+    "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution",
+    "and is never treated as `none`",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -201,6 +207,29 @@ def _behavior_fixtures() -> list[str]:
         for label, over in flips.items():
             if allowed(**over):
                 errors.append(f"fixture: {label}")
+        # Rejection: a None binding (gated_hash failure, absent marker FinalArtifactHash, no digest) never authorizes.
+        bare = {k: v for k, v in marker.items() if k != "FinalArtifactHash"}
+        if qma.caller_allowed("qg-verified", bare, path, digest, None, **trusted):
+            errors.append("fixture: absent marker FinalArtifactHash with a None current hash was accepted")
+        if qma.caller_allowed("qg-verified", marker, path, None, "b" * 64, **trusted):
+            errors.append("fixture: a None digest was accepted")
+        if not qma.caller_allowed("none", {"Verdict": "PASS"}, None, None, None):
+            errors.append("fixture: ordinary PASS was blocked by a None binding")
+        # Rejection: an unapproved request (equal to every turn) or an empty policy is never verified.
+        cheap = {"model": "provider/cheap-haiku", "effort": "low", "route": "fixed"}
+        saved = [dict(r.get("request") or {}) for r in case.data["invocations"][:2]]
+        for row in case.data["invocations"][:2]:
+            row["request"] = dict(cheap)
+        for name, res in (("review", "1" * 64), ("synthesis", "2" * 64)):
+            case.put_record(name, {"id": name, "result_digest": res, "turns": [cheap]})
+        if case.reconcile(evidence=case.signed()) != "unknown" or case.reconcile(evidence=case.signed(), policy={}) != "unknown":
+            errors.append("fixture: an unapproved request produced a verified state")
+        for row, old_req in zip(case.data["invocations"][:2], saved):
+            row["request"] = old_req
+        for name, res in (("review", "1" * 64), ("synthesis", "2" * 64)):
+            case.put_record(name, {"id": name, "result_digest": res, "turns": [case.TURN]})
+        if case.reconcile(evidence=case.signed()) != "verified":
+            errors.append("fixture: restored approved request did not reconcile to verified")
         # Rejection: a verified inventory whose roster records a non-PASS chunk cannot authorize a PASS marker.
         case.data["roster"]["terminal"]["c2"] = "ESCALATED"
         esc_path = pathlib.Path(case.tmp.name, "esc.json")
@@ -332,6 +361,12 @@ _MUTANTS = {
                                           "any(not isinstance(turn, dict) or any(False"),
     "evidence file size cap removed": ("if len(raw) > MAX_INVENTORY_BYTES:\n        raise ValueError('evidence file",
                                        "if False:\n        raise ValueError('evidence file"),
+    "request policy approval removed": (
+        "or not record['turns'] or configured_assurance(request, policy) != 'configured'",
+        "or not record['turns']"),
+    "None final hash binding removed": (
+        "if not (_hex64(current_final_hash) and _hex64(digest) and _hex64(marker.get('FinalArtifactHash'))):",
+        "if False:"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
                                   "if False:"),
 }
@@ -382,6 +417,9 @@ def selftest() -> int:
         ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
         ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
+        ("gated_hash failure never passed as None", "gate", "is never passed to the predicate as `None`"),
+        ("warden-verified blocks only the opted-in action", "gate", "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution"),
+        ("warden-verified never treated as none", "gate", "and is never treated as `none`"),
         ("gated_hash failure downgrades", "QG", "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`"),
         ("marker ModelAssurance is marker_assurance output", "QG", "`ModelAssurance` is the output of `marker_assurance`"),
         ("row labels never feed verified", "QG", "a row's `assurance` label is never an input to `verified`"),
