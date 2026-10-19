@@ -56,6 +56,21 @@ class ArtifactHashTest(unittest.TestCase):
     def test_document_raw_bytes(self):
         self.assertEqual(artifact_hash(self.root, ['a.txt'], document=True), hashlib.sha256(b'hello\n').hexdigest())
 
+    def test_document_outside_git_and_non_git_set_fail_totally(self):
+        with tempfile.TemporaryDirectory() as plain:
+            Path(plain, 'doc.md').write_bytes(b'doc')
+            self.assertEqual(artifact_hash(plain, ['doc.md'], document=True), hashlib.sha256(b'doc').hexdigest())
+            with self.assertRaises(ValueError):  # git failure is a ValueError, not CalledProcessError
+                artifact_hash(plain, ['doc.md'])
+            with self.assertRaises(ValueError):
+                artifact_hash(plain, ['nope.md'], document=True)
+
+    def test_tombstone_under_deleted_directory(self):
+        (self.root / 'keep.txt').write_text('k')
+        self.assertEqual(len(artifact_hash(self.root, ['keep.txt', 'old/a.md'], deleted={'old/a.md'})), 64)
+        with self.assertRaises(ValueError):  # a non-tombstone under a missing directory still fails closed
+            artifact_hash(self.root, ['keep.txt', 'old/a.md'])
+
     def test_reject_invalid_set(self):
         for paths, deleted in [(['a.txt', 'a.txt'], set()), (['/a.txt'], set()), (['./a.txt'], set()),
                                (['../a.txt'], set()), (['a\x00.txt'], set()), (['missing'], set()),
@@ -410,7 +425,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         self.digest = write_inventory(self.path, self.data, terminal=True)
         self.marker = {'Verdict': 'PASS', 'MarkerFinality': 'final-integration', 'RunID': 'run-1',
                        'ArtifactHash': 'a' * 64, 'FinalArtifactHash': 'b' * 64, 'ModelAssurance': 'verified',
-                       'ModelAssuranceInventory': f'{self.path} sha256:{self.digest}'}
+                       'ModelAssuranceInventory': f'{self.path} sha256:{self.digest}',
+                       'Gated-Files': json.dumps(['a.txt'])}
         self.trusted = {'evidence': self.evidence, 'allowlist': self.allowlist, 'policy': self.POLICY,
                         'host_adapter': self.adapter}
 
@@ -451,6 +467,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
             'marker says unknown': dict(marker={**self.marker, 'ModelAssurance': 'unknown'}),
             'marker not PASS': dict(marker={**self.marker, 'Verdict': 'ESCALATED'}),
             'other run in marker': dict(marker={**self.marker, 'RunID': 'run-2'}),
+            'gated set omits a changed file': dict(marker={**self.marker, 'Gated-Files': json.dumps(['a.txt', 'extra.txt'])}),
+            'marker without Gated-Files': dict(marker={k: v for k, v in self.marker.items() if k != 'Gated-Files'}),
             'other artifact hash in marker': dict(marker={**self.marker, 'ArtifactHash': 'c' * 64}),
         }
         for label, flip in flips.items():

@@ -524,8 +524,11 @@ So:
   (and `Phase: code`), stamped with warden's **aggregate** verdict.
 - warden records the quality-gate leg's assurance **separately** from that
   aggregate (#746): the QG-leg proof tuple (`RunID`, pre-gate `ArtifactHash`,
-  `FinalArtifactHash`, inventory path + SHA-256 digest) persists in the run
-  state/handoff that authorizes push, and status display names it `QG-leg model
+  `FinalArtifactHash`, `MarkerFinality`, inventory path + SHA-256 digest, `Gated-Files`) is carried
+  in two advisory fields of warden's aggregate marker, `QGLegModelAssurance:` and
+  `QGLegProofTuple:` (same tuple format as build's `QGProofTuple`; build's marker
+  verification never reads them, they are the push handoff's persistence and build
+  Phase 4's tuple source), and status display names it `QG-leg model
   assurance: <state>`. Warden's aggregate PASS keeps its ordinary label — warden
   can never claim whole-run `verified` from QG evidence alone, and whole-Warden
   opt-in (`warden-verified`) stays unavailable until a distinct durable
@@ -668,7 +671,9 @@ The boundary is asserted by selection-eval prompts in the private `raddue/crucib
   - `scope`: PR id | `base..head` range | path | auto-detect (delve's resolver).
   - Returns: sectioned-per-reviewer report + `PASS`/`BLOCKED` verdict + RCPT v1 receipt.
 - `Use crucible:warden` (sub-skill) with dispatch context: `PipelineID: <id>`,
-  `Phase: code`, `reviewer-set: <full|standalone>`, `dispatch-dir: <path>`.
+  `Phase: code`, `reviewer-set: <full|standalone>`, `dispatch-dir: <path>`, and optionally
+  `RequiredModelAssurance: <none|qg-verified>` (absent is `none`; a standalone `/warden` has no
+  opt-in unless the caller passes it).
 - warden invokes its **internal quality-gate red-team leg** with `mode: full`, `Phase: code` and
   warden's own run-id as `PipelineID` (non-interactive, not build-tagged), and **lets the
   QG leg re-dispatch its internal siege** (warden does **not** suppress it) — warden's

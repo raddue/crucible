@@ -53,6 +53,7 @@ QG_REQUIRED = {
     "attestation pinned by inventory digest": "the inventory digest therefore pins the evidence",
     "provisional recovery read": "resume with the provisional read",
     "sole FinalArtifactHash computation": "computed only by `gated_hash`",
+    "gated_hash failure downgrades": "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`",
 }
 
 GATE_LEDGER_REQUIRED = {
@@ -62,6 +63,11 @@ GATE_LEDGER_REQUIRED = {
     "roster check belongs to opt-in": "belong to this opt-in predicate only",
     "evidence comes from host adapter": "host adapter supplies from its own protected store",
     "no adapter means False": "with no host adapter the predicate returns False",
+    "warden handoff tuple source": "`QGLegProofTuple`",
+    "tuple rebuilds the marker": "rebuild the marker dict for `caller_allowed` from the ledger",
+    "unknown never withholds PASS": "never a reason to withhold or fail PASS",
+    "changed paths within gated set": "is in the inventory's `gated.paths`",
+    "reconstruction with evidence blocks": "block only the opted-in action pending user resolution rather than defaulting to `none`",
 }
 
 LEDGER_REQUIRED = {
@@ -109,6 +115,7 @@ _GOOD_QG = "\n".join([
     "the inventory digest therefore pins the evidence",
     "resume with the provisional read",
     "computed only by `gated_hash`",
+    "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`",
 ])
 
 _GOOD_GATE_LEDGER = "\n".join([
@@ -118,6 +125,11 @@ _GOOD_GATE_LEDGER = "\n".join([
     "belong to this opt-in predicate only",
     "that the host adapter supplies from its own protected store",
     "with no host adapter the predicate returns False",
+    "`QGLegProofTuple`",
+    "rebuild the marker dict for `caller_allowed` from the ledger",
+    "never a reason to withhold or fail PASS",
+    "is in the inventory's `gated.paths`",
+    "block only the opted-in action pending user resolution rather than defaulting to `none`",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -145,7 +157,7 @@ def _behavior_fixtures() -> list[str]:
         digest = qma.write_inventory(path, case.data, terminal=True)
         marker = {"Verdict": "PASS", "MarkerFinality": "final-integration", "RunID": "run-1",
                   "ArtifactHash": "a" * 64, "FinalArtifactHash": "b" * 64, "ModelAssurance": "verified",
-                  "ModelAssuranceInventory": f"{path} sha256:{digest}"}
+                  "ModelAssuranceInventory": f"{path} sha256:{digest}", "Gated-Files": json.dumps(["a.txt"])}
         trusted = {"evidence": case.evidence, "allowlist": case.allowlist, "policy": case.POLICY,
                    "host_adapter": case.adapter}
 
@@ -163,6 +175,8 @@ def _behavior_fixtures() -> list[str]:
                 m={**marker, "ModelAssuranceInventory": f"{path} sha256:{'e' * 64}"}),
             "evidence without a host adapter produced verified": dict(host_adapter=None),
             "empty allowlist produced verified": dict(allowlist={}),
+            "marker Gated-Files differing from the inventory gated set was accepted": dict(
+                m={**marker, "Gated-Files": json.dumps(["a.txt", "extra.txt"])}),
         }
         for label, over in flips.items():
             if allowed(**over):
@@ -241,6 +255,12 @@ def selftest() -> int:
         ("no assurance data at marker selection", "gate", "no inventory, roster, or assurance field is read here"),
         ("roster check belongs to opt-in", "gate", "belong to this opt-in predicate only"),
         ("no adapter means False", "gate", "with no host adapter the predicate returns False"),
+        ("warden handoff tuple source", "gate", "`QGLegProofTuple`"),
+        ("tuple rebuilds the marker", "gate", "rebuild the marker dict for `caller_allowed` from the ledger"),
+        ("unknown never withholds PASS", "gate", "never a reason to withhold or fail PASS"),
+        ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
+        ("reconstruction with evidence blocks", "gate", "rather than defaulting to `none`"),
+        ("gated_hash failure downgrades", "QG", "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`"),
     ]
     for label, target, needle in mutations:
         qg = _GOOD_QG.replace(needle, "") if target == "QG" else _GOOD_QG

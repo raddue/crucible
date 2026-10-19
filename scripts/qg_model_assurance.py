@@ -25,7 +25,25 @@ def artifact_hash(root: Path, paths, *, deleted=frozenset(), document=False) -> 
     if document and (len(names) != 1 or removed):
         raise ValueError('document requires one existing file')
 
-    common = Path(subprocess.check_output(['git', '-C', str(root), 'rev-parse', '--git-common-dir'], text=True).strip())
+    if document:
+        # A single document is hashed before (and without) any git lookup so a non-git root works.
+        try:
+            parent = root
+            for part in names[0].split('/')[:-1]:
+                parent /= part
+                if not stat.S_ISDIR(parent.lstat().st_mode):
+                    raise ValueError(f'non-directory or symlink parent: {names[0]}')
+            if not stat.S_ISREG((root / names[0]).lstat().st_mode):
+                raise ValueError('document must be a regular file')
+            return hashlib.sha256((root / names[0]).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ValueError('document unavailable') from exc
+
+    try:
+        common = Path(subprocess.check_output(['git', '-C', str(root), 'rev-parse', '--git-common-dir'],
+                                              text=True, stderr=subprocess.DEVNULL).strip())
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise ValueError('not a git worktree: cannot bind the gated manifest') from exc
     if not common.is_absolute():
         common = root / common
     fields = ['crucible-qg-manifest-v1', str(common.resolve()), str(root), str(len(names))]
@@ -34,12 +52,14 @@ def artifact_hash(root: Path, paths, *, deleted=frozenset(), document=False) -> 
         parent = root
         for part in name.split('/')[:-1]:
             parent /= part
-            if not stat.S_ISDIR(parent.lstat().st_mode):
+            try:
+                is_dir = stat.S_ISDIR(parent.lstat().st_mode)
+            except FileNotFoundError:
+                if name in removed:  # a tombstone under a wholly deleted directory
+                    break
+                raise ValueError(f'missing gated parent directory: {name}')
+            if not is_dir:
                 raise ValueError(f'non-directory or symlink parent: {name}')
-        if document:
-            if not stat.S_ISREG(path.lstat().st_mode):
-                raise ValueError('document must be a regular file')
-            return hashlib.sha256(path.read_bytes()).hexdigest()
         if name in removed:
             if path.is_symlink() or path.exists():
                 raise ValueError(f'deleted path still exists: {name}')
@@ -207,6 +227,14 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     try:
         data = read_inventory(inventory_path, digest, marker['RunID'], marker['ArtifactHash'], current_final_hash)
     except (KeyError, ValueError):
+        return False
+    # The gated set must be the set the marker declares: it is otherwise self-certifying.
+    try:
+        declared = marker['Gated-Files']
+        declared = set(json.loads(declared) if isinstance(declared, str) else declared)
+    except (KeyError, TypeError, ValueError):
+        return False
+    if declared != set(data['gated']['paths']) - set(data['gated']['deleted']):
         return False
     # Digest and inventory claims cannot attest their own protected origin.
     return (marker.get('ModelAssurance') == 'verified'
