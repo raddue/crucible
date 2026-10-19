@@ -25,6 +25,7 @@ PIPELINE_STATUS_DOC = ROOT / "skills/build/references/pipeline-status.md"
 
 QG_REQUIRED = {
     "inventory section": "## Model Assurance Inventory (#746)",
+    "QG gated enumeration is rename-safe": "git diff --no-renames --name-only -z <base>..HEAD",
     "durable inventory path": "memory/quality-gate/model-assurance/<run-id>.json",
     "record before consumption": "before its result is consumed",
     "demotion stays consumed": "keeps the original dispatch's consumed record",
@@ -77,6 +78,10 @@ GATE_LEDGER_REQUIRED = {
     "unknown never withholds PASS": "never a reason to withhold or fail PASS",
     "changed paths within gated set": "is in the inventory's `gated.paths`",
     "expected_gated binds the artifact": "`expected_gated` binds the tuple to the artifact being authorized",
+    "expected_gated never re-read from ledger": "never re-read from this ledger",
+    "expected_gated rename-safe NUL command": "git diff --no-renames --name-only -z <base>..HEAD",
+    "authenticated evidence covers gated and roster": "`canonical_evidence` covers `gated` and `roster`",
+    "3-4 transition re-checks Phase 2 tuple": "re-checks Phase 2's tuple",
     "reconstruction keys on manifest opt-in line": "`**RequiredModelAssurance:** qg-verified` header line",
     "inventory or tuple is not an opt-in signal": "is not an opt-in signal",
     "gated_hash failure never passed as None": "is never passed to the predicate as `None`",
@@ -103,6 +108,7 @@ def check_files(qg: str, ledger: str, gate_ledger: str, pipeline: str | None = N
 
 _GOOD_QG = "\n".join([
     "## Model Assurance Inventory (#746)",
+    "git diff --no-renames --name-only -z <base>..HEAD",
     "memory/quality-gate/model-assurance/<run-id>.json",
     "before its result is consumed",
     "keeps the original dispatch's consumed record",
@@ -153,11 +159,19 @@ _GOOD_GATE_LEDGER = "\n".join([
     "never a reason to withhold or fail PASS",
     "is in the inventory's `gated.paths`",
     "`expected_gated` binds the tuple to the artifact being authorized",
+    "never re-read from this ledger",
+    "git diff --no-renames --name-only -z <base>..HEAD",
+    "`canonical_evidence` covers `gated` and `roster`",
+    "re-checks Phase 2's tuple",
     "takes the requirement from the manifests' `**RequiredModelAssurance:** qg-verified` header line",
     "A retained inventory or a `QGProofTuple` is not an opt-in signal",
     "is never passed to the predicate as `None`",
     "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution",
     "and is never treated as `none`",
+    "never re-read from this ledger",
+    "git diff --no-renames --name-only -z <base>..HEAD",
+    "`canonical_evidence` covers `gated` and `roster`",
+    "re-checks Phase 2's tuple",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -285,7 +299,9 @@ def _behavior_fixtures() -> list[str]:
             errors.append("fixture: restored evidence did not reconcile to verified")
         # Property: every top-level canonical field and each record digest is under the signature.
         base = qma.canonical_evidence(case.data, case.journal, case.records)
-        for key, val in (("run_id", "run-2"), ("artifact_hash", "f" * 64), ("final_artifact_hash", "f" * 64)):
+        for key, val in (("run_id", "run-2"), ("artifact_hash", "f" * 64), ("final_artifact_hash", "f" * 64),
+                         ("gated", {**case.data["gated"], "paths": ["other.md"]}),
+                         ("roster", {**case.data["roster"], "terminal": {}})):
             if qma.canonical_evidence({**case.data, key: val}, case.journal, case.records) == base:
                 errors.append(f"fixture: canonical evidence does not cover {key}")
         if qma.canonical_evidence(case.data, case.journal[:-1], case.records) == base:
@@ -363,6 +379,8 @@ _MUTANTS = {
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],",
         "    records = {k: {'path': v['path']} for k, v in records.items()}\n"
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],"),
+    "gated dropped from signed bytes": ("                       'gated': data['gated'],\n", ""),
+    "roster dropped from signed bytes": ("                       'roster': data['roster'],\n", ""),
     "unprivileged reviewer check removed": (" or not _unprivileged_reviewer():", ":"),
     "turn equals request check removed": ("any(not isinstance(turn, dict) or any(turn.get(key) != request[key]",
                                           "any(not isinstance(turn, dict) or any(False"),
@@ -427,6 +445,11 @@ def selftest() -> int:
         ("unknown never withholds PASS", "gate", "never a reason to withhold or fail PASS"),
         ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
         ("expected_gated binds the artifact", "gate", "`expected_gated` binds the tuple to the artifact being authorized"),
+        ("expected_gated never re-read from ledger", "gate", "never re-read from this ledger"),
+        ("expected_gated rename-safe NUL command", "gate", "git diff --no-renames --name-only -z <base>..HEAD"),
+        ("authenticated evidence covers gated and roster", "gate", "`canonical_evidence` covers `gated` and `roster`"),
+        ("3-4 transition re-checks Phase 2 tuple", "gate", "re-checks Phase 2's tuple"),
+        ("QG gated enumeration is rename-safe", "QG", "git diff --no-renames --name-only -z <base>..HEAD"),
         ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure never passed as None", "gate", "is never passed to the predicate as `None`"),

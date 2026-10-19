@@ -535,7 +535,7 @@ So:
   Warden-wide proof object and expected-leg roster cover every used temper,
   delve, and warden-owned siege/inquisitor leg. A persisted
   `RequiredModelAssurance: qg-verified` gates the push handoff through the
-  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`) against
+  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`, with `expected_gated` from `git diff --no-renames --name-only -z <base>..HEAD`, repo-relative POSIX paths) against
   the QG leg only, revalidated on push and recovery; `warden-verified` found in
   persisted state blocks that opted-in action pending explicit user resolution
   and is never treated as `none`.

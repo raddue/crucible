@@ -255,8 +255,9 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     """Caller predicate: opt-in needs reconciled host evidence; portable default blocks.
 
     `expected_gated` (required for `qg-verified`) is the caller's own list of paths this action
-    authorizes (design/plan: the ledger phase's `Artifact:` path; code: `git diff --name-only
-    <base>..HEAD`); it must be a non-empty list/tuple/set of strings, each in the inventory's
+    authorizes (design/plan: the path from the phase sub-skill's linted receipt or the orchestrator's
+    in-context output, never re-read from the ledger; code: `git diff --no-renames --name-only -z
+    <base>..HEAD` split on NUL); it must be a non-empty list/tuple/set of strings, each in the inventory's
     `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
     `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
@@ -478,8 +479,12 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
 
 
 def canonical_evidence(data: dict, journal: list, records: dict) -> bytes:
-    """Bytes the host adapter authenticates: bound to the run and the accepted final artifact."""
+    """Bytes the host adapter authenticates: bound to the run, the accepted final artifact, the gated
+    path set (paths, deletions, mode) and the terminal roster, so a rewritten inventory cannot re-point a
+    genuine run at a different artifact or verdict."""
     return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],
                        'final_artifact_hash': data['final_artifact_hash'],
+                       'gated': data['gated'],
+                       'roster': data['roster'],
                        'journal': journal, 'records': records},
                       sort_keys=True, separators=(',', ':')).encode()

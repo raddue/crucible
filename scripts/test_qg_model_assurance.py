@@ -452,8 +452,9 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
     def test_canonical_covers_every_top_level_field(self):
         base = canonical_evidence(self.data, self.journal, self.records)
         other = {**self.data}
-        for key in ('run_id', 'artifact_hash', 'final_artifact_hash'):
-            other[key] = 'f' * 64 if key != 'run_id' else 'run-2'
+        for key in ('run_id', 'artifact_hash', 'final_artifact_hash', 'gated', 'roster'):
+            other[key] = ('f' * 64 if key != 'run_id' else 'run-2') if key in ('run_id', 'artifact_hash', 'final_artifact_hash') \
+                else ({**self.data['gated'], 'paths': ['other.md']} if key == 'gated' else {**self.data['roster'], 'terminal': {}})
             self.assertNotEqual(canonical_evidence(other, self.journal, self.records), base, key)
             other[key] = self.data[key]
         self.assertNotEqual(canonical_evidence(self.data, self.journal[:-1], self.records), base, 'journal')
@@ -826,7 +827,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                     digest = write_inventory(path, self.data, terminal=True)
                     marker = {**self.marker, 'ModelAssuranceInventory': f'{path} sha256:{digest}'}
                     self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64,
-                                                    expected_gated=['a.txt'], **self.trusted))
+                                                    expected_gated=['a.txt'],
+                                                    **{**self.trusted, 'evidence': self.signed()}))  # re-signed: only the PASS check can refuse
                     self.data['roster']['terminal']['c2'] = 'PASS'
                     continue
                 self.assertFalse(self.allowed(**flip))
@@ -854,6 +856,61 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         stale = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), root)
         self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, stale,
                                         expected_gated=['design.md'], **trusted))
+
+    def test_expected_gated_from_documented_git_command_sees_rename_source(self):
+        # r9 S2: default rename detection collapses delete+add into one line, hiding the deleted source.
+        repo = Path(self.tmp.name, 'gitrepo')
+        (repo / 'hooks').mkdir(parents=True)
+        (repo / 'docs').mkdir()
+
+        def git(*args):
+            return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t',
+                                   '-c', 'commit.gpgsign=false', *args],
+                                  check=True, capture_output=True).stdout
+        git('init', '-q')
+        body = ''.join(f'line {n}\n' for n in range(12))
+        (repo / 'hooks/guard.sh').write_text(body + 'exit 1 # deny\n')
+        git('add', '-A')
+        git('commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD').decode().strip()
+        (repo / 'hooks/guard.sh').rename(repo / 'docs/guard.sh')
+        (repo / 'docs/guard.sh').write_text(body + 'exit 0 # allow\n')
+        git('add', '-A')
+        git('commit', '-qm', 'move and edit')
+
+        def changed(*flags):
+            raw = git('diff', *flags, '--name-only', '-z', f'{base}..HEAD').decode()
+            return [name for name in raw.split('\0') if name]
+        self.assertEqual(changed(), ['docs/guard.sh'])  # default renames hides hooks/guard.sh
+        documented = changed('--no-renames')
+        self.assertEqual(sorted(documented), ['docs/guard.sh', 'hooks/guard.sh'])
+        # QG gated only the added destination; the rename source was never gated or tombstoned.
+        self.data['gated'] = {'paths': ['docs/guard.sh'], 'deleted': [], 'mode': 'manifest'}
+        self.data['final_artifact_hash'] = gated_hash(self.data, repo)
+        self.path = Path(self.tmp.name, 'rename-inv.json')
+        digest = write_inventory(self.path, self.data, terminal=True)
+        marker = {**self.marker, 'FinalArtifactHash': self.data['final_artifact_hash'],
+                  'ModelAssuranceInventory': f'{self.path} sha256:{digest}', 'Gated-Files': json.dumps(['docs/guard.sh'])}
+        trusted = {**self.trusted, 'evidence': self.signed()}
+        final = self.data['final_artifact_hash']
+        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, final,
+                                       expected_gated=changed(), **trusted))  # the collapsed list passes: the defect
+        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, final,
+                                        expected_gated=documented, **trusted))
+        # once QG tombstones the source, the documented list is accepted
+        self.data['gated'] = {'paths': ['docs/guard.sh', 'hooks/guard.sh'], 'deleted': ['hooks/guard.sh'], 'mode': 'manifest'}
+        self.data['final_artifact_hash'] = gated_hash(self.data, repo)
+        digest = write_inventory(self.path, self.data, terminal=True)
+        marker.update(FinalArtifactHash=self.data['final_artifact_hash'],
+                      ModelAssuranceInventory=f'{self.path} sha256:{digest}')
+        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, self.data['final_artifact_hash'],
+                                       expected_gated=documented, **{**self.trusted, 'evidence': self.signed()}))
+
+    def test_gated_set_rewrite_after_signing_is_refused(self):
+        # r9 S1 class: the authenticated bytes name the gated set, so re-pointing it breaks the signature.
+        evidence = self.signed()
+        self.data['gated'] = {**self.data['gated'], 'paths': ['a.txt', 'gone', 'new.md']}
+        self.assertEqual(self.reconcile(evidence=evidence), 'unknown')
 
     def test_missing_inventory_blocks(self):
         os.unlink(self.path)
