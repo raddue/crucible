@@ -23,9 +23,16 @@ LEDGER_DOC = ROOT / "skills/shared/ledger-append.md"
 GATE_LEDGER_DOC = ROOT / "skills/build/references/gate-ledger.md"
 PIPELINE_STATUS_DOC = ROOT / "skills/build/references/pipeline-status.md"
 
+_FREEZE_NEEDLES = {
+    "gated set enumerated at the freeze point": "at the `FinalArtifactHash` freeze point",
+    "freeze-point tracked enumeration": "`git -C <root> diff --no-renames --no-relative --name-status -z <base>`",
+    "freeze-point untracked enumeration": "`git -C <root> ls-files --others --exclude-standard -z`",
+}
+
 QG_REQUIRED = {
+    **_FREEZE_NEEDLES,
     "inventory section": "## Model Assurance Inventory (#746)",
-    "QG gated enumeration is rename-safe": "git diff --no-renames --name-only -z <base>..HEAD",
+    "QG gated enumeration is rename-safe": "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD",
     "durable inventory path": "memory/quality-gate/model-assurance/<run-id>.json",
     "record before consumption": "before its result is consumed",
     "demotion stays consumed": "keeps the original dispatch's consumed record",
@@ -67,6 +74,7 @@ PIPELINE_REQUIRED = {
 }
 
 GATE_LEDGER_REQUIRED = {
+    **_FREEZE_NEEDLES,
     "absent finality reads as final": "an absent `MarkerFinality`",
     "only explicit chunk-milestone rejected": "only an explicit `chunk-milestone` is rejected",
     "no assurance data at marker selection": "no inventory, roster, or assurance field is read here",
@@ -79,7 +87,7 @@ GATE_LEDGER_REQUIRED = {
     "changed paths within gated set": "is in the inventory's `gated.paths`",
     "expected_gated binds the artifact": "`expected_gated` binds the tuple to the artifact being authorized",
     "expected_gated never re-read from ledger": "never re-read from this ledger",
-    "expected_gated rename-safe NUL command": "git diff --no-renames --name-only -z <base>..HEAD",
+    "expected_gated rename-safe NUL command": "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD",
     "authenticated evidence covers gated and roster": "`canonical_evidence` covers `gated` and `roster`",
     "3-4 transition re-checks Phase 2 tuple": "re-checks Phase 2's tuple",
     "reconstruction keys on manifest opt-in line": "`**RequiredModelAssurance:** qg-verified` header line",
@@ -108,7 +116,7 @@ def check_files(qg: str, ledger: str, gate_ledger: str, pipeline: str | None = N
 
 _GOOD_QG = "\n".join([
     "## Model Assurance Inventory (#746)",
-    "git diff --no-renames --name-only -z <base>..HEAD",
+    "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD",
     "memory/quality-gate/model-assurance/<run-id>.json",
     "before its result is consumed",
     "keeps the original dispatch's consumed record",
@@ -143,6 +151,7 @@ _GOOD_QG = "\n".join([
     "a row's `assurance` label is never an input to `verified`",
     "a required non-empty `kind`",
     "written with `kind: consensus-member` / `consensus-synthesis`",
+    *_FREEZE_NEEDLES.values(),
 ])
 
 _GOOD_PIPELINE = "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"
@@ -160,7 +169,7 @@ _GOOD_GATE_LEDGER = "\n".join([
     "is in the inventory's `gated.paths`",
     "`expected_gated` binds the tuple to the artifact being authorized",
     "never re-read from this ledger",
-    "git diff --no-renames --name-only -z <base>..HEAD",
+    "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD",
     "`canonical_evidence` covers `gated` and `roster`",
     "re-checks Phase 2's tuple",
     "takes the requirement from the manifests' `**RequiredModelAssurance:** qg-verified` header line",
@@ -168,10 +177,7 @@ _GOOD_GATE_LEDGER = "\n".join([
     "is never passed to the predicate as `None`",
     "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution",
     "and is never treated as `none`",
-    "never re-read from this ledger",
-    "git diff --no-renames --name-only -z <base>..HEAD",
-    "`canonical_evidence` covers `gated` and `roster`",
-    "re-checks Phase 2's tuple",
+    *_FREEZE_NEEDLES.values(),
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -446,10 +452,16 @@ def selftest() -> int:
         ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
         ("expected_gated binds the artifact", "gate", "`expected_gated` binds the tuple to the artifact being authorized"),
         ("expected_gated never re-read from ledger", "gate", "never re-read from this ledger"),
-        ("expected_gated rename-safe NUL command", "gate", "git diff --no-renames --name-only -z <base>..HEAD"),
+        ("expected_gated rename-safe NUL command", "gate", "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD"),
         ("authenticated evidence covers gated and roster", "gate", "`canonical_evidence` covers `gated` and `roster`"),
         ("3-4 transition re-checks Phase 2 tuple", "gate", "re-checks Phase 2's tuple"),
-        ("QG gated enumeration is rename-safe", "QG", "git diff --no-renames --name-only -z <base>..HEAD"),
+        ("gated set enumerated at the freeze point", "QG", "at the `FinalArtifactHash` freeze point"),
+        ("gated set enumerated at the freeze point (gate)", "gate", "at the `FinalArtifactHash` freeze point"),
+        ("freeze-point tracked enumeration", "QG", "`git -C <root> diff --no-renames --no-relative --name-status -z <base>`"),
+        ("freeze-point tracked enumeration (gate)", "gate", "`git -C <root> diff --no-renames --no-relative --name-status -z <base>`"),
+        ("freeze-point untracked enumeration", "QG", "`git -C <root> ls-files --others --exclude-standard -z`"),
+        ("freeze-point untracked enumeration (gate)", "gate", "`git -C <root> ls-files --others --exclude-standard -z`"),
+        ("QG gated enumeration is rename-safe", "QG", "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD"),
         ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure never passed as None", "gate", "is never passed to the predicate as `None`"),

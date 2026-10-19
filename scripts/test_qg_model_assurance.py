@@ -857,17 +857,26 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, stale,
                                         expected_gated=['design.md'], **trusted))
 
-    def test_expected_gated_from_documented_git_command_sees_rename_source(self):
-        # r9 S2: default rename detection collapses delete+add into one line, hiding the deleted source.
-        repo = Path(self.tmp.name, 'gitrepo')
-        (repo / 'hooks').mkdir(parents=True)
-        (repo / 'docs').mkdir()
+    def _git_repo(self, name):
+        # diff.renames=true pins the config so the rename-collapse is independent of the host's git config
+        repo = Path(self.tmp.name, name)
+        repo.mkdir(parents=True)
 
         def git(*args):
             return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t',
-                                   '-c', 'commit.gpgsign=false', *args],
+                                   '-c', 'commit.gpgsign=false', '-c', 'diff.renames=true', *args],
                                   check=True, capture_output=True).stdout
         git('init', '-q')
+        return repo, git
+
+    @staticmethod
+    def _nul(raw):
+        return [name for name in raw.decode().split('\0') if name]
+
+    def _commit_rename(self):
+        repo, git = self._git_repo('gitrepo')
+        (repo / 'hooks').mkdir()
+        (repo / 'docs').mkdir()
         body = ''.join(f'line {n}\n' for n in range(12))
         (repo / 'hooks/guard.sh').write_text(body + 'exit 1 # deny\n')
         git('add', '-A')
@@ -877,12 +886,20 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         (repo / 'docs/guard.sh').write_text(body + 'exit 0 # allow\n')
         git('add', '-A')
         git('commit', '-qm', 'move and edit')
+        return repo, git, base
 
-        def changed(*flags):
-            raw = git('diff', *flags, '--name-only', '-z', f'{base}..HEAD').decode()
-            return [name for name in raw.split('\0') if name]
-        self.assertEqual(changed(), ['docs/guard.sh'])  # default renames hides hooks/guard.sh
-        documented = changed('--no-renames')
+    def test_git_default_renames_collapse_the_source(self):
+        # git fact only (r9 S2): with rename detection the deleted source is invisible; --no-renames shows it.
+        repo, git, base = self._commit_rename()
+        names = lambda *f: self._nul(git('diff', *f, '--name-only', '-z', f'{base}..HEAD'))
+        self.assertEqual(names(), ['docs/guard.sh'])
+        self.assertEqual(sorted(names('--no-renames')), ['docs/guard.sh', 'hooks/guard.sh'])
+
+    def test_expected_gated_from_documented_git_command_sees_rename_source(self):
+        # r9 S2 module behaviour: the documented NUL list names the rename source, so QG must have gated it.
+        repo, git, base = self._commit_rename()
+        documented = self._nul(git('diff', '--no-renames', '--no-relative', '--name-only', '-z', f'{base}..HEAD'))
+        collapsed = ['docs/guard.sh']
         self.assertEqual(sorted(documented), ['docs/guard.sh', 'hooks/guard.sh'])
         # QG gated only the added destination; the rename source was never gated or tombstoned.
         self.data['gated'] = {'paths': ['docs/guard.sh'], 'deleted': [], 'mode': 'manifest'}
@@ -894,7 +911,7 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         trusted = {**self.trusted, 'evidence': self.signed()}
         final = self.data['final_artifact_hash']
         self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, final,
-                                       expected_gated=changed(), **trusted))  # the collapsed list passes: the defect
+                                       expected_gated=collapsed, **trusted))  # the collapsed list is a subset
         self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, final,
                                         expected_gated=documented, **trusted))
         # once QG tombstones the source, the documented list is accepted
@@ -905,6 +922,56 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                       ModelAssuranceInventory=f'{self.path} sha256:{digest}')
         self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, self.data['final_artifact_hash'],
                                        expected_gated=documented, **{**self.trusted, 'evidence': self.signed()}))
+
+    def test_freeze_point_enumeration_includes_uncommitted_fix_changes(self):
+        # r10 S1: QG fixes are uncommitted at marker emit (warden leg). The gated set is enumerated from base
+        # against the working tree plus untracked files; the caller later enumerates <base>..HEAD after commit.
+        repo, git = self._git_repo('fixrepo')
+        (repo / 'src').mkdir()
+        (repo / 'src/a.py').write_text('a = 1\n')
+        (repo / 'src/gone.py').write_text('gone = 1\n')
+        git('add', '-A')
+        git('commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD').decode().strip()
+        (repo / 'src/a.py').write_text('a = 2\n')
+        git('add', '-A')
+        git('commit', '-qm', 'impl')
+        # QG fix loop, uncommitted: add a regression test, delete a file that existed at base, touch a.py again
+        (repo / 'src/test_a.py').write_text('import a\n')
+        (repo / 'src/gone.py').unlink()
+        (repo / 'src/a.py').write_text('a = 3\n')
+        old = self._nul(git('diff', '--no-renames', '--no-relative', '--name-only', '-z', f'{base}..HEAD'))
+        self.assertEqual(old, ['src/a.py'])  # the old rule: misses the fix-created test_a.py and fix-deleted gone.py
+        status = self._nul(git('diff', '--no-renames', '--no-relative', '--name-status', '-z', base))
+        tracked = list(zip(status[0::2], status[1::2]))
+        untracked = self._nul(git('ls-files', '--others', '--exclude-standard', '-z'))
+        paths = sorted([p for _, p in tracked] + untracked)
+        deleted = sorted(p for st, p in tracked if st == 'D')
+        self.assertEqual((paths, deleted), (['src/a.py', 'src/gone.py', 'src/test_a.py'], ['src/gone.py']))
+        self.data['gated'] = {'paths': paths, 'deleted': deleted, 'mode': 'manifest'}
+        self.data['final_artifact_hash'] = gated_hash(self.data, repo)
+        self.path = Path(self.tmp.name, 'fix-inv.json')
+        digest = write_inventory(self.path, self.data, terminal=True)
+        final = self.data['final_artifact_hash']
+        marker = {**self.marker, 'FinalArtifactHash': final, 'ModelAssuranceInventory': f'{self.path} sha256:{digest}',
+                  'Gated-Files': json.dumps(['src/a.py', 'src/test_a.py'])}
+        trusted = {**self.trusted, 'evidence': self.signed()}
+        git('add', '-A')
+        git('commit', '-qm', 'warden commits the QG residual')
+        expected = self._nul(git('diff', '--no-renames', '--no-relative', '--name-only', '-z', f'{base}..HEAD'))
+        self.assertEqual(sorted(expected), paths)
+        recomputed = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), repo)
+        self.assertEqual(recomputed, final)
+        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, recomputed,
+                                       expected_gated=expected, **trusted))
+        # the old <base>..HEAD freeze-point enumeration would have gated only a.py and missed the rest
+        self.data['gated'] = {'paths': ['src/a.py'], 'deleted': [], 'mode': 'manifest'}
+        self.data['final_artifact_hash'] = gated_hash(self.data, repo)
+        digest = write_inventory(self.path, self.data, terminal=True)
+        marker.update(FinalArtifactHash=self.data['final_artifact_hash'],
+                      ModelAssuranceInventory=f'{self.path} sha256:{digest}')
+        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, self.data['final_artifact_hash'],
+                                        expected_gated=expected, **{**self.trusted, 'evidence': self.signed()}))
 
     def test_gated_set_rewrite_after_signing_is_refused(self):
         # r9 S1 class: the authenticated bytes name the gated set, so re-pointing it breaks the signature.

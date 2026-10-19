@@ -256,7 +256,7 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
 
     `expected_gated` (required for `qg-verified`) is the caller's own list of paths this action
     authorizes (design/plan: the path from the phase sub-skill's linted receipt or the orchestrator's
-    in-context output, never re-read from the ledger; code: `git diff --no-renames --name-only -z
+    in-context output, never re-read from the ledger; code: `git -C <root> diff --no-renames --no-relative --name-only -z
     <base>..HEAD` split on NUL); it must be a non-empty list/tuple/set of strings, each in the inventory's
     `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
