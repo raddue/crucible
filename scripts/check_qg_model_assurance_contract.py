@@ -67,7 +67,8 @@ GATE_LEDGER_REQUIRED = {
     "tuple rebuilds the marker": "rebuild the marker dict for `caller_allowed` from the ledger",
     "unknown never withholds PASS": "never a reason to withhold or fail PASS",
     "changed paths within gated set": "is in the inventory's `gated.paths`",
-    "reconstruction with evidence blocks": "block only the opted-in action pending user resolution rather than defaulting to `none`",
+    "reconstruction keys on manifest opt-in line": "`**RequiredModelAssurance:** qg-verified` header line",
+    "inventory or tuple is not an opt-in signal": "is not an opt-in signal",
 }
 
 LEDGER_REQUIRED = {
@@ -129,7 +130,8 @@ _GOOD_GATE_LEDGER = "\n".join([
     "rebuild the marker dict for `caller_allowed` from the ledger",
     "never a reason to withhold or fail PASS",
     "is in the inventory's `gated.paths`",
-    "block only the opted-in action pending user resolution rather than defaulting to `none`",
+    "takes the requirement from the manifests' `**RequiredModelAssurance:** qg-verified` header line",
+    "A retained inventory or a `QGProofTuple` is not an opt-in signal",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -187,6 +189,7 @@ def _behavior_fixtures() -> list[str]:
                 errors.append("fixture: reviewer-uid-owned evidence produced a verified state")
         # Rejection: a mandatory consensus member recorded unused is refused, not downgraded silently.
         gapped = json.loads(json.dumps(case.data))
+        gapped["roster"]["consensus"] = ["synthesis"]
         gapped["invocations"][1]["disposition"] = "unused"
         try:
             qma.write_inventory(pathlib.Path(case.tmp.name, "gap.json"), gapped, terminal=True)
@@ -259,7 +262,8 @@ def selftest() -> int:
         ("tuple rebuilds the marker", "gate", "rebuild the marker dict for `caller_allowed` from the ledger"),
         ("unknown never withholds PASS", "gate", "never a reason to withhold or fail PASS"),
         ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
-        ("reconstruction with evidence blocks", "gate", "rather than defaulting to `none`"),
+        ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
+        ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure downgrades", "QG", "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`"),
     ]
     for label, target, needle in mutations:

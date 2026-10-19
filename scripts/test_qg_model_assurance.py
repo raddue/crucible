@@ -6,6 +6,7 @@ from unittest import mock
 import json
 import os
 from pathlib import Path
+import stat
 import struct
 import subprocess
 import tempfile
@@ -65,6 +66,13 @@ class ArtifactHashTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 artifact_hash(plain, ['nope.md'], document=True)
 
+    def test_document_symlinked_parent_rejected(self):
+        with tempfile.TemporaryDirectory() as real:
+            Path(real, 'doc.md').write_bytes(b'doc')
+            (self.root / 'dirlink').symlink_to(real, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                artifact_hash(self.root, ['dirlink/doc.md'], document=True)
+
     def test_tombstone_under_deleted_directory(self):
         (self.root / 'keep.txt').write_text('k')
         self.assertEqual(len(artifact_hash(self.root, ['keep.txt', 'old/a.md'], deleted={'old/a.md'})), 64)
@@ -107,9 +115,10 @@ class ArtifactHashTest(unittest.TestCase):
         policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
         self.assertEqual(configured_assurance({'model': 'provider/model', 'effort': 'high', 'route': 'fixed'}, policy), 'configured')
         self.assertEqual(configured_assurance({'model': 'provider/model', 'effort': 'low', 'route': 'fixed'}, policy), 'unknown')
+        self.assertEqual(configured_assurance({'model': 'provider/model', 'effort': 'high', 'route': 'other'}, policy), 'unknown')
 
 
-GATED = {'paths': ['a.txt', 'gone'], 'deleted': ['gone']}
+GATED = {'paths': ['a.txt', 'gone'], 'deleted': ['gone'], 'mode': 'manifest'}
 
 
 class InventoryTest(unittest.TestCase):
@@ -163,7 +172,12 @@ class InventoryTest(unittest.TestCase):
                                                                     'disposition': 'unused', 'assurance': 'unknown'})),
             'consensus not a list': lambda d: d['roster'].update(consensus='1'),
             'no gated set': lambda d: d.update(gated=None),
-            'deleted outside gated set': lambda d: d.update(gated={'paths': ['a'], 'deleted': ['b']}),
+            'deleted outside gated set': lambda d: d.update(gated={'paths': ['a'], 'deleted': ['b'], 'mode': 'manifest'}),
+            'gated mode missing': lambda d: d.update(gated={'paths': ['a'], 'deleted': []}),
+            'gated mode unknown': lambda d: d.update(gated={**GATED, 'mode': 'raw'}),
+            'document mode with two paths': lambda d: d.update(gated={**GATED, 'mode': 'document'}),
+            'document mode with deletion': lambda d: d.update(gated={'paths': ['a'], 'deleted': ['a'], 'mode': 'document'}),
+            'row kind not a string': lambda d: d['invocations'][0].update(kind=7),
             'verified row lacks attestation': lambda d: d['invocations'][0].update(assurance='verified', attestation={}),
         }.items():
             data = deepcopy(self.data)
@@ -180,6 +194,35 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(gated_hash(self.data, root), expected)
         (root / 'a.txt').write_text('y')  # working tree diverges from the gated bytes
         self.assertNotEqual(gated_hash(self.data, root), expected)
+
+    def test_gated_hash_mode_comes_from_persisted_data(self):
+        root = Path(self.tmp.name, 'plain')
+        root.mkdir()
+        (root / 'doc.md').write_bytes(b'doc')
+        data = {**self.data, 'gated': {'paths': ['doc.md'], 'deleted': [], 'mode': 'document'}}
+        self.assertEqual(gated_hash(data, root), hashlib.sha256(b'doc').hexdigest())  # no git, no mode argument
+        subprocess.run(['git', '-C', str(root), 'init', '-q'], check=True)
+        manifest = {**data, 'gated': {**data['gated'], 'mode': 'manifest'}}
+        self.assertNotEqual(gated_hash(manifest, root), gated_hash(data, root))
+
+    def test_read_inventory_size_cap_and_none_requires_pass(self):
+        self.path.write_bytes(b' ' * (qma.MAX_INVENTORY_BYTES + 1))
+        with self.assertRaises(ValueError):
+            read_inventory(self.path, None, 'run-1', 'a' * 64, None)
+        self.assertFalse(action_allowed('none', {'Verdict': 'ESCALATED'}, self.path, 'x', 'x'))
+
+    def test_weakest_state_over_consumed_rows(self):
+        policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
+        request = {'model': 'provider/model', 'effort': 'high', 'route': 'fixed'}
+        self.data['invocations'] = [
+            {'id': f'r{i}', 'parent': 'run-1', 'scope': 's', 'disposition': 'consumed',
+             'assurance': 'configured', 'request': dict(request)} for i in range(2)]
+        self.assertEqual(assurance_state(self.data, policy), 'configured')
+        self.data['invocations'][1]['assurance'] = 'unknown'  # one weaker row caps the run
+        self.assertEqual(assurance_state(self.data, policy), 'unknown')
+        self.data['invocations'][1]['assurance'] = 'configured'
+        self.data['invocations'][1]['request']['route'] = 'other'
+        self.assertEqual(assurance_state(self.data, policy), 'unknown')
 
     def test_tamper_and_binding_fail_closed(self):
         digest = write_inventory(self.path, self.data, terminal=True)
@@ -259,7 +302,7 @@ class EvidenceFixture:
             'version': 1, 'run_id': 'run-1', 'artifact_hash': 'a' * 64,
             'final_artifact_hash': 'b' * 64, 'gated': GATED,
             'roster': {'kind': 'chunked', 'chunks': ['c1', 'c2'], 'terminal': {'c1': 'PASS', 'c2': 'PASS'},
-                       'consensus': ['synthesis']},
+                       'consensus': []},
             'invocations': [
                 {'id': 'review', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'consumed', 'assurance': 'verified'},
                 {'id': 'synthesis', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'consumed', 'assurance': 'verified'},
@@ -317,8 +360,52 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         # The reviewer's real uid owns the files: a same-uid child could have forged them.
         with mock.patch.object(qma.os, 'getuid', return_value=self.real_uid):
             self.assertEqual(self.reconcile(), 'unknown')
-        self.assertEqual(self.reconcile(adapter=FakeAdapter({self.real_uid + 1})), 'unknown')  # not the owner
         self.assertEqual(self.reconcile(adapter=FakeAdapter(set())), 'unknown')
+
+    def _foreign_owner(self, name):
+        """Patch one stat call so only that check sees a uid outside the adapter's owners."""
+        real = getattr(os, name)
+        foreign = self.real_uid + 5
+
+        def fake(target, *args, **kwargs):
+            info = real(target, *args, **kwargs)
+            wanted = (Path(str(target)) == self.dir) if name == 'lstat' else stat.S_ISREG(info.st_mode)
+            if not wanted:
+                return info
+            return mock.Mock(st_mode=info.st_mode, st_uid=foreign)
+        return mock.patch.object(qma.os, name, side_effect=fake)
+
+    def test_owner_checks_each_reached_and_independent(self):
+        self.assertEqual(self.reconcile(), 'verified')
+        with self._foreign_owner('lstat'):  # directory owner only
+            self.assertEqual(self.reconcile(), 'unknown')
+        with self._foreign_owner('fstat'):  # file owner only
+            self.assertEqual(self.reconcile(), 'unknown')
+        # Reviewer uid distinct from the owner but the adapter does not own the files.
+        with mock.patch.object(qma.os, 'getuid', return_value=self.real_uid + 2):
+            self.assertEqual(self.reconcile(adapter=FakeAdapter({self.real_uid + 1})), 'unknown')
+
+    def test_consensus_cap_is_code_enforced(self):
+        self.assertEqual(self.reconcile(), 'verified')
+        self.data['roster']['consensus'] = ['synthesis']  # mandatory consensus member, consumed
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
+        self.data['roster']['consensus'] = []
+        self.data['invocations'][0]['kind'] = 'consensus-member'  # a consumed consensus row, single flip
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
+        self.data['invocations'][0]['kind'] = 'review'
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
+
+    def test_authenticate_must_return_true(self):
+        class Truthy(FakeAdapter):
+            def authenticate(self, origin, canonical):
+                return 'yes'
+        self.assertEqual(self.reconcile(adapter=Truthy({self.real_uid})), 'unknown')
+
+    def test_records_must_match_consumed_set_and_digests(self):
+        extra = {**self.records, 'ghost': dict(self.records['review'])}
+        self.assertEqual(self.reconcile(evidence=self.signed(records=extra)), 'unknown')
+        wrong = {**self.records, 'review': {**self.records['review'], 'digest': 'f' * 64}}
+        self.assertEqual(self.reconcile(evidence=self.signed(records=wrong)), 'unknown')
 
     def test_unauthenticated_or_child_writable_origin_unknown(self):
         self.assertEqual(self.reconcile(evidence={**self.evidence, 'origin': {'hmac': '0' * 64}}), 'unknown')
@@ -356,7 +443,8 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         self.assertEqual(self.reconcile(evidence=self.signed(journal=flood)), 'unknown')
 
     def test_multi_turn_mismatch_and_mixed_effort(self):
-        for turns in ([self.TURN, {**self.TURN, 'model': 'provider/other'}], [{**self.TURN, 'effort': 'low'}], []):
+        for turns in ([self.TURN, {**self.TURN, 'model': 'provider/other'}], [{**self.TURN, 'effort': 'low'}],
+                      [{**self.TURN, 'route': 'other'}], []):
             self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': turns})
             self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
 
@@ -412,6 +500,7 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         self.assertEqual(self.reconcile(evidence=self.signed(journal=demoted)), 'unknown')
 
     def test_consensus_member_unused_in_inventory_unknown(self):
+        self.data['roster']['consensus'] = ['synthesis']
         self.data['invocations'][1]['disposition'] = 'unused'
         self.assertEqual(self.reconcile(), 'unknown')
 
@@ -474,6 +563,25 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         for label, flip in flips.items():
             with self.subTest(label):
                 self.assertFalse(self.allowed(**flip))
+
+    def test_document_mode_caller_flow_without_any_mode_argument(self):
+        root = Path(self.tmp.name, 'docroot')  # a non-git root holding one design document
+        root.mkdir()
+        (root / 'design.md').write_bytes(b'design')
+        self.data['gated'] = {'paths': ['design.md'], 'deleted': [], 'mode': 'document'}
+        self.data['final_artifact_hash'] = gated_hash(self.data, root)
+        self.assertEqual(self.data['final_artifact_hash'], hashlib.sha256(b'design').hexdigest())
+        self.path = Path(self.tmp.name, 'doc-inv.json')
+        digest = write_inventory(self.path, self.data, terminal=True)
+        marker = {**self.marker, 'FinalArtifactHash': self.data['final_artifact_hash'],
+                  'ModelAssuranceInventory': f'{self.path} sha256:{digest}', 'Gated-Files': json.dumps(['design.md'])}
+        trusted = {**self.trusted, 'evidence': self.signed()}
+        # Caller side: read the persisted gated set provisionally, recompute, then run the predicate.
+        recomputed = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), root)
+        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, recomputed, **trusted))
+        (root / 'design.md').write_bytes(b'edited')
+        stale = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), root)
+        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, stale, **trusted))
 
     def test_missing_inventory_blocks(self):
         os.unlink(self.path)

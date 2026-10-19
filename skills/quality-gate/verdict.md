@@ -50,7 +50,7 @@ ResidualMinor: <count on terminal qualifying fresh-review set, deduplicated by f
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id — identical to the model-assurance inventory's run_id; never write a duplicate RunID field>
 MarkerFinality: chunk-milestone | final-integration
-FinalArtifactHash: <sha256-hex from `gated_hash` in scripts/qg_model_assurance.py (artifact_hash over the inventory's persisted gated path set and deletion set; sha256 of the bytes for a single document), frozen after all fixes>
+FinalArtifactHash: <sha256-hex from `gated_hash` in scripts/qg_model_assurance.py (artifact_hash over the inventory's persisted gated path set and deletion set, and persisted `gated.mode`; sha256 of the bytes when the mode is `document`), frozen after all fixes>
 ModelAssurance: verified | configured | unknown
 ModelAssuranceInventory: <inventory-path> sha256:<inventory-digest>
 Severity-Histogram: <json — e.g., {"fatal":0,"significant":0,"minor":0,"nit":0}>

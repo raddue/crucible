@@ -125,7 +125,11 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
                     for row in rows if row['assurance'] == 'verified')
             and (data['final_artifact_hash'] is None or _hex64(data['final_artifact_hash']))
             and (gated is None or (isinstance(gated['paths'], list) and isinstance(gated['deleted'], list)
-                                   and all(isinstance(n, str) for n in gated['paths'] + gated['deleted'])))
+                                   and all(isinstance(n, str) for n in gated['paths'] + gated['deleted'])
+                                   and gated['mode'] in ('document', 'manifest')
+                                   and (gated['mode'] == 'manifest'
+                                        or (len(gated['paths']) == 1 and not gated['deleted']))))
+            and all(isinstance(row.get('kind', ''), str) for row in rows)
         )
         if valid and terminal:
             consumed = {row['id'] for row in rows if row['disposition'] == 'consumed'}
@@ -138,14 +142,18 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
         raise ValueError('invalid or incomplete QG assurance inventory') from exc
 
 
-def gated_hash(data: dict, root: Path, *, document: bool = False) -> str:
+def gated_hash(data: dict, root: Path) -> str:
     """The only FinalArtifactHash computation: artifact_hash over the inventory's persisted gated set.
+
+    The hash mode (`document` raw bytes of a single file, or `manifest`) is read from the
+    persisted `gated.mode`, never guessed by the caller.
 
     Hashes the working tree at `root`; a caller revalidating a commit must have a clean tree at
     that commit. The hash binds `root`, so a different checkout fails closed.
     """
     gated = data['gated']
-    return artifact_hash(root, gated['paths'], deleted=frozenset(gated['deleted']), document=document)
+    return artifact_hash(root, gated['paths'], deleted=frozenset(gated['deleted']),
+                         document=gated['mode'] == 'document')
 
 
 def write_inventory(path: Path, data: dict, *, terminal: bool = False) -> str:
@@ -308,13 +316,20 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
     and authenticates origin out of the reviewer's reach; evidence files owned by one of
     the adapter's uids and not child-writable; per-row attestation digests pinned by the
     inventory (hence by the marker's inventory digest); and per-turn exact-ID
-    model/effort/route proof for every consumed invocation. With no adapter (the portable
+    model/effort/route proof for every consumed invocation, and no consensus row (a roster
+    with consensus membership, or a consumed row whose optional `kind` starts `consensus`, is
+    capped at `unknown` until the consensus API exposes stable member identity). With no adapter (the portable
     default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
     """
     try:
         if host_adapter is None:
             return 'unknown'
         _validate_inventory(data, terminal=True)
+        # Consensus cap (design): the consensus API exposes no stable per-member identity or
+        # source, so a run consuming any consensus row is never verified.
+        if data['roster']['consensus'] or any(str(row.get('kind', '')).startswith('consensus')
+                                              for row in data['invocations'] if row['disposition'] == 'consumed'):
+            return 'unknown'
         approved = allowlist[host_adapter.name]
         if approved['version'] != host_adapter.version:
             return 'unknown'
