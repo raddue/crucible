@@ -156,6 +156,25 @@ class InventoryTest(unittest.TestCase):
         policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
         self.assertEqual(marker_assurance(self.data, policy), 'configured')
 
+    def test_malformed_request_or_policy_is_unknown_never_raises(self):
+        row = self.data['invocations'][0]
+        good = {'model': 'provider/model', 'effort': 'high', 'route': 'fixed'}
+        policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
+        row.update(assurance='configured', request=good)
+        self.assertEqual(marker_assurance(self.data, policy), 'configured')  # documented shape + policy
+        for bad_policy in (['provider/model'], 'provider/model', 7):
+            self.assertEqual(marker_assurance(self.data, bad_policy), 'unknown')
+            self.assertEqual(assurance_state(self.data, bad_policy), 'unknown')
+        self.assertEqual(marker_assurance(self.data, {'provider/model': 'high'}), 'unknown')
+        for bad in ('provider/model', {'model': ['provider/model']}, {'model': 'provider/model', 'effort': 5},
+                    ['provider/model']):
+            row['request'] = bad
+            self.assertEqual(marker_assurance(self.data, policy), 'unknown')
+            with self.assertRaises(ValueError):  # the terminal schema refuses the shape outright
+                write_inventory(self.path, self.data, terminal=True)
+        self.assertEqual(assurance_state({'invocations': 'x'}, policy), 'unknown')  # total over a non-inventory
+        self.assertEqual(marker_assurance(None, policy), 'unknown')
+
     def test_provisional_midrun_write_and_digestless_recovery_read(self):
         # Truthful incremental write: one of two chunks terminal, final hash and gated set not yet frozen.
         data = {**self.data, 'final_artifact_hash': None, 'gated': None,
@@ -310,6 +329,12 @@ class EvidenceFixture:
         patcher = mock.patch.object(qma.os, 'getuid', return_value=self.real_uid + 1)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Run identically under any uid or capability set: the reviewer is an unprivileged uid with no CapEff.
+        mock.patch.object(qma.os, 'geteuid', return_value=self.real_uid + 1).start()
+        self.addCleanup(mock.patch.stopall)
+        caps = Path(self.tmp.name, 'status')
+        caps.write_text('Name:\tx\nCapEff:\t0000000000000000\n')
+        mock.patch.object(qma, '_PROC_STATUS', str(caps)).start()
         self.data = {
             'version': 1, 'run_id': 'run-1', 'artifact_hash': 'a' * 64,
             'final_artifact_hash': 'b' * 64, 'gated': GATED,
@@ -373,6 +398,49 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         with mock.patch.object(qma.os, 'getuid', return_value=self.real_uid):
             self.assertEqual(self.reconcile(), 'unknown')
         self.assertEqual(self.reconcile(adapter=FakeAdapter(set())), 'unknown')
+
+    def test_privileged_reviewer_never_verifies(self):
+        self.assertEqual(self.reconcile(), 'verified')
+        for name in ('getuid', 'geteuid'):  # uid 0, real or effective, can rewrite any adapter-owned file
+            with mock.patch.object(qma.os, name, return_value=0):
+                self.assertEqual(self.reconcile(), 'unknown', name)
+        with mock.patch.object(qma, '_privileged_reviewer', return_value=True):
+            self.assertEqual(self.reconcile(), 'unknown')  # e.g. CAP_DAC_OVERRIDE
+        status = Path(self.tmp.name, 'cap-status')
+        with mock.patch.object(qma.os, 'getuid', return_value=1), mock.patch.object(qma.os, 'geteuid', return_value=1), \
+                mock.patch.object(qma, '_PROC_STATUS', str(status)):
+            status.write_text('Name:\tx\nCapEff:\t0000000000000002\n')
+            self.assertTrue(qma._privileged_reviewer())
+            status.write_text('Name:\tx\nCapEff:\t0000000000000000\n')
+            self.assertFalse(qma._privileged_reviewer())
+            status.unlink()
+            self.assertFalse(qma._privileged_reviewer())  # unreadable falls back to the uid test
+
+    def test_record_rewritten_after_signing(self):
+        evidence = self.signed()
+        record = {'id': 'review', 'result_digest': '1' * 64, 'turns': [self.TURN] * 5}
+        path = Path(self.records['review']['path'])
+        path.write_text(json.dumps(record))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.records['review']['digest'] = digest  # the evidence's records map is the signed dict object
+        self.data['invocations'][0]['attestation']['digest'] = digest
+        # digests now agree everywhere except the signature, which covered the old record digest
+        self.assertEqual(self.reconcile(evidence=evidence), 'unknown')
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')  # re-signed: genuine
+
+    def test_canonical_covers_every_top_level_field(self):
+        base = canonical_evidence(self.data, self.journal, self.records)
+        other = {**self.data}
+        for key in ('run_id', 'artifact_hash', 'final_artifact_hash'):
+            other[key] = 'f' * 64 if key != 'run_id' else 'run-2'
+            self.assertNotEqual(canonical_evidence(other, self.journal, self.records), base, key)
+            other[key] = self.data[key]
+        self.assertNotEqual(canonical_evidence(self.data, self.journal[:-1], self.records), base, 'journal')
+        for name in self.records:
+            for field in ('digest', 'path'):
+                changed = {**self.records, name: {**self.records[name], field: 'x' * 64}}
+                self.assertNotEqual(canonical_evidence(self.data, self.journal, changed), base, f'{name}.{field}')
+        self.assertNotEqual(canonical_evidence(self.data, self.journal, {}), base, 'records')
 
     def _foreign_owner(self, name):
         """Patch one stat call so only that check sees a uid outside the adapter's owners."""

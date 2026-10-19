@@ -33,7 +33,7 @@ QG_REQUIRED = {
     "unobservable consensus cap": "at most `configured`/`unknown`",
     "PASS never suppressed": "never suppresses an artifact PASS",
     "wrapper cannot attest children": "never attests its children",
-    "bridged response counted once": "counts once",
+    "bridged response counted once": "counts once — never a second row",
     "inventory survives scratch deletion": "surviving compaction and scratch deletion",
     "roster membership set": "consensus membership set",
     "marker finality values": "MarkerFinality: chunk-milestone | final-integration",
@@ -56,7 +56,7 @@ QG_REQUIRED = {
     "sole FinalArtifactHash computation": "computed only by `gated_hash`",
     "gated_hash failure downgrades": "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`",
     "marker ModelAssurance is marker_assurance output": "`ModelAssurance` is the output of `marker_assurance`",
-    "row labels never feed verified": "never an input to `verified`",
+    "row labels never feed verified": "a row's `assurance` label is never an input to `verified`",
     "kind required on every row": "a required non-empty `kind`",
     "consensus rows carry kind": "`kind: consensus-member` / `consensus-synthesis`",
 }
@@ -107,7 +107,7 @@ _GOOD_QG = "\n".join([
     "QG assurance is at most `configured`/`unknown`",
     "never suppresses an artifact PASS",
     "A wrapper receipt (siege's included) never attests its children",
-    "counts once",
+    "counts once — never a second row",
     "surviving compaction and scratch deletion",
     "mandatory consensus membership set",
     "MarkerFinality: chunk-milestone | final-integration",
@@ -224,6 +224,34 @@ def _behavior_fixtures() -> list[str]:
         with mock.patch.object(qma.os, "getuid", return_value=case.real_uid):
             if case.reconcile() != "unknown":
                 errors.append("fixture: reviewer-uid-owned evidence produced a verified state")
+        # Rejection: a privileged reviewer (uid 0 real or effective, or CAP_DAC_OVERRIDE) can rewrite
+        # adapter-owned files, so ownership cannot certify them.
+        for name in ("getuid", "geteuid"):
+            with mock.patch.object(qma.os, name, return_value=0):
+                if case.reconcile() != "unknown":
+                    errors.append(f"fixture: uid-0 reviewer ({name}) produced a verified state")
+        with mock.patch.object(qma, "_privileged_reviewer", return_value=True):
+            if case.reconcile() != "unknown":
+                errors.append("fixture: CAP_DAC_OVERRIDE reviewer produced a verified state")
+        # Property: every top-level canonical field and each record digest is under the signature.
+        base = qma.canonical_evidence(case.data, case.journal, case.records)
+        for key, val in (("run_id", "run-2"), ("artifact_hash", "f" * 64), ("final_artifact_hash", "f" * 64)):
+            if qma.canonical_evidence({**case.data, key: val}, case.journal, case.records) == base:
+                errors.append(f"fixture: canonical evidence does not cover {key}")
+        if qma.canonical_evidence(case.data, case.journal[:-1], case.records) == base:
+            errors.append("fixture: canonical evidence does not cover the journal")
+        for name in case.records:
+            changed = {**case.records, name: {**case.records[name], "digest": "f" * 64}}
+            if qma.canonical_evidence(case.data, case.journal, changed) == base:
+                errors.append(f"fixture: canonical evidence does not cover the {name} record digest")
+        # Rejection: malformed request/policy shapes read unknown and never raise.
+        shaped = json.loads(json.dumps(case.data))
+        shaped["invocations"][0]["request"] = "provider/model"
+        try:
+            if qma.marker_assurance(shaped, ["bad-policy"]) != "unknown":
+                errors.append("fixture: malformed request/policy did not read unknown")
+        except Exception as exc:  # noqa: BLE001 - the property is that nothing escapes
+            errors.append(f"fixture: marker_assurance raised on malformed request/policy: {exc!r}")
         # Rejection: a mandatory consensus member recorded unused is refused, not downgraded silently.
         gapped = json.loads(json.dumps(case.data))
         gapped["roster"]["consensus"] = ["synthesis"]
@@ -281,6 +309,11 @@ _MUTANTS = {
     "completeness reconciliation removed": ("if consumed != expected or set(records) != consumed:",
                                             "if set(records) != consumed:"),
     "journal dropped from signed bytes": ("'journal': journal, 'records': records}", "'records': records}"),
+    "record digests dropped from signed bytes": (
+        "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],",
+        "    records = {k: {'path': v['path']} for k, v in records.items()}\n"
+        "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],"),
+    "privileged reviewer check removed": (" or _privileged_reviewer():", ":"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
                                   "if False:"),
 }
@@ -333,7 +366,7 @@ def selftest() -> int:
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure downgrades", "QG", "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`"),
         ("marker ModelAssurance is marker_assurance output", "QG", "`ModelAssurance` is the output of `marker_assurance`"),
-        ("row labels never feed verified", "QG", "never an input to `verified`"),
+        ("row labels never feed verified", "QG", "a row's `assurance` label is never an input to `verified`"),
         ("kind required on every row", "QG", "a required non-empty `kind`"),
         ("consensus rows carry kind", "QG", "`kind: consensus-member` / `consensus-synthesis`"),
         ("manifest writer rule for opt-in line", "pipeline", "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"),

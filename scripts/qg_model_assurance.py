@@ -94,6 +94,12 @@ def _hex64(value) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
 
 
+def _valid_request(request) -> bool:
+    """A row's optional `request` (the exact model/effort/route the dispatch asked for): absent, or str fields."""
+    return request is None or (isinstance(request, dict) and all(
+        isinstance(request.get(key), str) for key in ('model', 'effort', 'route') if key in request))
+
+
 def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
     """Provisional (mid-run, writable as the run proceeds) vs terminal (marker emit / caller check).
 
@@ -131,6 +137,7 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
                                    and (gated['mode'] == 'manifest'
                                         or (len(gated['paths']) == 1 and not gated['deleted']))))
             and all(isinstance(row.get('kind', ''), str) for row in rows)
+            and all(_valid_request(row.get('request')) for row in rows)
         )
         if valid and terminal:
             consumed = {row['id'] for row in rows if row['disposition'] == 'consumed'}
@@ -210,22 +217,27 @@ def read_inventory(path: Path, digest: str | None, run_id: str, artifact: str, f
 
 
 def assurance_state(data: dict, policy: dict | None = None) -> str:
-    """No host-owned observation exists in portable core; never claim verified."""
+    """No host-owned observation exists in portable core; never claim verified.
+
+    Total: any malformed inventory, request or policy reads `unknown`, never raises, so it
+    can never block marker emit for an ordinary PASS.
+    """
     try:
         _validate_inventory(data, terminal=True)
-    except ValueError:
+        used = [row for row in data['invocations'] if row['disposition'] == 'consumed']
+        return ('configured' if used and all(row['assurance'] == 'configured'
+                and configured_assurance(row.get('request'), policy) == 'configured' for row in used)
+                else 'unknown')
+    except (KeyError, TypeError, AttributeError, ValueError):
         return 'unknown'
-    used = [row for row in data['invocations'] if row['disposition'] == 'consumed']
-    return ('configured' if used and all(row['assurance'] == 'configured'
-            and configured_assurance(row.get('request'), policy) == 'configured' for row in used)
-            else 'unknown')
 
 
 def marker_assurance(data: dict, policy: dict | None = None, *, evidence: dict | None = None,
                      allowlist: dict | None = None, host_adapter=None) -> str:
     """The only source of the terminal marker's `ModelAssurance`: `verified` only when
     `reconcile_evidence` proves it, else `assurance_state`. Row `assurance` labels are never
-    an input to `verified`; without a host adapter (the portable default) this is never verified."""
+    an input to `verified`; without a host adapter (the portable default) this is never verified.
+    Total: both callees return `unknown` on any malformed input, so this never raises."""
     if reconcile_evidence(data, evidence, allowlist, policy, host_adapter=host_adapter) == 'verified':
         return 'verified'
     return assurance_state(data, policy)
@@ -267,15 +279,38 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
 
 def configured_assurance(request: dict | None, policy: dict | None) -> str:
     """A matched selector is configured, never independent execution proof."""
-    if not request or not policy:
+    if not request or not policy or not isinstance(request, dict) or not isinstance(policy, dict):
         return 'unknown'
-    approved = policy.get(request.get('model'))
-    return 'configured' if approved and all(request.get(key) == approved.get(key) for key in ('effort', 'route')) else 'unknown'
+    model = request.get('model')
+    approved = policy.get(model) if isinstance(model, str) else None
+    return ('configured' if isinstance(approved, dict)
+            and all(request.get(key) == approved.get(key) for key in ('effort', 'route')) else 'unknown')
+
+
+_PROC_STATUS = '/proc/self/status'
+
+
+def _privileged_reviewer() -> bool:
+    """True when the reviewer process can write any file regardless of ownership: real or effective
+    uid 0, or `CAP_DAC_OVERRIDE` in `CapEff` (Linux `/proc/self/status`; unreadable falls back to the uid test)."""
+    if os.getuid() == 0 or os.geteuid() == 0:
+        return True
+    try:
+        with open(_PROC_STATUS, encoding='ascii') as status:
+            for line in status:
+                if line.startswith('CapEff:'):
+                    return bool(int(line.split()[1], 16) & (1 << 1))  # CAP_DAC_OVERRIDE
+    except (OSError, ValueError, IndexError):
+        pass
+    return False
 
 
 def _read_protected(path, owners, parent_checked: dict) -> bytes:
     """Open once without following symlinks; the file must be a non-group/other-writable
-    regular file owned by one of the adapter's `owners` (uids other than the reviewer's)."""
+    regular file owned by one of the adapter's `owners` (uids other than the reviewer's).
+    Ownership only keeps files out of an unprivileged reviewer's reach: a uid-0 or
+    `CAP_DAC_OVERRIDE` reviewer can write them anyway, so `reconcile_evidence` returns
+    `unknown` for such a reviewer (`_privileged_reviewer`)."""
     path = Path(path)
     parent = path.parent
     if parent not in parent_checked:
@@ -349,8 +384,8 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
         if approved['version'] != host_adapter.version:
             return 'unknown'
         owners = frozenset(host_adapter.owner_uids)
-        if not owners or os.getuid() in owners:
-            return 'unknown'  # evidence the reviewer's own uid owns is reviewer-writable
+        if not owners or os.getuid() in owners or _privileged_reviewer():
+            return 'unknown'  # evidence the reviewer's own uid owns, or a privileged reviewer can write, is reviewer-writable
         records = evidence['records']
         checked: dict = {}
         if evidence['run_id'] != data['run_id']:
