@@ -3,7 +3,8 @@
 
 Path-pinned, stdlib-only structural check over the QG runbook and the shared
 ledger doc, plus behavioral rejection fixtures (chunk-milestone selection,
-missing mandatory consensus, wrapper-only verified, cross-chunk receipt lint).
+missing mandatory consensus, no-adapter verified, cross-chunk receipt lint). Every
+rejection fixture starts from a configuration that is allowed/verified and flips exactly one field.
 Use --selftest for mutation guards.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from qg_source import read_runbook
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER_DOC = ROOT / "skills/shared/ledger-append.md"
+GATE_LEDGER_DOC = ROOT / "skills/build/references/gate-ledger.md"
 
 QG_REQUIRED = {
     "inventory section": "## Model Assurance Inventory (#746)",
@@ -47,6 +49,19 @@ QG_REQUIRED = {
     "recovery never assumes empty": "never an assumed-empty invocation set",
     "external response inventory": "stable response ID",
     "judge dispatch inventory": "silent-seed included",
+    "provisional vs terminal schema": "Provisional vs terminal schema",
+    "attestation pinned by inventory digest": "the inventory digest therefore pins the evidence",
+    "provisional recovery read": "resume with the provisional read",
+    "sole FinalArtifactHash computation": "computed only by `gated_hash`",
+}
+
+GATE_LEDGER_REQUIRED = {
+    "absent finality reads as final": "an absent `MarkerFinality`",
+    "only explicit chunk-milestone rejected": "only an explicit `chunk-milestone` is rejected",
+    "no assurance data at marker selection": "no inventory, roster, or assurance field is read here",
+    "roster check belongs to opt-in": "belong to this opt-in predicate only",
+    "evidence comes from host adapter": "host adapter supplies from its own protected store",
+    "no adapter means False": "with no host adapter the predicate returns False",
 }
 
 LEDGER_REQUIRED = {
@@ -56,8 +71,10 @@ LEDGER_REQUIRED = {
     "no transcripts or credentials": "Never archive raw provider transcripts or credentials",
 }
 
-def check_files(qg: str, ledger: str) -> list[str]:
+def check_files(qg: str, ledger: str, gate_ledger: str) -> list[str]:
     errors = [f"QG: missing {label}" for label, needle in QG_REQUIRED.items() if needle not in qg]
+    errors += [f"gate-ledger: missing {label}" for label, needle in GATE_LEDGER_REQUIRED.items()
+               if needle not in gate_ledger]
     errors += [f"ledger: missing {label}" for label, needle in LEDGER_REQUIRED.items() if needle not in ledger]
     return errors
 
@@ -88,6 +105,19 @@ _GOOD_QG = "\n".join([
     "never an assumed-empty invocation set",
     "one inventory row under its stable response ID",
     "silent-seed included",
+    "**Provisional vs terminal schema.**",
+    "the inventory digest therefore pins the evidence",
+    "resume with the provisional read",
+    "computed only by `gated_hash`",
+])
+
+_GOOD_GATE_LEDGER = "\n".join([
+    "an absent `MarkerFinality` reads as final",
+    "only an explicit `chunk-milestone` is rejected",
+    "no inventory, roster, or assurance field is read here",
+    "belong to this opt-in predicate only",
+    "that the host adapter supplies from its own protected store",
+    "with no host adapter the predicate returns False",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -98,38 +128,63 @@ _GOOD_LEDGER = "\n".join([
 ])
 
 def _behavior_fixtures() -> list[str]:
+    import unittest
+    from unittest import mock
     import qg_model_assurance as qma
+    import test_qg_model_assurance as fx
     errors: list[str] = []
-    data = {
-        "version": 1, "run_id": "run-1", "artifact_hash": "a" * 64, "final_artifact_hash": "b" * 64,
-        "roster": {"kind": "chunked", "chunks": ["c1", "cross-chunk"], "terminal": ["c1", "cross-chunk"],
-                   "consensus": ["synthesis"]},
-        "invocations": [
-            {"id": "review", "parent": "run-1", "scope": "c1", "disposition": "consumed", "assurance": "verified"},
-            {"id": "synthesis", "parent": "run-1", "scope": "cross-chunk", "disposition": "consumed", "assurance": "verified"},
-        ],
-    }
-    with tempfile.TemporaryDirectory() as tmp:
-        path = pathlib.Path(tmp, "inv.json")
-        digest = qma.write_inventory(path, data)
+
+    class _Case(fx.EvidenceFixture, unittest.TestCase):
+        def runTest(self):
+            pass
+
+    case = _Case()
+    case.setUp()
+    try:
+        path = pathlib.Path(case.tmp.name, "inv.json")
+        digest = qma.write_inventory(path, case.data, terminal=True)
         marker = {"Verdict": "PASS", "MarkerFinality": "final-integration", "RunID": "run-1",
                   "ArtifactHash": "a" * 64, "FinalArtifactHash": "b" * 64, "ModelAssurance": "verified",
                   "ModelAssuranceInventory": f"{path} sha256:{digest}"}
-        # Rejection: a chunk milestone must never satisfy qg-verified or read as whole-gate assurance.
-        if qma.action_allowed("qg-verified", {**marker, "MarkerFinality": "chunk-milestone"},
-                              path, digest, "b" * 64):
-            errors.append("fixture: chunk-milestone marker satisfied qg-verified")
-        # Rejection: an inventory omitting a mandatory consensus member is refused, not downgraded silently.
-        gapped = json.loads(json.dumps(data))
-        gapped["invocations"] = [row for row in gapped["invocations"] if row["id"] != "synthesis"]
+        trusted = {"evidence": case.evidence, "allowlist": case.allowlist, "policy": case.POLICY,
+                   "host_adapter": case.adapter}
+
+        def allowed(m=marker, **over):
+            return qma.caller_allowed("qg-verified", m, path, digest, "b" * 64, **{**trusted, **over})
+
+        # Baseline: the unflipped configuration is allowed and verified, or every flip below is vacuous.
+        if not allowed():
+            errors.append("fixture: baseline verified configuration was not allowed")
+        if case.reconcile() != "verified":
+            errors.append("fixture: baseline evidence did not reconcile to verified")
+        flips = {
+            "chunk-milestone marker satisfied qg-verified": dict(m={**marker, "MarkerFinality": "chunk-milestone"}),
+            "marker naming another inventory digest was accepted": dict(
+                m={**marker, "ModelAssuranceInventory": f"{path} sha256:{'e' * 64}"}),
+            "evidence without a host adapter produced verified": dict(host_adapter=None),
+            "empty allowlist produced verified": dict(allowlist={}),
+        }
+        for label, over in flips.items():
+            if allowed(**over):
+                errors.append(f"fixture: {label}")
+        # Rejection: same-uid evidence (the reviewer's own uid owns it) never verifies.
+        with mock.patch.object(qma.os, "getuid", return_value=case.real_uid):
+            if case.reconcile() != "unknown":
+                errors.append("fixture: reviewer-uid-owned evidence produced a verified state")
+        # Rejection: a mandatory consensus member recorded unused is refused, not downgraded silently.
+        gapped = json.loads(json.dumps(case.data))
+        gapped["invocations"][1]["disposition"] = "unused"
         try:
-            qma.write_inventory(pathlib.Path(tmp, "gap.json"), gapped)
-            errors.append("fixture: inventory omitting a mandatory consensus member was accepted")
+            qma.write_inventory(pathlib.Path(case.tmp.name, "gap.json"), gapped, terminal=True)
+            errors.append("fixture: inventory with an unused mandatory consensus member was accepted")
         except ValueError:
             pass
-        # Rejection: a wrapper result with no host evidence never verifies the whole run.
-        if qma.reconcile_evidence(data, {}, {}, {}) != "unknown":
-            errors.append("fixture: wrapper-only evidence produced a verified state")
+        # Rejection: evidence whose bytes the inventory does not pin never verifies.
+        case.data["invocations"][0]["attestation"]["digest"] = "e" * 64
+        if case.reconcile(evidence=case.signed()) != "unknown":
+            errors.append("fixture: evidence not anchored to the inventory produced a verified state")
+    finally:
+        case.doCleanups()
     # Fixture: the chunked gate's cross-chunk integration round completes receipt lint with its
     # findings and journal resolvable under the explicitly passed cross-chunk findings root.
     with tempfile.TemporaryDirectory() as tmp:
@@ -168,7 +223,7 @@ def _behavior_fixtures() -> list[str]:
     return errors
 
 def selftest() -> int:
-    errors = check_files(_GOOD_QG, _GOOD_LEDGER)
+    errors = check_files(_GOOD_QG, _GOOD_LEDGER, _GOOD_GATE_LEDGER)
     mutations = [
         ("chunk milestone non-qualifying", "QG", "must never be selected or displayed as whole-gate high assurance"),
         ("timestamp selection ban", "QG", "never select latest PASS by timestamp"),
@@ -180,11 +235,18 @@ def selftest() -> int:
         ("final hash freeze point", "QG", "frozen **after** all fixes including the post-PASS Minor"),
         ("cross-chunk layout pin", "QG", "Cross-chunk layout (pinned, #746)"),
         ("ledger shape section", "ledger", "### `model_assurance` shape (#746, additive optional)"),
+        ("provisional vs terminal schema", "QG", "**Provisional vs terminal schema.**"),
+        ("sole FinalArtifactHash computation", "QG", "computed only by `gated_hash`"),
+        ("absent finality reads as final", "gate", "an absent `MarkerFinality`"),
+        ("no assurance data at marker selection", "gate", "no inventory, roster, or assurance field is read here"),
+        ("roster check belongs to opt-in", "gate", "belong to this opt-in predicate only"),
+        ("no adapter means False", "gate", "with no host adapter the predicate returns False"),
     ]
     for label, target, needle in mutations:
         qg = _GOOD_QG.replace(needle, "") if target == "QG" else _GOOD_QG
         ledger = _GOOD_LEDGER.replace(needle, "") if target == "ledger" else _GOOD_LEDGER
-        if not check_files(qg, ledger):
+        gate = _GOOD_GATE_LEDGER.replace(needle, "") if target == "gate" else _GOOD_GATE_LEDGER
+        if not check_files(qg, ledger, gate):
             errors.append(f"selftest: removing {label!r} did not fail")
     errors.extend(f"selftest: {error}" for error in _behavior_fixtures())
     if errors:
@@ -202,10 +264,11 @@ def main(argv: list[str]) -> int:
     try:
         qg = read_runbook()
         ledger = LEDGER_DOC.read_text(encoding="utf-8")
+        gate_ledger = GATE_LEDGER_DOC.read_text(encoding="utf-8")
     except OSError as exc:
         print(f"QG MODEL-ASSURANCE CONTRACT: unreadable source: {exc}")
         return 1
-    errors = check_files(qg, ledger)
+    errors = check_files(qg, ledger, gate_ledger)
     if errors:
         print("QG MODEL-ASSURANCE CONTRACT DRIFT DETECTED:")
         for error in errors:

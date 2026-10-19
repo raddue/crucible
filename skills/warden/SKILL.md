@@ -537,7 +537,7 @@ So:
   persisted state blocks that opted-in action pending explicit user resolution
   and is never treated as `none`.
 - build's Verdict Marker Verification **read** logic — glob → PipelineID-filter →
-  PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** and now resolves
+  PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** (it additionally rejects only an explicit `MarkerFinality: chunk-milestone`; warden's aggregate marker carries no such field and reads as final) and now resolves
   **deterministically**: its filter surfaces exactly one marker (warden's
   aggregate), because the leg's marker is tagged with a different (warden)
   PipelineID.

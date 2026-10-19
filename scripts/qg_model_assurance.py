@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -68,39 +67,70 @@ def artifact_hash(root: Path, paths, *, deleted=frozenset(), document=False) -> 
 
 MAX_INVENTORY_BYTES = 1_048_576
 MAX_INVOCATIONS = 1024
+TERMINAL_STATUSES = ('PASS', 'STAGNATION', 'ESCALATED', 'ARCHITECTURAL', 'SUSTAINED_REGRESSION')
 
 
-def _validate_inventory(data: dict) -> None:
+def _hex64(value) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
+
+
+def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
+    """Provisional (mid-run, writable as the run proceeds) vs terminal (marker emit / caller check).
+
+    Provisional: any subset of chunks terminal, `final_artifact_hash`/`gated` may still be null.
+    Terminal: every chunk has a checked terminal status, the final hash and gated path set are
+    frozen, and every mandatory consensus member is a consumed row.
+    """
     try:
         roster = data['roster']
         rows = data['invocations']
         ids = [row['id'] for row in rows]
+        chunks, status, consensus = roster['chunks'], roster['terminal'], roster['consensus']
+        gated = data.get('gated')
         valid = (
             data['version'] == 1 and isinstance(data['run_id'], str) and bool(data['run_id'])
-            and all(isinstance(data[key], str) and len(data[key]) == 64
-                    and all(c in '0123456789abcdef' for c in data[key])
-                    for key in ('artifact_hash', 'final_artifact_hash'))
+            and _hex64(data['artifact_hash'])
             and roster['kind'] in ('single-artifact', 'chunked')
-            and isinstance(roster['chunks'], list) and bool(roster['chunks'])
-            and len(roster['chunks']) == len(set(roster['chunks']))
-            and set(roster['chunks']) == set(roster['terminal'])
-            and len(roster['consensus']) == len(set(roster['consensus']))
+            and isinstance(chunks, list) and bool(chunks) and len(chunks) == len(set(chunks))
+            and isinstance(status, dict) and set(status) <= set(chunks)
+            and all(value in TERMINAL_STATUSES for value in status.values())
+            and isinstance(consensus, list) and len(consensus) == len(set(consensus))
             and isinstance(rows, list) and 0 < len(rows) <= MAX_INVOCATIONS
             and len(ids) == len(set(ids)) and all(isinstance(i, str) and i for i in ids)
-            and set(roster['consensus']) <= set(ids)
+            and set(consensus) <= set(ids)
             and all(row['parent'] == data['run_id'] or row['parent'] in ids for row in rows)
             and all(row['scope'] and row['disposition'] in ('consumed', 'unused')
                     and row['assurance'] in ('verified', 'configured', 'unknown') for row in rows)
+            and all(_hex64(row['attestation'].get('digest')) and _hex64(row['attestation'].get('result_digest'))
+                    for row in rows if row['assurance'] == 'verified')
+            and (data['final_artifact_hash'] is None or _hex64(data['final_artifact_hash']))
+            and (gated is None or (isinstance(gated['paths'], list) and isinstance(gated['deleted'], list)
+                                   and all(isinstance(n, str) for n in gated['paths'] + gated['deleted'])))
         )
+        if valid and terminal:
+            consumed = {row['id'] for row in rows if row['disposition'] == 'consumed'}
+            valid = (_hex64(data['final_artifact_hash']) and gated is not None and bool(gated['paths'])
+                     and set(gated['deleted']) <= set(gated['paths'])
+                     and set(status) == set(chunks) and set(consensus) <= consumed)
         if not valid:
             raise ValueError('invalid fields')
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ValueError('invalid or incomplete QG assurance inventory') from exc
 
 
-def write_inventory(path: Path, data: dict) -> str:
+def gated_hash(data: dict, root: Path, *, document: bool = False) -> str:
+    """The only FinalArtifactHash computation: artifact_hash over the inventory's persisted gated set.
+
+    Hashes the working tree at `root`; a caller revalidating a commit must have a clean tree at
+    that commit. The hash binds `root`, so a different checkout fails closed.
+    """
+    gated = data['gated']
+    return artifact_hash(root, gated['paths'], deleted=frozenset(gated['deleted']), document=document)
+
+
+def write_inventory(path: Path, data: dict, *, terminal: bool = False) -> str:
     """Durable, bounded index; its digest proves integrity, not evidence origin."""
-    _validate_inventory(data)
+    _validate_inventory(data, terminal=terminal)
     raw = (json.dumps(data, sort_keys=True, separators=(',', ':')) + '\n').encode()
     if len(raw) > MAX_INVENTORY_BYTES:
         raise ValueError('QG assurance inventory exceeds byte limit')
@@ -117,22 +147,32 @@ def write_inventory(path: Path, data: dict) -> str:
         with path.open('rb') as saved:
             os.fsync(saved.fileno())
         digest = hashlib.sha256(raw).hexdigest()
-        read_inventory(path, digest, data['run_id'], data['artifact_hash'], data['final_artifact_hash'])
+        read_inventory(path, digest, data['run_id'], data['artifact_hash'],
+                       data['final_artifact_hash'] if terminal else None)
         return digest
     finally:
         if name and os.path.exists(name):
             os.unlink(name)
 
 
-def read_inventory(path: Path, digest: str, run_id: str, artifact: str, final_artifact: str) -> dict:
+def read_inventory(path: Path, digest: str | None, run_id: str, artifact: str, final_artifact: str | None) -> dict:
+    """Terminal read (final_artifact given): digest, binding and terminal schema all required.
+
+    Provisional read (final_artifact None): mid-run recovery only, no marker digest exists yet;
+    `digest` may be None and the result is never an assurance-bearing closure input.
+    """
+    terminal = final_artifact is not None
     try:
+        if terminal and digest is None:
+            raise ValueError('terminal read requires the marker digest')
         with Path(path).open('rb') as saved:
             raw = saved.read(MAX_INVENTORY_BYTES + 1)
-        if len(raw) > MAX_INVENTORY_BYTES or hashlib.sha256(raw).hexdigest() != digest:
+        if len(raw) > MAX_INVENTORY_BYTES or (digest is not None and hashlib.sha256(raw).hexdigest() != digest):
             raise ValueError('QG assurance inventory digest or size mismatch')
         data = json.loads(raw)
-        _validate_inventory(data)
-        if (data['run_id'], data['artifact_hash'], data['final_artifact_hash']) != (run_id, artifact, final_artifact):
+        _validate_inventory(data, terminal=terminal)
+        if (data['run_id'], data['artifact_hash']) != (run_id, artifact) or (
+                terminal and data['final_artifact_hash'] != final_artifact):
             raise ValueError('QG assurance inventory binding mismatch')
         return data
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -142,7 +182,7 @@ def read_inventory(path: Path, digest: str, run_id: str, artifact: str, final_ar
 def assurance_state(data: dict, policy: dict | None = None) -> str:
     """No host-owned observation exists in portable core; never claim verified."""
     try:
-        _validate_inventory(data)
+        _validate_inventory(data, terminal=True)
     except ValueError:
         return 'unknown'
     used = [row for row in data['invocations'] if row['disposition'] == 'consumed']
@@ -153,7 +193,8 @@ def assurance_state(data: dict, policy: dict | None = None) -> str:
 
 def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest: str,
                    current_final_hash: str, evidence: dict | None = None,
-                   allowlist: dict | None = None, policy: dict | None = None) -> bool:
+                   allowlist: dict | None = None, policy: dict | None = None,
+                   host_adapter=None) -> bool:
     """Caller predicate: opt-in needs reconciled host evidence; portable default blocks."""
     if requirement == 'none':
         return marker.get('Verdict') == 'PASS'
@@ -169,7 +210,8 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
         return False
     # Digest and inventory claims cannot attest their own protected origin.
     return (marker.get('ModelAssurance') == 'verified'
-            and reconcile_evidence(data, evidence or {}, allowlist or {}, policy or {}) == 'verified')
+            and reconcile_evidence(data, evidence or {}, allowlist or {}, policy or {},
+                                   host_adapter=host_adapter) == 'verified')
 
 
 def configured_assurance(request: dict | None, policy: dict | None) -> str:
@@ -179,30 +221,41 @@ def configured_assurance(request: dict | None, policy: dict | None) -> str:
     approved = policy.get(request.get('model'))
     return 'configured' if approved and all(request.get(key) == approved.get(key) for key in ('effort', 'route')) else 'unknown'
 
-def _protected(path: Path, *, key: bool = False) -> bool:
-    # shortcut: permission heuristics only — a same-user reviewer child can still forge;
-    # real origin protection arrives with the host adapter (#12) owning this area.
-    try:
-        info = Path(path).lstat()
-        parent = Path(path).parent.lstat()
-    except OSError:
-        return False
-    if stat.S_ISLNK(info.st_mode) or stat.S_ISLNK(parent.st_mode):
-        return False
-    if info.st_mode & (0o077 if key else 0o022) or parent.st_mode & 0o022:
-        return False
-    return info.st_uid == os.getuid()
+
+def _read_protected(path, owners, parent_checked: dict) -> bytes:
+    """Open once without following symlinks; the file must be a non-group/other-writable
+    regular file owned by one of the adapter's `owners` (uids other than the reviewer's)."""
+    path = Path(path)
+    parent = path.parent
+    if parent not in parent_checked:
+        info = parent.lstat()
+        parent_checked[parent] = (not stat.S_ISLNK(info.st_mode) and not info.st_mode & 0o022
+                                  and info.st_uid in owners)
+    if not parent_checked[parent]:
+        raise ValueError('unprotected evidence directory')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or info.st_uid not in owners:
+            raise ValueError('unprotected evidence file')
+        raw = handle.read(MAX_INVENTORY_BYTES + 1)
+    if len(raw) > MAX_INVENTORY_BYTES:
+        raise ValueError('evidence file exceeds byte limit')
+    return raw
+
 
 def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest: str | None,
                    current_final_hash: str | None, expected_run_id: str | None = None,
                    evidence: dict | None = None, allowlist: dict | None = None,
-                   policy: dict | None = None) -> bool:
+                   policy: dict | None = None, host_adapter=None) -> bool:
     """Persisted opt-in predicate at phase/push/recovery boundaries.
 
     A missing or `none` requirement keeps legacy behavior and never engages the
     proof tuple; `Status: PASS` stays artifact closure and is never rewritten.
     Unsupported values — including `warden-verified`, whose Warden-wide proof
     contract does not exist — fail closed and block only the opted-in action.
+    `evidence`, `allowlist`, `policy` and `host_adapter` come from the host adapter's
+    own protected store, never from the ledger or the reviewer.
     """
     if requirement in (None, '', 'none'):
         return True
@@ -212,39 +265,44 @@ def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest
         return False
     try:
         return action_allowed('qg-verified', marker, inventory_path, digest, current_final_hash,
-                              evidence=evidence, allowlist=allowlist, policy=policy)
+                              evidence=evidence, allowlist=allowlist, policy=policy,
+                              host_adapter=host_adapter)
     except (KeyError, TypeError, ValueError, OSError):
         return False
 
-def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None, policy: dict | None) -> str:
+
+def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None, policy: dict | None,
+                       *, host_adapter=None) -> str:
     """Reconcile host-owned evidence against the inventory; anything unproven is unknown.
 
-    `verified` requires a human-approved allowlist entry, an authenticated protected
-    origin (HMAC under a key the reviewer cannot read/write), and per-turn exact-ID
-    model/effort/route proof for every consumed invocation. The portable default
-    (empty allowlist) fails closed; every failure downgrades, never artifact FAIL.
+    `verified` requires an injected host adapter (`.name`, `.version`, `.owner_uids`,
+    `.authenticate(origin, canonical) -> bool`) that is on the human-approved allowlist
+    and authenticates origin out of the reviewer's reach; evidence files owned by one of
+    the adapter's uids and not child-writable; per-row attestation digests pinned by the
+    inventory (hence by the marker's inventory digest); and per-turn exact-ID
+    model/effort/route proof for every consumed invocation. With no adapter (the portable
+    default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
     """
     try:
-        _validate_inventory(data)
-        approved = allowlist[evidence['adapter']['name']]
-        origin = evidence['origin']
-        if approved['version'] != evidence['adapter']['version'] or approved['key_path'] != origin['key_path']:
+        if host_adapter is None:
             return 'unknown'
-        key_path = Path(origin['key_path'])
-        journal_path = Path(evidence['journal_path'])
+        _validate_inventory(data, terminal=True)
+        approved = allowlist[host_adapter.name]
+        if approved['version'] != host_adapter.version:
+            return 'unknown'
+        owners = frozenset(host_adapter.owner_uids)
+        if not owners or os.getuid() in owners:
+            return 'unknown'  # evidence the reviewer's own uid owns is reviewer-writable
         records = evidence['records']
+        checked: dict = {}
         if evidence['run_id'] != data['run_id']:
             return 'unknown'
-        if not all(_protected(path, key=is_key)
-                   for path, is_key in [(key_path, True), (journal_path, False)]
-                   + [(Path(index['path']), False) for index in records.values()]):
-            return 'unknown'
-        lines = [json.loads(line) for line in journal_path.read_text().splitlines() if line.strip()]
+        journal_raw = _read_protected(evidence['journal_path'], owners, checked)
+        lines = [json.loads(line) for line in journal_raw.decode().splitlines() if line.strip()]
         if len(lines) > MAX_INVOCATIONS:
             return 'unknown'
-        canonical = json.dumps({'journal': lines, 'records': records}, sort_keys=True, separators=(',', ':')).encode()
-        keyed = hmac.new(key_path.read_bytes(), canonical, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(keyed, origin['hmac']):
+        canonical = canonical_evidence(data, lines, records)
+        if host_adapter.authenticate(evidence['origin'], canonical) is not True:
             return 'unknown'
         consumed, seen, results = set(), set(), {}
         for line in lines:
@@ -259,19 +317,30 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
                 consumed.add(line['id'])
                 results[line['id']] = line['result_digest']
         expected = {row['id'] for row in data['invocations'] if row['disposition'] == 'consumed'}
-        if consumed != expected or set(records) != consumed or not set(data['roster']['consensus']) <= consumed:
+        if consumed != expected or set(records) != consumed:
             return 'unknown'
         for row in data['invocations']:
             if row['disposition'] != 'consumed':
                 continue
-            raw = Path(records[row['id']]['path']).read_bytes()
-            if len(raw) > MAX_INVENTORY_BYTES or hashlib.sha256(raw).hexdigest() != records[row['id']]['digest']:
-                return 'unknown'
+            raw = _read_protected(records[row['id']]['path'], owners, checked)
+            digest = hashlib.sha256(raw).hexdigest()
+            attestation = row.get('attestation') or {}
+            if digest != records[row['id']]['digest'] or digest != attestation.get('digest') \
+                    or attestation.get('result_digest') != results[row['id']]:
+                return 'unknown'  # evidence must be the exact bytes the inventory pins
             record = json.loads(raw)
             if (record['id'] != row['id'] or record['result_digest'] != results[row['id']]
                     or not record['turns']
                     or any(configured_assurance(turn, policy) != 'configured' for turn in record['turns'])):
                 return 'unknown'
         return 'verified'
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+    except (KeyError, TypeError, ValueError, OSError, AttributeError, json.JSONDecodeError):
         return 'unknown'
+
+
+def canonical_evidence(data: dict, journal: list, records: dict) -> bytes:
+    """Bytes the host adapter authenticates: bound to the run and the accepted final artifact."""
+    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],
+                       'final_artifact_hash': data['final_artifact_hash'],
+                       'journal': journal, 'records': records},
+                      sort_keys=True, separators=(',', ':')).encode()
