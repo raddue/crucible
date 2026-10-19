@@ -303,6 +303,21 @@ class GateProvenanceTest(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_missing_model_telemetry_preserves_artifact_pass(self):
+        self.row.pop('actual_model')
+        self.write_manifest()
+        self.write_receipt()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_present_conflicting_model_still_blocks(self):
+        self.row['actual_model'] = 'provider/other'
+        self.write_manifest()
+        self.write_receipt()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('differs from mapped model', result.stdout)
+
     def test_vacuous_receipt_fails_coverage_requirement(self):
         self.write_manifest()
         text = ("RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
