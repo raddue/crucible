@@ -76,6 +76,7 @@ GATE_LEDGER_REQUIRED = {
     "tuple rebuilds the marker": "rebuild the marker dict for `caller_allowed` from the ledger",
     "unknown never withholds PASS": "never a reason to withhold or fail PASS",
     "changed paths within gated set": "is in the inventory's `gated.paths`",
+    "expected_gated binds the artifact": "`expected_gated` binds the tuple to the artifact being authorized",
     "reconstruction keys on manifest opt-in line": "`**RequiredModelAssurance:** qg-verified` header line",
     "inventory or tuple is not an opt-in signal": "is not an opt-in signal",
     "gated_hash failure never passed as None": "is never passed to the predicate as `None`",
@@ -151,6 +152,7 @@ _GOOD_GATE_LEDGER = "\n".join([
     "rebuild the marker dict for `caller_allowed` from the ledger",
     "never a reason to withhold or fail PASS",
     "is in the inventory's `gated.paths`",
+    "`expected_gated` binds the tuple to the artifact being authorized",
     "takes the requirement from the manifests' `**RequiredModelAssurance:** qg-verified` header line",
     "A retained inventory or a `QGProofTuple` is not an opt-in signal",
     "is never passed to the predicate as `None`",
@@ -188,7 +190,8 @@ def _behavior_fixtures() -> list[str]:
                    "host_adapter": case.adapter}
 
         def allowed(m=marker, **over):
-            return qma.caller_allowed("qg-verified", m, path, digest, "b" * 64, **{**trusted, **over})
+            return qma.caller_allowed("qg-verified", m, path, digest, "b" * 64,
+                                      **{"expected_gated": ["a.txt"], **trusted, **over})
 
         # Baseline: the unflipped configuration is allowed and verified, or every flip below is vacuous.
         if not allowed():
@@ -201,6 +204,9 @@ def _behavior_fixtures() -> list[str]:
                 m={**marker, "ModelAssuranceInventory": f"{path} sha256:{'e' * 64}"}),
             "evidence without a host adapter produced verified": dict(host_adapter=None),
             "empty allowlist produced verified": dict(allowlist={}),
+            "tuple for another artifact authorized this phase artifact (expected_gated not bound)": dict(
+                expected_gated=["new.md"]),
+            "missing expected_gated was accepted": dict(expected_gated=None),
             "marker Gated-Files differing from the inventory gated set was accepted": dict(
                 m={**marker, "Gated-Files": json.dumps(["a.txt", "extra.txt"])}),
         }
@@ -209,9 +215,9 @@ def _behavior_fixtures() -> list[str]:
                 errors.append(f"fixture: {label}")
         # Rejection: a None binding (gated_hash failure, absent marker FinalArtifactHash, no digest) never authorizes.
         bare = {k: v for k, v in marker.items() if k != "FinalArtifactHash"}
-        if qma.caller_allowed("qg-verified", bare, path, digest, None, **trusted):
+        if qma.caller_allowed("qg-verified", bare, path, digest, None, expected_gated=["a.txt"], **trusted):
             errors.append("fixture: absent marker FinalArtifactHash with a None current hash was accepted")
-        if qma.caller_allowed("qg-verified", marker, path, None, "b" * 64, **trusted):
+        if qma.caller_allowed("qg-verified", marker, path, None, "b" * 64, expected_gated=["a.txt"], **trusted):
             errors.append("fixture: a None digest was accepted")
         if not qma.caller_allowed("none", {"Verdict": "PASS"}, None, None, None):
             errors.append("fixture: ordinary PASS was blocked by a None binding")
@@ -235,7 +241,8 @@ def _behavior_fixtures() -> list[str]:
         esc_path = pathlib.Path(case.tmp.name, "esc.json")
         esc_digest = qma.write_inventory(esc_path, case.data, terminal=True)
         esc_marker = {**marker, "ModelAssuranceInventory": f"{esc_path} sha256:{esc_digest}"}
-        if qma.caller_allowed("qg-verified", esc_marker, esc_path, esc_digest, "b" * 64, **trusted):
+        if qma.caller_allowed("qg-verified", esc_marker, esc_path, esc_digest, "b" * 64,
+                              expected_gated=["a.txt"], **trusted):
             errors.append("fixture: ESCALATED roster chunk authorized a PASS marker")
         case.data["roster"]["terminal"]["c2"] = "PASS"
         # Rejection: self-labelled verified rows with no host adapter never yield a verified marker.
@@ -367,6 +374,10 @@ _MUTANTS = {
     "None final hash binding removed": (
         "if not (_hex64(current_final_hash) and _hex64(digest) and _hex64(marker.get('FinalArtifactHash'))):",
         "if False:"),
+    "expected_gated artifact binding removed": ("if not set(expected_gated) <= set(data['gated']['paths']):",
+                                                "if False:"),
+    "expected_gated requirement removed": ("if (not isinstance(expected_gated, (list, tuple, set, frozenset)) or not expected_gated\n            or any(not isinstance(item, str) for item in expected_gated)):",
+                                           "if False:"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
                                   "if False:"),
 }
@@ -415,6 +426,7 @@ def selftest() -> int:
         ("tuple rebuilds the marker", "gate", "rebuild the marker dict for `caller_allowed` from the ledger"),
         ("unknown never withholds PASS", "gate", "never a reason to withhold or fail PASS"),
         ("changed paths within gated set", "gate", "is in the inventory's `gated.paths`"),
+        ("expected_gated binds the artifact", "gate", "`expected_gated` binds the tuple to the artifact being authorized"),
         ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure never passed as None", "gate", "is never passed to the predicate as `None`"),

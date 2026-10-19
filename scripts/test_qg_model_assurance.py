@@ -100,6 +100,14 @@ class ArtifactHashTest(unittest.TestCase):
             Path(other, 'run').chmod(0o755)
             self.assertNotEqual(artifact_hash(Path(other), ['run']), initial)
 
+    def test_exec_bit_is_owner_only_like_git(self):
+        (self.root / 'run').chmod(0o644)
+        plain = artifact_hash(self.root, ['run'])
+        (self.root / 'run').chmod(0o654)  # group-x only: git still records 100644
+        self.assertEqual(artifact_hash(self.root, ['run']), plain)
+        (self.root / 'run').chmod(0o744)
+        self.assertNotEqual(artifact_hash(self.root, ['run']), plain)
+
     def test_symlink_to_outside_is_hashed_not_followed(self):
         (self.root / 'link').unlink()
         (self.root / 'link').symlink_to('../outside')
@@ -743,6 +751,7 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                         'host_adapter': self.adapter}
 
     def allowed(self, marker=None, requirement='qg-verified', digest=None, final='b' * 64, **extra):
+        extra.setdefault('expected_gated', ['a.txt'])
         return caller_allowed(requirement, self.marker if marker is None else marker, self.path,
                               digest or self.digest, final, **{**self.trusted, **extra})
 
@@ -750,7 +759,19 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         self.assertTrue(self.allowed())
         self.assertTrue(action_allowed('qg-verified', self.marker, self.path, self.digest, 'b' * 64,
                                        evidence=self.evidence, allowlist=self.allowlist, policy=self.POLICY,
-                                       host_adapter=self.adapter))
+                                       host_adapter=self.adapter, expected_gated=['a.txt']))
+
+    def test_expected_gated_binds_tuple_to_artifact(self):
+        # A genuine verified tuple for a.txt must not authorize a different artifact (replay, r8 S1).
+        self.assertFalse(self.allowed(expected_gated=['new.md']))
+        self.assertFalse(self.allowed(expected_gated=['a.txt', 'new.md']))  # code caller: a changed path never gated
+        self.assertTrue(self.allowed(expected_gated=('a.txt',)))
+        for missing in (None, [], (), set(), 'a.txt', [None], [b'a.txt'], [1]):
+            with self.subTest(missing=missing):
+                self.assertFalse(self.allowed(expected_gated=missing))
+        # requirement none/absent is unaffected by the new input
+        self.assertTrue(caller_allowed('none', {'Verdict': 'PASS'}, None, None, None))
+        self.assertTrue(caller_allowed(None, {}, None, None, None))
 
     def test_legacy_and_none_never_engage(self):
         for requirement in (None, '', 'none'):
@@ -781,7 +802,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
             'no adapter': dict(host_adapter=None),
             'no allowlist': dict(allowlist={}),
             'no evidence': dict(evidence={}),
-            'wrong run': dict(expected_run_id='run-2'),
+            'other artifact': dict(expected_gated=['new.md']),
+            'no expected_gated': dict(expected_gated=None),
             'other final hash': dict(final='c' * 64),
             'other digest': dict(digest='e' * 64),
             'chunk milestone': dict(marker={**self.marker, 'MarkerFinality': 'chunk-milestone'}),
@@ -803,7 +825,8 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                     path = Path(self.tmp.name, 'esc-inv.json')
                     digest = write_inventory(path, self.data, terminal=True)
                     marker = {**self.marker, 'ModelAssuranceInventory': f'{path} sha256:{digest}'}
-                    self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64, **self.trusted))
+                    self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64,
+                                                    expected_gated=['a.txt'], **self.trusted))
                     self.data['roster']['terminal']['c2'] = 'PASS'
                     continue
                 self.assertFalse(self.allowed(**flip))
@@ -822,10 +845,15 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         trusted = {**self.trusted, 'evidence': self.signed()}
         # Caller side: read the persisted gated set provisionally, recompute, then run the predicate.
         recomputed = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), root)
-        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, recomputed, **trusted))
+        self.assertTrue(caller_allowed('qg-verified', marker, self.path, digest, recomputed,
+                                       expected_gated=['design.md'], **trusted))
+        # the same genuine tuple presented for a different phase artifact is refused
+        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, recomputed,
+                                        expected_gated=['new-design.md'], **trusted))
         (root / 'design.md').write_bytes(b'edited')
         stale = gated_hash(read_inventory(self.path, digest, 'run-1', 'a' * 64, None), root)
-        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, stale, **trusted))
+        self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, stale,
+                                        expected_gated=['design.md'], **trusted))
 
     def test_missing_inventory_blocks(self):
         os.unlink(self.path)

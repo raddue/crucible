@@ -72,7 +72,7 @@ def artifact_hash(root: Path, paths, *, deleted=frozenset(), document=False) -> 
             if stat.S_ISLNK(info.st_mode):
                 kind, mode, content = 'symlink', '120000', os.fsencode(os.readlink(path))
             elif stat.S_ISREG(info.st_mode):
-                kind, mode, content = 'regular', ('100755' if info.st_mode & 0o111 else '100644'), path.read_bytes()
+                kind, mode, content = 'regular', ('100755' if info.st_mode & stat.S_IXUSR else '100644'), path.read_bytes()
             else:
                 raise ValueError(f'unsupported gated file type: {name}')
             digest = hashlib.sha256(content).hexdigest()
@@ -251,8 +251,13 @@ def marker_assurance(data: dict, policy: dict | None = None, *, evidence: dict |
 def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest: str,
                    current_final_hash: str, evidence: dict | None = None,
                    allowlist: dict | None = None, policy: dict | None = None,
-                   host_adapter=None) -> bool:
+                   host_adapter=None, expected_gated=None) -> bool:
     """Caller predicate: opt-in needs reconciled host evidence; portable default blocks.
+
+    `expected_gated` (required for `qg-verified`) is the caller's own list of paths this action
+    authorizes (design/plan: the ledger phase's `Artifact:` path; code: `git diff --name-only
+    <base>..HEAD`); it must be a non-empty list/tuple/set of strings, each in the inventory's
+    `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
     `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
     missing one (for example after a `gated_hash` failure) returns False."""
@@ -263,6 +268,9 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     # Every binding input must be a real digest: a None/absent value never matches a None/absent value,
     # and a None final hash would otherwise silently turn the terminal read into a provisional one.
     if not (_hex64(current_final_hash) and _hex64(digest) and _hex64(marker.get('FinalArtifactHash'))):
+        return False
+    if (not isinstance(expected_gated, (list, tuple, set, frozenset)) or not expected_gated
+            or any(not isinstance(item, str) for item in expected_gated)):
         return False
     if marker.get('MarkerFinality') != 'final-integration' or marker.get('FinalArtifactHash') != current_final_hash:
         return False
@@ -279,6 +287,9 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     except (KeyError, TypeError, ValueError):
         return False
     if declared != set(data['gated']['paths']) - set(data['gated']['deleted']):
+        return False
+    # The tuple must belong to what this caller is authorizing, not merely be self-consistent.
+    if not set(expected_gated) <= set(data['gated']['paths']):
         return False
     # A PASS marker needs a roster whose every chunk ended PASS (the roster is a terminal-schema field).
     if any(value != 'PASS' for value in data['roster']['terminal'].values()):
@@ -351,7 +362,7 @@ def _read_protected(path, owners, parent_checked: dict) -> bytes:
 
 
 def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest: str | None,
-                   current_final_hash: str | None, expected_run_id: str | None = None,
+                   current_final_hash: str | None, expected_gated=None,
                    evidence: dict | None = None, allowlist: dict | None = None,
                    policy: dict | None = None, host_adapter=None) -> bool:
     """Persisted opt-in predicate at phase/push/recovery boundaries.
@@ -362,6 +373,9 @@ def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest
     contract does not exist — fail closed and block only the opted-in action.
     For `qg-verified`, `digest` and `current_final_hash` of `None` block the action: a
     `gated_hash` failure is never passed on as `None` (it blocks only the opted-in action).
+    `expected_gated` is mandatory for `qg-verified` (absent/None/empty/mismatch -> False; see
+    `action_allowed`). There is no `expected_run_id`: the marker's `RunID` is bound to the inventory
+    and `expected_gated` binds the tuple to the caller's artifact, so a run id from the same ledger adds nothing.
     `evidence`, `allowlist`, `policy` and `host_adapter` come from the host adapter's
     own protected store, never from the ledger or the reviewer.
     """
@@ -369,12 +383,10 @@ def caller_allowed(requirement: str | None, marker: dict, inventory_path, digest
         return True
     if requirement != 'qg-verified':
         return False
-    if expected_run_id is not None and marker.get('RunID') != expected_run_id:
-        return False
     try:
         return action_allowed('qg-verified', marker, inventory_path, digest, current_final_hash,
                               evidence=evidence, allowlist=allowlist, policy=policy,
-                              host_adapter=host_adapter)
+                              host_adapter=host_adapter, expected_gated=expected_gated)
     except (KeyError, TypeError, ValueError, OSError):
         return False
 
