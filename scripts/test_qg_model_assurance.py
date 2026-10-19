@@ -14,7 +14,8 @@ import unittest
 
 import qg_model_assurance as qma
 from qg_model_assurance import (artifact_hash, configured_assurance, write_inventory, read_inventory, assurance_state,
-                                action_allowed, reconcile_evidence, caller_allowed, canonical_evidence, gated_hash)
+                                action_allowed, reconcile_evidence, caller_allowed, canonical_evidence, gated_hash,
+                                marker_assurance)
 
 
 def reference_hash(root, entries):
@@ -131,7 +132,7 @@ class InventoryTest(unittest.TestCase):
             'final_artifact_hash': 'b' * 64, 'gated': GATED,
             'roster': {'kind': 'single-artifact', 'chunks': ['artifact'], 'terminal': {'artifact': 'PASS'}, 'consensus': []},
             'invocations': [{'id': 'round-1-review', 'parent': 'run-1', 'scope': 'artifact/round-1',
-                             'disposition': 'consumed', 'assurance': 'unknown'}],
+                             'disposition': 'consumed', 'assurance': 'unknown', 'kind': 'review'}],
         }
 
     def test_write_readback_and_absent_host_evidence(self):
@@ -145,6 +146,15 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(assurance_state(self.data, policy), 'configured')
         self.data['invocations'][0]['assurance'] = 'verified'
         self.assertEqual(assurance_state(self.data, policy), 'unknown')
+
+    def test_marker_assurance_ignores_row_labels(self):
+        # Rows self-labelled verified with hex attestations and no host adapter: never verified.
+        row = self.data['invocations'][0]
+        row.update(assurance='verified', attestation={'digest': 'c' * 64, 'result_digest': 'd' * 64})
+        self.assertEqual(marker_assurance(self.data), 'unknown')
+        row.update(assurance='configured', request={'model': 'provider/model', 'effort': 'high', 'route': 'fixed'})
+        policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
+        self.assertEqual(marker_assurance(self.data, policy), 'configured')
 
     def test_provisional_midrun_write_and_digestless_recovery_read(self):
         # Truthful incremental write: one of two chunks terminal, final hash and gated set not yet frozen.
@@ -178,6 +188,8 @@ class InventoryTest(unittest.TestCase):
             'document mode with two paths': lambda d: d.update(gated={**GATED, 'mode': 'document'}),
             'document mode with deletion': lambda d: d.update(gated={'paths': ['a'], 'deleted': ['a'], 'mode': 'document'}),
             'row kind not a string': lambda d: d['invocations'][0].update(kind=7),
+            'row kind missing': lambda d: d['invocations'][0].pop('kind'),
+            'row kind empty': lambda d: d['invocations'][0].update(kind=''),
             'verified row lacks attestation': lambda d: d['invocations'][0].update(assurance='verified', attestation={}),
         }.items():
             data = deepcopy(self.data)
@@ -216,7 +228,7 @@ class InventoryTest(unittest.TestCase):
         request = {'model': 'provider/model', 'effort': 'high', 'route': 'fixed'}
         self.data['invocations'] = [
             {'id': f'r{i}', 'parent': 'run-1', 'scope': 's', 'disposition': 'consumed',
-             'assurance': 'configured', 'request': dict(request)} for i in range(2)]
+             'assurance': 'configured', 'kind': 'review', 'request': dict(request)} for i in range(2)]
         self.assertEqual(assurance_state(self.data, policy), 'configured')
         self.data['invocations'][1]['assurance'] = 'unknown'  # one weaker row caps the run
         self.assertEqual(assurance_state(self.data, policy), 'unknown')
@@ -304,9 +316,9 @@ class EvidenceFixture:
             'roster': {'kind': 'chunked', 'chunks': ['c1', 'c2'], 'terminal': {'c1': 'PASS', 'c2': 'PASS'},
                        'consensus': []},
             'invocations': [
-                {'id': 'review', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'consumed', 'assurance': 'verified'},
-                {'id': 'synthesis', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'consumed', 'assurance': 'verified'},
-                {'id': 'failed-member', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'unused', 'assurance': 'unknown'},
+                {'id': 'review', 'parent': 'run-1', 'scope': 'c1', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'},
+                {'id': 'synthesis', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'},
+                {'id': 'failed-member', 'parent': 'run-1', 'scope': 'c2', 'disposition': 'unused', 'assurance': 'unknown', 'kind': 'review'},
             ],
         }
         self.allowlist = {'test-host': {'version': '2'}}
@@ -456,6 +468,51 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         replayed = [dict(line, replay=True) if line['id'] == 'synthesis' else line for line in self.journal]
         self.assertEqual(self.reconcile(evidence=self.signed(journal=replayed)), 'unknown')
 
+    def test_extra_consumed_invocation_not_in_inventory(self):
+        # The journal AND the records carry a consumed `ghost` the inventory omits: completeness fails.
+        ghost = {'id': 'ghost', 'run_id': 'run-1', 'disposition': 'consumed', 'result_digest': '4' * 64}
+        path = self.dir / 'ghost.json'
+        path.write_text(json.dumps({'id': 'ghost', 'result_digest': '4' * 64, 'turns': [self.TURN]}))
+        records = {**self.records, 'ghost': {'path': str(path), 'digest': hashlib.sha256(path.read_bytes()).hexdigest()}}
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=self.journal + [ghost], records=records)), 'unknown')
+
+    def test_journal_edited_after_signing(self):
+        evidence = self.signed()
+        # an unused line is checked by nothing else, so only the signature can notice the edit
+        edited = [dict(line, result_digest='9' * 64) if line['id'] == 'failed-member' else line for line in self.journal]
+        self.journal_path.write_text(''.join(json.dumps(line) + '\n' for line in edited))
+        self.assertEqual(self.reconcile(evidence=evidence), 'unknown')  # signature no longer covers the bytes
+
+    def test_record_self_mismatch_and_unknown_disposition(self):
+        self.put_record('review', {'id': 'other', 'result_digest': '1' * 64, 'turns': [self.TURN]})
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')  # record names another invocation
+        self.put_record('review', {'id': 'review', 'result_digest': '8' * 64, 'turns': [self.TURN]})
+        self.data['invocations'][0]['attestation']['result_digest'] = '1' * 64
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')  # record digest != journal result
+        self.put_record('review', {'id': 'review', 'result_digest': '1' * 64, 'turns': [self.TURN] * 2})
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
+        odd = [dict(line, disposition='pending') if line['id'] == 'failed-member' else line for line in self.journal]
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=odd)), 'unknown')
+
+    def test_review_mode_consensus_row_without_kind_or_roster_entry(self):
+        # Periodic review-mode consensus is not in roster.consensus: the required `kind` carries the cap.
+        self.data['invocations'][0].pop('kind')
+        with self.assertRaises(ValueError):
+            write_inventory(Path(self.tmp.name, 'x.json'), self.data, terminal=True)
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')  # terminal schema rejects it
+        self.data['invocations'][0]['kind'] = 'consensus-synthesis'
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'unknown')
+        self.data['invocations'][0]['kind'] = 'review'
+        flagged = [dict(line, kind='consensus-member') if line['id'] == 'review' else line for line in self.journal]
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=flagged)), 'unknown')  # journal-observed
+
+    def test_marker_assurance_verified_only_via_reconcile(self):
+        self.assertEqual(marker_assurance(self.data, self.POLICY), 'unknown')  # labels alone, no adapter
+        self.assertEqual(marker_assurance(self.data, self.POLICY, evidence=self.evidence,
+                                          allowlist=self.allowlist, host_adapter=self.adapter), 'verified')
+        self.assertEqual(marker_assurance(self.data, self.POLICY, evidence=self.evidence,
+                                          allowlist={}, host_adapter=self.adapter), 'unknown')
+
     def test_missing_stale_or_unavailable_records(self):
         stale = self.signed()
         Path(self.records['review']['path']).write_text('{"tampered": true}')
@@ -491,7 +548,7 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
 
     def test_look_harder_demotion_and_consensus_membership(self):
         self.data['invocations'].append({'id': 'look-harder', 'parent': 'run-1', 'scope': 'c1',
-                                         'disposition': 'consumed', 'assurance': 'verified'})
+                                         'disposition': 'consumed', 'assurance': 'verified', 'kind': 'review'})
         self.journal.append({'id': 'look-harder', 'run_id': 'run-1', 'disposition': 'consumed', 'result_digest': '5' * 64})
         self.put_record('look-harder', {'id': 'look-harder', 'result_digest': '5' * 64, 'turns': [self.TURN]})
         self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
@@ -554,6 +611,7 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
             'wrong inventory field': dict(marker={**self.marker, 'ModelAssuranceInventory': f'{self.path} sha256:{"e" * 64}'}),
             'inventory field other path': dict(marker={**self.marker, 'ModelAssuranceInventory': f'/elsewhere sha256:{self.digest}'}),
             'marker says unknown': dict(marker={**self.marker, 'ModelAssurance': 'unknown'}),
+            'roster chunk not PASS': 'roster',
             'marker not PASS': dict(marker={**self.marker, 'Verdict': 'ESCALATED'}),
             'other run in marker': dict(marker={**self.marker, 'RunID': 'run-2'}),
             'gated set omits a changed file': dict(marker={**self.marker, 'Gated-Files': json.dumps(['a.txt', 'extra.txt'])}),
@@ -562,6 +620,14 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         }
         for label, flip in flips.items():
             with self.subTest(label):
+                if flip == 'roster':  # a verified inventory whose own roster records a non-PASS chunk
+                    self.data['roster']['terminal']['c2'] = 'ESCALATED'
+                    path = Path(self.tmp.name, 'esc-inv.json')
+                    digest = write_inventory(path, self.data, terminal=True)
+                    marker = {**self.marker, 'ModelAssuranceInventory': f'{path} sha256:{digest}'}
+                    self.assertFalse(caller_allowed('qg-verified', marker, path, digest, 'b' * 64, **self.trusted))
+                    self.data['roster']['terminal']['c2'] = 'PASS'
+                    continue
                 self.assertFalse(self.allowed(**flip))
 
     def test_document_mode_caller_flow_without_any_mode_argument(self):

@@ -21,6 +21,7 @@ from qg_source import read_runbook
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER_DOC = ROOT / "skills/shared/ledger-append.md"
 GATE_LEDGER_DOC = ROOT / "skills/build/references/gate-ledger.md"
+PIPELINE_STATUS_DOC = ROOT / "skills/build/references/pipeline-status.md"
 
 QG_REQUIRED = {
     "inventory section": "## Model Assurance Inventory (#746)",
@@ -54,6 +55,14 @@ QG_REQUIRED = {
     "provisional recovery read": "resume with the provisional read",
     "sole FinalArtifactHash computation": "computed only by `gated_hash`",
     "gated_hash failure downgrades": "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`",
+    "marker ModelAssurance is marker_assurance output": "`ModelAssurance` is the output of `marker_assurance`",
+    "row labels never feed verified": "never an input to `verified`",
+    "kind required on every row": "a required non-empty `kind`",
+    "consensus rows carry kind": "`kind: consensus-member` / `consensus-synthesis`",
+}
+
+PIPELINE_REQUIRED = {
+    "manifest writer rule for opt-in line": "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line",
 }
 
 GATE_LEDGER_REQUIRED = {
@@ -78,11 +87,14 @@ LEDGER_REQUIRED = {
     "no transcripts or credentials": "Never archive raw provider transcripts or credentials",
 }
 
-def check_files(qg: str, ledger: str, gate_ledger: str) -> list[str]:
+def check_files(qg: str, ledger: str, gate_ledger: str, pipeline: str | None = None) -> list[str]:
     errors = [f"QG: missing {label}" for label, needle in QG_REQUIRED.items() if needle not in qg]
     errors += [f"gate-ledger: missing {label}" for label, needle in GATE_LEDGER_REQUIRED.items()
                if needle not in gate_ledger]
     errors += [f"ledger: missing {label}" for label, needle in LEDGER_REQUIRED.items() if needle not in ledger]
+    if pipeline is not None:
+        errors += [f"pipeline-status: missing {label}" for label, needle in PIPELINE_REQUIRED.items()
+                   if needle not in pipeline]
     return errors
 
 _GOOD_QG = "\n".join([
@@ -117,7 +129,13 @@ _GOOD_QG = "\n".join([
     "resume with the provisional read",
     "computed only by `gated_hash`",
     "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`",
+    "`ModelAssurance` is the output of `marker_assurance`",
+    "a row's `assurance` label is never an input to `verified`",
+    "a required non-empty `kind`",
+    "written with `kind: consensus-member` / `consensus-synthesis`",
 ])
+
+_GOOD_PIPELINE = "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"
 
 _GOOD_GATE_LEDGER = "\n".join([
     "an absent `MarkerFinality` reads as final",
@@ -183,6 +201,25 @@ def _behavior_fixtures() -> list[str]:
         for label, over in flips.items():
             if allowed(**over):
                 errors.append(f"fixture: {label}")
+        # Rejection: a verified inventory whose roster records a non-PASS chunk cannot authorize a PASS marker.
+        case.data["roster"]["terminal"]["c2"] = "ESCALATED"
+        esc_path = pathlib.Path(case.tmp.name, "esc.json")
+        esc_digest = qma.write_inventory(esc_path, case.data, terminal=True)
+        esc_marker = {**marker, "ModelAssuranceInventory": f"{esc_path} sha256:{esc_digest}"}
+        if qma.caller_allowed("qg-verified", esc_marker, esc_path, esc_digest, "b" * 64, **trusted):
+            errors.append("fixture: ESCALATED roster chunk authorized a PASS marker")
+        case.data["roster"]["terminal"]["c2"] = "PASS"
+        # Rejection: self-labelled verified rows with no host adapter never yield a verified marker.
+        if qma.marker_assurance(case.data, case.POLICY) == "verified":
+            errors.append("fixture: marker_assurance trusted row labels without a host adapter")
+        # Rejection: a terminal row with no `kind` is refused (consensus cap keys on it).
+        kindless = json.loads(json.dumps(case.data))
+        del kindless["invocations"][0]["kind"]
+        try:
+            qma.write_inventory(pathlib.Path(case.tmp.name, "kindless.json"), kindless, terminal=True)
+            errors.append("fixture: terminal inventory row without kind was accepted")
+        except ValueError:
+            pass
         # Rejection: same-uid evidence (the reviewer's own uid owns it) never verifies.
         with mock.patch.object(qma.os, "getuid", return_value=case.real_uid):
             if case.reconcile() != "unknown":
@@ -212,11 +249,12 @@ def _behavior_fixtures() -> list[str]:
         (cross / "round-1-findings.md").write_text("finding\n")
         (cross / "fix-journal.md").write_text("journal\n")
         (cross / "round-1-coverage.md").write_text("")
+        nl = b"\n"
         receipt = (
             "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
             "ARTIFACTS\n"
-            f"  round-1-findings.md sha256:{hashlib.sha256(b'finding' + b'\n').hexdigest()} 8\n"
-            f"  fix-journal.md sha256:{hashlib.sha256(b'journal' + b'\n').hexdigest()} 8\n"
+            f"  round-1-findings.md sha256:{hashlib.sha256(b'finding' + nl).hexdigest()} 8\n"
+            f"  fix-journal.md sha256:{hashlib.sha256(b'journal' + nl).hexdigest()} 8\n"
             "TRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
             "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
             "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
@@ -239,8 +277,37 @@ def _behavior_fixtures() -> list[str]:
             errors.append("fixture: bare-basename citation resolved without the explicit cross-chunk root")
     return errors
 
+_MUTANTS = {
+    "completeness reconciliation removed": ("if consumed != expected or set(records) != consumed:",
+                                            "if set(records) != consumed:"),
+    "journal dropped from signed bytes": ("'journal': journal, 'records': records}", "'records': records}"),
+    "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
+                                  "if False:"),
+}
+
+
+def _mutation_guards() -> list[str]:
+    """Apply each mutant to a temp copy of the module (never the real one); the module tests must fail."""
+    errors: list[str] = []
+    scripts = pathlib.Path(__file__).resolve().parent
+    source = (scripts / "qg_model_assurance.py").read_text(encoding="utf-8")
+    for label, (old, new) in _MUTANTS.items():
+        if source.count(old) != 1:
+            errors.append(f"mutant anchor not found: {label}")
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("test_qg_model_assurance.py", "qg_source.py"):
+                (pathlib.Path(tmp) / name).write_text((scripts / name).read_text(encoding="utf-8"), encoding="utf-8")
+            (pathlib.Path(tmp) / "qg_model_assurance.py").write_text(source.replace(old, new), encoding="utf-8")
+            run = subprocess.run([sys.executable, "test_qg_model_assurance.py"], cwd=tmp,
+                                 capture_output=True, text=True)
+            if run.returncode == 0:
+                errors.append(f"mutant survived the module tests: {label}")
+    return errors
+
+
 def selftest() -> int:
-    errors = check_files(_GOOD_QG, _GOOD_LEDGER, _GOOD_GATE_LEDGER)
+    errors = check_files(_GOOD_QG, _GOOD_LEDGER, _GOOD_GATE_LEDGER, _GOOD_PIPELINE)
     mutations = [
         ("chunk milestone non-qualifying", "QG", "must never be selected or displayed as whole-gate high assurance"),
         ("timestamp selection ban", "QG", "never select latest PASS by timestamp"),
@@ -265,14 +332,21 @@ def selftest() -> int:
         ("reconstruction keys on manifest opt-in line", "gate", "`**RequiredModelAssurance:** qg-verified` header line"),
         ("inventory or tuple is not an opt-in signal", "gate", "is not an opt-in signal"),
         ("gated_hash failure downgrades", "QG", "write `FinalArtifactHash: unknown` and `ModelAssurance: unknown`"),
+        ("marker ModelAssurance is marker_assurance output", "QG", "`ModelAssurance` is the output of `marker_assurance`"),
+        ("row labels never feed verified", "QG", "never an input to `verified`"),
+        ("kind required on every row", "QG", "a required non-empty `kind`"),
+        ("consensus rows carry kind", "QG", "`kind: consensus-member` / `consensus-synthesis`"),
+        ("manifest writer rule for opt-in line", "pipeline", "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"),
     ]
     for label, target, needle in mutations:
         qg = _GOOD_QG.replace(needle, "") if target == "QG" else _GOOD_QG
         ledger = _GOOD_LEDGER.replace(needle, "") if target == "ledger" else _GOOD_LEDGER
         gate = _GOOD_GATE_LEDGER.replace(needle, "") if target == "gate" else _GOOD_GATE_LEDGER
-        if not check_files(qg, ledger, gate):
+        pipe = _GOOD_PIPELINE.replace(needle, "") if target == "pipeline" else _GOOD_PIPELINE
+        if not check_files(qg, ledger, gate, pipe):
             errors.append(f"selftest: removing {label!r} did not fail")
     errors.extend(f"selftest: {error}" for error in _behavior_fixtures())
+    errors.extend(f"selftest: {error}" for error in _mutation_guards())
     if errors:
         print("SELFTEST FAILED:")
         for error in errors:
@@ -289,10 +363,11 @@ def main(argv: list[str]) -> int:
         qg = read_runbook()
         ledger = LEDGER_DOC.read_text(encoding="utf-8")
         gate_ledger = GATE_LEDGER_DOC.read_text(encoding="utf-8")
+        pipeline = PIPELINE_STATUS_DOC.read_text(encoding="utf-8")
     except OSError as exc:
         print(f"QG MODEL-ASSURANCE CONTRACT: unreadable source: {exc}")
         return 1
-    errors = check_files(qg, ledger, gate_ledger)
+    errors = check_files(qg, ledger, gate_ledger, pipeline)
     if errors:
         print("QG MODEL-ASSURANCE CONTRACT DRIFT DETECTED:")
         for error in errors:

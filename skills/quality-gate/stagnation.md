@@ -173,7 +173,7 @@ one-time visible warning of its own ("agent type `crucible-qg-judge` not install
 the judge is running on the inherited/session model — the Sonnet pin is NOT
 enforced; install per harness-adapter §8") rather than degrading silently.**
 
-**Assurance inventory (#746).** Every judge dispatch — silent-seed included — is recorded in the model-assurance inventory before its verdict is consumed (loop.md › Model Assurance Inventory). When `consensus_query(mode: 'verdict')` replaces the single judge dispatch, its consumed successful members and their separate synthesis are inventory rows too, kept separate from the terminal-round `model_resolution` field, which reserves no key for the verdict-mode judge.
+**Assurance inventory (#746).** Every judge dispatch — silent-seed included — is recorded in the model-assurance inventory before its verdict is consumed (loop.md › Model Assurance Inventory). When `consensus_query(mode: 'verdict')` replaces the single judge dispatch, its consumed successful members and their separate synthesis are inventory rows too (written with `kind: consensus-member` / `consensus-synthesis`), kept separate from the terminal-round `model_resolution` field, which reserves no key for the verdict-mode judge.
 
 
 **Input the orchestrator provides:**

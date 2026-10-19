@@ -206,7 +206,7 @@ Periodic application (rather than every-round) keeps cost manageable. A 10-round
 | quality-gate | Red-team review | review | Rounds 1, 4, 7, 10, 13 |
 | design | Challenger (deep dive) | investigate | Every deep-dive challenge |
 
-**Assurance inventory (#746).** QG callers record every consumed successful member and the synthesis of each `consensus_query` call — review and verdict modes alike — as separate inventory rows (loop.md › Model Assurance Inventory), with verdict-mode member/synthesis rows kept separate from the terminal-round `model_resolution` ledger field. This interface exposes no stable per-member response identity or source, so consensus membership remains unobservable for `verified`: QG assurance is at most `configured`/`unknown` until stable identifiers ship. Failed and unused members are recorded `unused` and contribute nothing to aggregate assurance.
+**Assurance inventory (#746).** QG callers record every consumed successful member and the synthesis of each `consensus_query` call — review and verdict modes alike — as separate inventory rows, each written with `kind: consensus-member` / `consensus-synthesis` (loop.md › Model Assurance Inventory), with verdict-mode member/synthesis rows kept separate from the terminal-round `model_resolution` ledger field. This interface exposes no stable per-member response identity or source, so consensus membership remains unobservable for `verified`: QG assurance is at most `configured`/`unknown` until stable identifiers ship. Failed and unused members are recorded `unused` and contribute nothing to aggregate assurance.
 
 ### Excluded (with rationale)
 

@@ -135,8 +135,8 @@ are available:
    are appended to round output but not routed through the aggregator
 6. Record every non-errored external response actually consumed — bridged into
    consensus or appended to round output / fix-journal context — as one
-   inventory row under its stable response ID (loop.md › Model Assurance
-   Inventory); a bridged response is the same invocation as its consensus-member
+   inventory row under its stable response ID, `kind` `consensus-member` when
+   bridged into consensus (loop.md › Model Assurance Inventory); a bridged response is the same invocation as its consensus-member
    row and counts once. Identity or source that cannot be independently attested
    keeps that contribution `unknown`.
 

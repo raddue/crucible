@@ -99,7 +99,8 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
 
     Provisional: any subset of chunks terminal, `final_artifact_hash`/`gated` may still be null.
     Terminal: every chunk has a checked terminal status, the final hash and gated path set are
-    frozen, and every mandatory consensus member is a consumed row.
+    frozen, every row carries a non-empty `kind` (consensus rows `consensus-member` /
+    `consensus-synthesis`, any mode), and every mandatory consensus member is a consumed row.
     """
     try:
         roster = data['roster']
@@ -134,6 +135,7 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
         if valid and terminal:
             consumed = {row['id'] for row in rows if row['disposition'] == 'consumed'}
             valid = (_hex64(data['final_artifact_hash']) and gated is not None and bool(gated['paths'])
+                     and all(isinstance(row.get('kind'), str) and row['kind'] for row in rows)
                      and set(gated['deleted']) <= set(gated['paths'])
                      and set(status) == set(chunks) and set(consensus) <= consumed)
         if not valid:
@@ -219,6 +221,16 @@ def assurance_state(data: dict, policy: dict | None = None) -> str:
             else 'unknown')
 
 
+def marker_assurance(data: dict, policy: dict | None = None, *, evidence: dict | None = None,
+                     allowlist: dict | None = None, host_adapter=None) -> str:
+    """The only source of the terminal marker's `ModelAssurance`: `verified` only when
+    `reconcile_evidence` proves it, else `assurance_state`. Row `assurance` labels are never
+    an input to `verified`; without a host adapter (the portable default) this is never verified."""
+    if reconcile_evidence(data, evidence, allowlist, policy, host_adapter=host_adapter) == 'verified':
+        return 'verified'
+    return assurance_state(data, policy)
+
+
 def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest: str,
                    current_final_hash: str, evidence: dict | None = None,
                    allowlist: dict | None = None, policy: dict | None = None,
@@ -243,6 +255,9 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     except (KeyError, TypeError, ValueError):
         return False
     if declared != set(data['gated']['paths']) - set(data['gated']['deleted']):
+        return False
+    # A PASS marker needs a roster whose every chunk ended PASS (the roster is a terminal-schema field).
+    if any(value != 'PASS' for value in data['roster']['terminal'].values()):
         return False
     # Digest and inventory claims cannot attest their own protected origin.
     return (marker.get('ModelAssurance') == 'verified'
@@ -317,7 +332,7 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
     the adapter's uids and not child-writable; per-row attestation digests pinned by the
     inventory (hence by the marker's inventory digest); and per-turn exact-ID
     model/effort/route proof for every consumed invocation, and no consensus row (a roster
-    with consensus membership, or a consumed row whose optional `kind` starts `consensus`, is
+    with consensus membership, or a consumed row or journal line whose `kind` starts `consensus`, is
     capped at `unknown` until the consensus API exposes stable member identity). With no adapter (the portable
     default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
     """
@@ -349,6 +364,8 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
             return 'unknown'
         consumed, seen, results = set(), set(), {}
         for line in lines:
+            if line.get('disposition') == 'consumed' and str(line.get('kind', '')).startswith('consensus'):
+                return 'unknown'  # the adapter's own journal observed a consensus call
             if line['run_id'] != data['run_id'] or line['id'] in seen:
                 return 'unknown'  # wrong binding, or a bridged response counted twice
             seen.add(line['id'])
