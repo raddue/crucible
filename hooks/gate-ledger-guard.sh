@@ -255,8 +255,12 @@ for PHASE_NUM in $NEW_PASS_PHASES; do
     MARKER_PID="$(grep -m1 '^PipelineID:' "$MARKER" 2>/dev/null | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
     MARKER_VERDICT="$(grep -m1 '^Verdict:' "$MARKER" 2>/dev/null | sed 's/^Verdict:[[:space:]]*//;s/[[:space:]]*$//')"
     MARKER_PHASE="$(grep -m1 '^Phase:' "$MARKER" 2>/dev/null | sed 's/^Phase:[[:space:]]*//;s/[[:space:]]*$//')"
+    # #746/#750: only an explicit chunk-milestone is non-final (gate-ledger.md
+    # Verdict Marker Verification step 4); an absent MarkerFinality reads as final.
+    MARKER_FINALITY="$(grep -m1 '^MarkerFinality:' "$MARKER" 2>/dev/null | sed 's/^MarkerFinality:[[:space:]]*//;s/[[:space:]]*$//')"
 
-    if [ "$MARKER_PID" = "$PIPELINE_ID" ] && [ "$MARKER_VERDICT" = "PASS" ] && [ "$MARKER_PHASE" = "$EXPECTED_PHASE" ]; then
+    if [ "$MARKER_PID" = "$PIPELINE_ID" ] && [ "$MARKER_VERDICT" = "PASS" ] && [ "$MARKER_PHASE" = "$EXPECTED_PHASE" ] \
+       && [ "$MARKER_FINALITY" != "chunk-milestone" ]; then
       FOUND_MATCH=true
       break
     fi
