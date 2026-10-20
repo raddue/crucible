@@ -167,12 +167,15 @@ def gated_hash(data: dict, root: Path, *, committed: bool = False) -> str:
 
     Hashes the working tree at `root`. A caller revalidating a commit passes `committed=True`: in
     manifest mode any gated path whose working-tree or index state differs from HEAD then raises, so
-    a tree restored to the reviewed bytes cannot mask unreviewed bytes committed to HEAD. In manifest
+    a tree restored to the reviewed bytes cannot mask unreviewed bytes committed to HEAD; an empty
+    manifest set raises its own error instead of being checked against the whole tree. In manifest
     mode the hash binds `root`, so a different checkout fails closed (document mode hashes raw bytes
     only and needs no git). A symlink binds its target string, never the target's content (git
     semantics, design): content reached through a link is outside the gated set.
     """
     gated = data['gated']
+    if committed and gated['mode'] == 'manifest' and not gated['paths']:
+        raise ValueError('empty gated set: nothing to revalidate')  # `--` with no pathspec scopes the whole tree
     if committed and gated['mode'] == 'manifest' and _git(
             root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames', '--', *gated['paths']):
         raise ValueError('gated paths differ from HEAD: commit or restore them before revalidating')
@@ -209,8 +212,13 @@ def freeze_gated(root: Path, base: str, *, untracked_at_start=()) -> dict:
     plus untracked non-ignored files, minus `CLEAN_TREE_EXEMPT` and minus `untracked_at_start` (the
     inventory's gate-start `ls-files --others` snapshot, so orchestrator files that predate the gate
     are never swept in). `base` is resolved to its commit id and persisted as `gated.base`, the only
-    base a caller's `committed_paths` may use. Edge inputs raise ValueError (downgrade to unknown).
+    base a caller's `committed_paths` may use. `untracked_at_start` must be a list/tuple/set/frozenset
+    of non-empty str (a bare string would split into characters). Edge inputs raise ValueError
+    (downgrade to unknown).
     """
+    if (not isinstance(untracked_at_start, (list, tuple, set, frozenset))
+            or any(not isinstance(name, str) or not name for name in untracked_at_start)):
+        raise ValueError('untracked_at_start must be a list of non-empty paths')
     commit = _git(root, 'rev-parse', '--verify', '--end-of-options', f'{base}^{{commit}}').decode().strip()
     status = _nul_list(_git(root, 'diff', '--no-renames', '--no-relative', '--name-status', '-z', commit))
     if len(status) % 2:

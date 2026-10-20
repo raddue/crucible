@@ -1080,6 +1080,29 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
         git('commit', '-qm', 'end-of-session memory')
         self.assertEqual(sorted(qma.committed_paths(repo, base)), sorted(gated['paths']))
 
+    def test_untracked_at_start_argument_shape_checked(self):
+        # #750 round 2 M1: a bare string would be split into characters, silently gating the snapshot file.
+        repo, _, base = self._fix_repo()
+        (repo / 'orch_status.md').write_text('STATE: WORKING\n')
+        for bad in ('orch_status.md', None, ['orch_status.md', 1], [''], {'orch_status.md': 1}):
+            with self.subTest(untracked_at_start=bad), self.assertRaises(ValueError):
+                qma.freeze_gated(repo, base, untracked_at_start=bad)
+        for good in (['orch_status.md'], ('orch_status.md',), {'orch_status.md'}, frozenset({'orch_status.md'})):
+            with self.subTest(untracked_at_start=good):
+                self.assertNotIn('orch_status.md', qma.freeze_gated(repo, base, untracked_at_start=good)['paths'])
+
+    def test_committed_revalidation_rejects_empty_manifest(self):
+        # #750 round 2 M2: `-- <no paths>` would scope git status to the whole tree; an empty set raises its own error.
+        repo, git, base = self._fix_repo()
+        git('add', '-A')
+        git('commit', '-qm', 'clean tree')
+        empty = {'gated': {'paths': [], 'deleted': [], 'mode': 'manifest', 'base': base}}
+        with self.assertRaisesRegex(ValueError, 'empty gated set'):
+            gated_hash(empty, repo, committed=True)
+        (repo / 'unrelated.txt').write_text('x\n')
+        with self.assertRaisesRegex(ValueError, 'empty gated set'):
+            gated_hash(empty, repo, committed=True)
+
     def test_committed_revalidation_rejects_divergent_head(self):
         # #750 r11 M1 / SIEGE2-M2: unreviewed bytes committed to HEAD with the tree restored to the reviewed bytes.
         repo, git, base = self._fix_repo()

@@ -429,6 +429,12 @@ _MUTANTS = {
         "for code, name in zip(status[0::2], status[1::2])]"),
     "gate-start untracked snapshot ignored": ("    skip = CLEAN_TREE_EXEMPT | set(untracked_at_start)",
                                               "    skip = CLEAN_TREE_EXEMPT"),
+    "untracked_at_start argument check removed": (
+        "    if (not isinstance(untracked_at_start, (list, tuple, set, frozenset))\n"
+        "            or any(not isinstance(name, str) or not name for name in untracked_at_start)):",
+        "    if False:"),
+    "empty manifest revalidation guard removed": (
+        "    if committed and gated['mode'] == 'manifest' and not gated['paths']:", "    if False:"),
     "committed_paths base check removed": ("    if not _commit_id(base):\n        raise ValueError('base must",
                                            "    if False:\n        raise ValueError('base must"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
