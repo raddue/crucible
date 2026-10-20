@@ -522,8 +522,25 @@ So:
   warden's run-id and therefore **never matches build's PipelineID filter**.
 - warden writes the **one** `gate-verdict-*.md` that carries **build's** PipelineID
   (and `Phase: code`), stamped with warden's **aggregate** verdict.
+- warden records the quality-gate leg's assurance **separately** from that
+  aggregate (#746): the QG-leg proof tuple (`RunID`, pre-gate `ArtifactHash`,
+  `FinalArtifactHash`, `MarkerFinality`, inventory path + SHA-256 digest, `Gated-Files`) is carried
+  in two advisory fields of warden's aggregate marker, `QGLegModelAssurance:` and
+  `QGLegProofTuple:` (same tuple format as build's `QGProofTuple`; build's marker
+  verification never reads them, they are the push handoff's persistence and build
+  Phase 4's tuple source), and status display names it `QG-leg model
+  assurance: <state>`. Warden's aggregate PASS keeps its ordinary label — warden
+  can never claim whole-run `verified` from QG evidence alone, and whole-Warden
+  opt-in (`warden-verified`) stays unavailable until a distinct durable
+  Warden-wide proof object and expected-leg roster cover every used temper,
+  delve, and warden-owned siege/inquisitor leg. A persisted
+  `RequiredModelAssurance: qg-verified` gates the push handoff through the
+  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`, with `expected_gated` from `git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD` split on NUL dropping empty entries, repo-relative POSIX paths) against
+  the QG leg only, revalidated on push and recovery; `warden-verified` found in
+  persisted state blocks that opted-in action pending explicit user resolution
+  and is never treated as `none`.
 - build's Verdict Marker Verification **read** logic — glob → PipelineID-filter →
-  PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** and now resolves
+  PASS-check (`skills/build/references/gate-ledger.md` § Verdict Marker Verification) — is **unchanged** (it additionally rejects only an explicit `MarkerFinality: chunk-milestone`; warden's aggregate marker carries no such field and reads as final) and now resolves
   **deterministically**: its filter surfaces exactly one marker (warden's
   aggregate), because the leg's marker is tagged with a different (warden)
   PipelineID.
@@ -654,7 +671,9 @@ The boundary is asserted by selection-eval prompts in the private `raddue/crucib
   - `scope`: PR id | `base..head` range | path | auto-detect (delve's resolver).
   - Returns: sectioned-per-reviewer report + `PASS`/`BLOCKED` verdict + RCPT v1 receipt.
 - `Use crucible:warden` (sub-skill) with dispatch context: `PipelineID: <id>`,
-  `Phase: code`, `reviewer-set: <full|standalone>`, `dispatch-dir: <path>`.
+  `Phase: code`, `reviewer-set: <full|standalone>`, `dispatch-dir: <path>`, and optionally
+  `RequiredModelAssurance: <none|qg-verified>` (absent is `none`; a standalone `/warden` has no
+  opt-in unless the caller passes it).
 - warden invokes its **internal quality-gate red-team leg** with `mode: full`, `Phase: code` and
   warden's own run-id as `PipelineID` (non-interactive, not build-tagged), and **lets the
   QG leg re-dispatch its internal siege** (warden does **not** suppress it) — warden's

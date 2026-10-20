@@ -61,6 +61,7 @@ Append after the shared header:
 - Plan: PASSED (1 round)
 - Task tiers: 1x T1, 1x T2, 1x T3
 - Code: not yet reached
+- QG-leg model assurance: <verified | configured | unknown> (the recorded `QGModelAssurance` claim, copied from the marker and not re-proved here — the quality-gate leg only, never a build-wide or Warden-wide claim; `caller_allowed` is the only proof)
 
 ## Checkpoints
 - Last checkpoint: pre-wave-3 (12:45:30)
@@ -181,6 +182,7 @@ At phase boundaries (1→2, 2→3, 3→4), write a **handoff manifest** to `<bui
 **Timestamp:** ISO-8601
 **Goal:** [original user request, verbatim]
 **Mode:** feature | refactor
+**RequiredModelAssurance:** qg-verified   <!-- only when the ledger persists qg-verified; omit the line for none/absent (#746) -->
 
 ## Inputs for Phase M
 - **[Input name]:** [disk path or inline value]
@@ -196,6 +198,7 @@ At phase boundaries (1→2, 2→3, 3→4), write a **handoff manifest** to `<bui
 ```
 
 **Rules:**
+- When the gate ledger persists `RequiredModelAssurance: qg-verified`, every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line (the only opt-in signal ledger reconstruction reads); for `none` or absent the line is omitted.
 - After writing the manifest, emit an explicit **shed statement**: list what context is no longer needed, where it lives on disk, and that the orchestrator operates from manifest inputs only going forward.
 - After writing the manifest, update the `## Compression State` section in `<build-scratch>/pipeline-status.md` with the manifest contents (Goal, Decisions, Constraints, and the Inputs as Next Steps). This ensures compaction recovery can reconstruct state even if the manifest is lost.
 - CSBs continue at all non-boundary checkpoint triggers (intra-phase progress, quality gate entry/exit, escalations, health transitions).

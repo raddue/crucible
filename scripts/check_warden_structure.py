@@ -93,6 +93,13 @@ REQUIRED_SUBSTRINGS: dict[str, str] = {
     "reviewer leg: temper": "temper",
     "reviewer leg: delve": "delve",
     "reviewer leg: red-team": "red-team",
+    # #746 — QG-leg assurance recorded separately; no whole-Warden verified claim.
+    "QG-leg assurance separation (#746)": "records the quality-gate leg's assurance **separately**",
+    "no whole-run verified from QG alone (#746)": "can never claim whole-run `verified` from QG evidence alone",
+    "marker finality absent reads as final (#746)": "carries no such field and reads as final",
+    "QG-leg tuple carried in aggregate marker (#746)": "`QGLegProofTuple:` (same tuple format",
+    "RequiredModelAssurance dispatch input (#746)": "`RequiredModelAssurance: <none|qg-verified>` (absent is `none`",
+    "push handoff expected_gated source (#746)": "with `expected_gated` from `git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD`",
     "reviewer leg: siege": "siege",
     "reviewer leg: inquisitor": "inquisitor",
     "reviewer-set parameter (full | standalone)": "reviewer-set: full | standalone",
@@ -644,6 +651,11 @@ warden deliberately does **not** claim temper's "is this ready to ship" phrases 
 - T-W12: build recovery re-invokes warden.
 - T-W13: siege twice per run (see Calibration-ledger entries).
 - T-W14: temper-only fixer → frozen HEAD contains the fix.
+- T-W15 (#746): warden records the quality-gate leg's assurance **separately** and can never claim whole-run `verified` from QG evidence alone.
+- T-W16 (#746): warden's aggregate marker carries no such field and reads as final.
+- T-W17 (#746): `QGLegProofTuple:` (same tuple format as build's, advisory in the aggregate marker) is the QG-leg tuple source.
+- T-W18 (#746): `RequiredModelAssurance: <none|qg-verified>` (absent is `none`) is an optional dispatch input.
+- T-W19 (#746): with `expected_gated` from `git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD` names the push handoff's anchor.
 """
 
 # The negation prose above must NOT trip the I-W1 guard; a real

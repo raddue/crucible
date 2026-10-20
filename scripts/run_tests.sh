@@ -159,6 +159,8 @@ run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
 run python3 scripts/check_qg_closure_modes.py --selftest
 run python3 scripts/check_qg_closure_modes.py
+run python3 scripts/check_qg_model_assurance_contract.py --selftest
+run python3 scripts/check_qg_model_assurance_contract.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
@@ -277,6 +279,7 @@ run python3 scripts/test_cairn.py
 # --- Dispatch manifest bookkeeping (#643) ---
 run python3 scripts/test_dispatch.py
 run python3 scripts/check_gate_provenance.py --selftest
+run python3 scripts/test_qg_model_assurance.py
 
 # --- Ambient pipeline status writer (#643) ---
 run python3 scripts/test_pipeline_status.py

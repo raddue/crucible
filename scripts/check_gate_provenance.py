@@ -74,10 +74,8 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
             violations.append(f"GATE-NOT-RUN:{role} (harness is not pi)")
         if not row.get("dispatch_ref"):
             violations.append(f"GATE-NOT-RUN:{role} (missing dispatch_ref)")
-        if not row.get("actual_model"):
-            violations.append(f"GATE-NOT-RUN:{role} (missing actual_model)")
         mapped = mappings.get(role)
-        if mapped and row.get("actual_model") != mapped:
+        if mapped and row.get("actual_model") and row["actual_model"] != mapped:
             violations.append(f"GATE-NOT-RUN:{role} (actual_model differs from mapped model)")
         filename = row.get("file")
         if not isinstance(filename, str):
@@ -158,6 +156,12 @@ def selftest() -> int:
         marker.write_text("Harness: pi\nVerdict: PASS\nRequired-Legs: crucible-red-team\nMapped-Model: crucible-red-team=provider/model\n")
         assert not check(d, marker), f"full Pi leg set must pass: {check(d, marker)}"
         row = json.loads((d / "manifest.jsonl").read_text())
+        row.pop("actual_model")
+        (d / "manifest.jsonl").write_text(json.dumps(row) + "\n")
+        assert not check(d, marker), "absent optional model telemetry must preserve ordinary PASS"
+        row["actual_model"] = "provider/model"
+        (d / "manifest.jsonl").write_text(json.dumps(row) + "\n")
+        row = json.loads((d / "manifest.jsonl").read_text())
         row.pop("dispatch_ref")
         (d / "manifest.jsonl").write_text(json.dumps(row) + "\n")
         assert any("missing dispatch_ref" in v for v in check(d, marker)), "missing dispatch_ref must fail"
@@ -165,7 +169,7 @@ def selftest() -> int:
         row["actual_model"] = "provider/other"
         (d / "manifest.jsonl").write_text(json.dumps(row) + "\n")
         assert any("differs from mapped model" in v for v in check(d, marker)), "model mismatch must fail"
-    print("SELFTEST OK — valid Pi provenance passes; self-review, missing dispatch_ref, and model mismatch fail.")
+    print("SELFTEST OK — Pi receipts pass without model telemetry; missing dispatch_ref and conflicting model fail.")
     return 0
 
 
