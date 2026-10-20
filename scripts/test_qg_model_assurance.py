@@ -466,6 +466,9 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
                 else ({**self.data['gated'], 'paths': ['other.md']} if key == 'gated' else {**self.data['roster'], 'terminal': {}})
             self.assertNotEqual(canonical_evidence(other, self.journal, self.records), base, key)
             other[key] = self.data[key]
+        relabeled = {**self.data, 'invocations': [dict(self.data['invocations'][0], kind='fix'),
+                                                  *self.data['invocations'][1:]]}
+        self.assertNotEqual(canonical_evidence(relabeled, self.journal, self.records), base, 'row kinds')
         self.assertNotEqual(canonical_evidence(self.data, self.journal[:-1], self.records), base, 'journal')
         for name in self.records:
             for field in ('digest', 'path'):
@@ -658,6 +661,29 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         path.write_text(json.dumps({'id': 'ghost', 'result_digest': '4' * 64, 'turns': [self.TURN]}))
         records = {**self.records, 'ghost': {'path': str(path), 'digest': hashlib.sha256(path.read_bytes()).hexdigest()}}
         self.assertEqual(self.reconcile(evidence=self.signed(journal=self.journal + [ghost], records=records)), 'unknown')
+
+    def test_journal_and_inventory_id_sets_equal(self):
+        # #750 SIEGE2-L1: missing or extra ids are unknown, unused ones included.
+        extra = self.journal + [{'id': 'stray', 'run_id': 'run-1', 'disposition': 'unused', 'result_digest': '6' * 64}]
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=extra)), 'unknown')
+        missing = [line for line in self.journal if line['id'] != 'failed-member']
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=missing)), 'unknown')
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
+
+    def test_journal_consumed_but_inventory_unused_unknown(self):
+        # Same id set, but the journal consumed a result the inventory calls unused (with its record).
+        consumed = [dict(line, disposition='consumed') if line['id'] == 'failed-member' else line for line in self.journal]
+        path = self.dir / 'failed-member.json'
+        path.write_text(json.dumps({'id': 'failed-member', 'result_digest': '3' * 64, 'turns': [self.TURN]}))
+        records = {**self.records, 'failed-member': {'path': str(path), 'digest': hashlib.sha256(path.read_bytes()).hexdigest()}}
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=consumed, records=records)), 'unknown')
+
+    def test_row_kind_relabel_after_signing_unknown(self):
+        # #750 SIEGE2-L3: the cap must not hinge on an unsigned inventory label.
+        evidence = self.signed()
+        self.data['invocations'][0]['kind'] = 'fix'
+        self.assertEqual(self.reconcile(evidence=evidence), 'unknown')
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
 
     def test_journal_edited_after_signing(self):
         evidence = self.signed()

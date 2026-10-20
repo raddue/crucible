@@ -380,6 +380,7 @@ def _behavior_fixtures() -> list[str]:
 _MUTANTS = {
     "completeness reconciliation removed": ("if consumed != expected or set(records) != consumed:",
                                             "if set(records) != consumed:"),
+    "journal/inventory id-set equality removed": ("if seen != {row['id'] for row in data['invocations']}:", "if False:"),
     "journal dropped from signed bytes": ("'journal': journal, 'records': records}", "'records': records}"),
     "record digests dropped from signed bytes": (
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],",
@@ -387,6 +388,8 @@ _MUTANTS = {
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],"),
     "gated dropped from signed bytes": ("                       'gated': data['gated'],\n", ""),
     "roster dropped from signed bytes": ("                       'roster': data['roster'],\n", ""),
+    "row kinds dropped from signed bytes": (
+        "                       'kinds': {row['id']: row.get('kind') for row in data['invocations']},\n", ""),
     "unprivileged reviewer check removed": (" or not _unprivileged_reviewer():", ":"),
     "turn equals request check removed": ("any(not isinstance(turn, dict) or any(turn.get(key) != request[key]",
                                           "any(not isinstance(turn, dict) or any(False"),

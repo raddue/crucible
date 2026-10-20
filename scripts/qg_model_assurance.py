@@ -459,6 +459,8 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
                 consumed.add(line['id'])
                 results[line['id']] = line['result_digest']
         expected = {row['id'] for row in data['invocations'] if row['disposition'] == 'consumed'}
+        if seen != {row['id'] for row in data['invocations']}:
+            return 'unknown'  # missing or extra ids, unused ones included (design: missing/extra -> unknown)
         if consumed != expected or set(records) != consumed:
             return 'unknown'
         for row in data['invocations']:
@@ -487,11 +489,12 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
 
 def canonical_evidence(data: dict, journal: list, records: dict) -> bytes:
     """Bytes the host adapter authenticates: bound to the run, the accepted final artifact, the gated
-    path set (paths, deletions, mode) and the terminal roster, so a rewritten inventory cannot re-point a
-    genuine run at a different artifact or verdict."""
+    path set (paths, deletions, mode), the terminal roster and every row's `kind`, so a rewritten inventory
+    cannot re-point a genuine run at a different artifact or verdict, or relabel a row past the consensus cap."""
     return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],
                        'final_artifact_hash': data['final_artifact_hash'],
                        'gated': data['gated'],
                        'roster': data['roster'],
+                       'kinds': {row['id']: row.get('kind') for row in data['invocations']},
                        'journal': journal, 'records': records},
                       sort_keys=True, separators=(',', ':')).encode()
