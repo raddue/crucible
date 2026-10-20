@@ -117,6 +117,7 @@ BLOCKED: Cannot write PASS to gate ledger — no matching verdict marker found.
    - PipelineID must match between the ledger content and the verdict marker
    - Verdict must be `PASS`
    - Phase field must match (Phase 1 = "design", Phase 2 = "plan", Phase 4 = "code")
+   - `MarkerFinality` must not be `chunk-milestone` (an absent field reads as final; #746/#750)
 5. Blocks Phase 3 PASS writes (Phase 3 uses COMPLETE, not PASS)
 6. **Graceful degradation:** On any infrastructure failure (missing `jq`, missing directories, malformed JSON), exits 0 to avoid blocking legitimate work
 

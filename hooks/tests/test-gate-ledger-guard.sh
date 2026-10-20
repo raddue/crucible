@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 32 test cases validating allow/block behavior.
+# Runs 34 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=32
+TOTAL=34
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -652,6 +652,27 @@ printf '%s\n' "$EXISTING" > "$NAMESPACED_LEDGER"
 EDIT_JSON="$(make_edit_json "$NAMESPACED_LEDGER" "Status: IN_PROGRESS" "Status: PASS")"
 set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
 check 32 "Namespaced build-gate-ledger PASS Edit remains enforced" 2 "$RC"
+
+# ========================================================================
+# Tests 33-34 (#750 LH-M5): gate-ledger.md step 4 rejects an explicit
+# `MarkerFinality: chunk-milestone`; the hook backstop must agree. A lone
+# chunk-milestone PASS marker blocks; a final-integration marker beside it
+# (or an absent finality, test 3) still allows.
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-033" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+create_marker "run-033-c1" "build-test-033" "PASS" "design"
+echo "MarkerFinality: chunk-milestone" >> "$VERDICT_DIR/gate-verdict-run-033-c1.md"
+CONTENT="$(make_ledger "build-test-033" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 33 "Chunk-milestone PASS marker does not authorize PASS" 2 "$RC"
+
+create_marker "run-033-final" "build-test-033" "PASS" "design"
+echo "MarkerFinality: final-integration" >> "$VERDICT_DIR/gate-verdict-run-033-final.md"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 34 "Final-integration PASS marker authorizes PASS" 0 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""

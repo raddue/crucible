@@ -94,6 +94,11 @@ def _hex64(value) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
 
 
+def _commit_id(value) -> bool:
+    """A full SHA-1 or SHA-256 commit id: never a ref or option a caller could choose."""
+    return isinstance(value, str) and len(value) in (40, 64) and all(c in '0123456789abcdef' for c in value)
+
+
 def _valid_request(request) -> bool:
     """A row's optional `request` (the exact model/effort/route the dispatch asked for): absent, or str fields."""
     return request is None or (isinstance(request, dict) and all(
@@ -135,7 +140,10 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
                                    and all(isinstance(n, str) for n in gated['paths'] + gated['deleted'])
                                    and gated['mode'] in ('document', 'manifest')
                                    and (gated['mode'] == 'manifest'
-                                        or (len(gated['paths']) == 1 and not gated['deleted']))))
+                                        or (len(gated['paths']) == 1 and not gated['deleted']))
+                                   and ('base' not in gated or (gated['mode'] == 'manifest' and _commit_id(gated['base'])))))
+            and ('untracked_at_start' not in data or (isinstance(data['untracked_at_start'], list)
+                                                      and all(isinstance(n, str) for n in data['untracked_at_start'])))
             and all(isinstance(row.get('kind', ''), str) for row in rows)
             and all(_valid_request(row.get('request')) for row in rows)
         )
@@ -151,18 +159,85 @@ def _validate_inventory(data: dict, *, terminal: bool = False) -> None:
         raise ValueError('invalid or incomplete QG assurance inventory') from exc
 
 
-def gated_hash(data: dict, root: Path) -> str:
+def gated_hash(data: dict, root: Path, *, committed: bool = False) -> str:
     """The only FinalArtifactHash computation: artifact_hash over the inventory's persisted gated set.
 
     The hash mode (`document` raw bytes of a single file, or `manifest`) is read from the
     persisted `gated.mode`, never guessed by the caller.
 
-    Hashes the working tree at `root`; a caller revalidating a commit must have a clean tree at
-    that commit. In manifest mode the hash binds `root`, so a different checkout fails closed (document mode hashes raw bytes only).
+    Hashes the working tree at `root`. A caller revalidating a commit passes `committed=True`: in
+    manifest mode any gated path whose working-tree or index state differs from HEAD then raises, so
+    a tree restored to the reviewed bytes cannot mask unreviewed bytes committed to HEAD; an empty
+    manifest set raises its own error instead of being checked against the whole tree. In manifest
+    mode the hash binds `root`, so a different checkout fails closed (document mode hashes raw bytes
+    only and needs no git). A symlink binds its target string, never the target's content (git
+    semantics, design): content reached through a link is outside the gated set.
     """
     gated = data['gated']
+    if committed and gated['mode'] == 'manifest' and not gated['paths']:
+        raise ValueError('empty gated set: nothing to revalidate')  # `--` with no pathspec scopes the whole tree
+    if committed and gated['mode'] == 'manifest' and _git(
+            root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames', '--', *gated['paths']):
+        raise ValueError('gated paths differ from HEAD: commit or restore them before revalidating')
     return artifact_hash(root, gated['paths'], deleted=frozenset(gated['deleted']),
                          document=gated['mode'] == 'document')
+
+
+# The clean-tree exemption (warden step 0, build Phase 4 step 2.5): committed only at end-of-session,
+# never reviewed, so it is never gated and never part of a caller's `expected_gated`.
+CLEAN_TREE_EXEMPT = frozenset({'docs/memory.md'})
+
+
+def _git(root, *args) -> bytes:
+    # --literal-pathspecs: a gated path is a name, never a glob
+    try:
+        return subprocess.run(['git', '-C', str(root), '--literal-pathspecs', *args],
+                              check=True, capture_output=True).stdout
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise ValueError(f'git {args[0]} failed') from exc
+
+
+def _nul_list(raw: bytes) -> list:
+    try:
+        return [name for name in raw.decode('utf-8').split('\0') if name]  # `-z` output ends with a NUL
+    except UnicodeDecodeError as exc:
+        raise ValueError('non-UTF-8 gated path') from exc
+
+
+def freeze_gated(root: Path, base: str, *, untracked_at_start=()) -> dict:
+    """A code gate's `gated` set, enumerated once at the FinalArtifactHash freeze point.
+
+    From `base` against the working tree (QG's fixes are usually still uncommitted at emit): tracked
+    changes (`--no-renames`, so a rename's source is a tombstone; status `D` also goes in `deleted`)
+    plus untracked non-ignored files, minus `CLEAN_TREE_EXEMPT` and minus `untracked_at_start` (the
+    inventory's gate-start `ls-files --others` snapshot, so orchestrator files that predate the gate
+    are never swept in). `base` is resolved to its commit id and persisted as `gated.base`, the only
+    base a caller's `committed_paths` may use. `untracked_at_start` must be a list/tuple/set/frozenset
+    of non-empty str (a bare string would split into characters). Edge inputs raise ValueError
+    (downgrade to unknown).
+    """
+    if (not isinstance(untracked_at_start, (list, tuple, set, frozenset))
+            or any(not isinstance(name, str) or not name for name in untracked_at_start)):
+        raise ValueError('untracked_at_start must be a list of non-empty paths')
+    commit = _git(root, 'rev-parse', '--verify', '--end-of-options', f'{base}^{{commit}}').decode().strip()
+    status = _nul_list(_git(root, 'diff', '--no-renames', '--no-relative', '--name-status', '-z', commit))
+    if len(status) % 2:
+        raise ValueError('unexpected name-status output')
+    tracked = [(code, name) for code, name in zip(status[0::2], status[1::2]) if name not in CLEAN_TREE_EXEMPT]
+    skip = CLEAN_TREE_EXEMPT | set(untracked_at_start)
+    untracked = [name for name in _nul_list(_git(root, 'ls-files', '--others', '--exclude-standard', '-z'))
+                 if name not in skip]
+    return {'paths': [name for _, name in tracked] + untracked,
+            'deleted': [name for code, name in tracked if code == 'D'], 'mode': 'manifest', 'base': commit}
+
+
+def committed_paths(root: Path, base: str) -> list:
+    """A code caller's `expected_gated` at a committed boundary: `<base>..HEAD` from the persisted
+    `gated.base` (a commit id, never a caller-chosen ref), minus `CLEAN_TREE_EXEMPT`."""
+    if not _commit_id(base):
+        raise ValueError('base must be the persisted gated.base commit id')
+    return [name for name in _nul_list(_git(root, 'diff', '--no-renames', '--no-relative', '--name-only', '-z',
+                                            f'{base}..HEAD')) if name not in CLEAN_TREE_EXEMPT]
 
 
 def write_inventory(path: Path, data: dict, *, terminal: bool = False) -> str:
@@ -226,6 +301,10 @@ def assurance_state(data: dict, policy: dict | None = None) -> str:
 
     Total: any malformed inventory, request or policy reads `unknown`, never raises, so it
     can never block marker emit for an ordinary PASS.
+
+    A row's own `assurance` label can only lower the result, never raise it: `configured` needs
+    both the label and a policy-approved `request`, so a row the orchestrator recorded `unknown`
+    (for example a failed protected write) stays `unknown` even when its request matches.
     """
     try:
         _validate_inventory(data, terminal=True)
@@ -256,14 +335,16 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
 
     `expected_gated` (required for `qg-verified`) is the caller's own list of paths this action
     authorizes (design/plan: the path from the phase sub-skill's linted receipt or the orchestrator's
-    in-context output, never re-read from the ledger; code: `git -C <root> diff --no-renames --no-relative --name-only -z
-    <base>..HEAD` split on NUL, dropping empty entries: `-z` output ends with a NUL); it must be a non-empty list/tuple/set of strings, each in the inventory's
+    in-context output, never re-read from the ledger; code: `committed_paths(root, gated.base)`, with
+    `current_final_hash` from `gated_hash(..., committed=True)`); it must be a non-empty list/tuple/set of strings, each in the inventory's
     `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
     `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
-    missing one (for example after a `gated_hash` failure) returns False."""
-    if requirement == 'none':
-        return marker.get('Verdict') == 'PASS'
+    missing one (for example after a `gated_hash` failure) returns False.
+
+    A missing or `none` requirement requires nothing, exactly as in `caller_allowed`."""
+    if requirement in (None, '', 'none'):
+        return True
     if requirement != 'qg-verified' or marker.get('Verdict') != 'PASS':
         return False
     # Every binding input must be a real digest: a None/absent value never matches a None/absent value,
@@ -411,6 +492,10 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
     with consensus membership, or a consumed row or journal line whose `kind` starts `consensus`, is
     capped at `unknown` until the consensus API exposes stable member identity). With no adapter (the portable
     default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
+
+    A turn's `model`/`effort`/`route` must be what the provider or endpoint reported, never an echo of
+    the requested selector (design stop condition): an echo equals the request by construction, and this
+    module cannot tell it from an observation, so that is an allowlisted-adapter contract requirement.
     """
     try:
         if host_adapter is None:
@@ -457,6 +542,8 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
                 consumed.add(line['id'])
                 results[line['id']] = line['result_digest']
         expected = {row['id'] for row in data['invocations'] if row['disposition'] == 'consumed'}
+        if seen != {row['id'] for row in data['invocations']}:
+            return 'unknown'  # missing or extra ids, unused ones included (design: missing/extra -> unknown)
         if consumed != expected or set(records) != consumed:
             return 'unknown'
         for row in data['invocations']:
@@ -485,11 +572,12 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
 
 def canonical_evidence(data: dict, journal: list, records: dict) -> bytes:
     """Bytes the host adapter authenticates: bound to the run, the accepted final artifact, the gated
-    path set (paths, deletions, mode) and the terminal roster, so a rewritten inventory cannot re-point a
-    genuine run at a different artifact or verdict."""
+    path set (paths, deletions, mode), the terminal roster and every row's `kind`, so a rewritten inventory
+    cannot re-point a genuine run at a different artifact or verdict, or relabel a row past the consensus cap."""
     return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],
                        'final_artifact_hash': data['final_artifact_hash'],
                        'gated': data['gated'],
                        'roster': data['roster'],
+                       'kinds': {row['id']: row.get('kind') for row in data['invocations']},
                        'journal': journal, 'records': records},
                       sort_keys=True, separators=(',', ':')).encode()

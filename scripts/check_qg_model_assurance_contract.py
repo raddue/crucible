@@ -29,8 +29,16 @@ _FREEZE_NEEDLES = {
     "freeze-point untracked enumeration": "`git -C <root> ls-files --others --exclude-standard -z`",
 }
 
+# #750: the enumerations and the committed-tree revalidation are module code, not prose only.
+_HELPER_NEEDLES = {
+    "caller expected_gated from persisted base": "`committed_paths(root, gated.base)`",
+}
+
 QG_REQUIRED = {
     **_FREEZE_NEEDLES,
+    **_HELPER_NEEDLES,
+    "freeze enumeration helper": "`freeze_gated(root, base, untracked_at_start=...)`",
+    "QG committed-tree revalidation": "`gated_hash(..., committed=True)`",
     "inventory section": "## Model Assurance Inventory (#746)",
     "QG caller committed-range expected_gated command is rename-safe": "git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD",
     "durable inventory path": "memory/quality-gate/model-assurance/<run-id>.json",
@@ -75,6 +83,8 @@ PIPELINE_REQUIRED = {
 
 GATE_LEDGER_REQUIRED = {
     **_FREEZE_NEEDLES,
+    **_HELPER_NEEDLES,
+    "committed-tree revalidation": "`gated_hash(data, root, committed=True)`",
     "absent finality reads as final": "an absent `MarkerFinality`",
     "only explicit chunk-milestone rejected": "only an explicit `chunk-milestone` is rejected",
     "no assurance data at marker selection": "no inventory, roster, or assurance field is read here",
@@ -152,6 +162,9 @@ _GOOD_QG = "\n".join([
     "a required non-empty `kind`",
     "written with `kind: consensus-member` / `consensus-synthesis`",
     *_FREEZE_NEEDLES.values(),
+    *_HELPER_NEEDLES.values(),
+    "`freeze_gated(root, base, untracked_at_start=...)`",
+    "`gated_hash(..., committed=True)`",
 ])
 
 _GOOD_PIPELINE = "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"
@@ -178,6 +191,8 @@ _GOOD_GATE_LEDGER = "\n".join([
     "if it is found in persisted state it blocks only the opted-in action pending explicit user resolution",
     "and is never treated as `none`",
     *_FREEZE_NEEDLES.values(),
+    *_HELPER_NEEDLES.values(),
+    "`gated_hash(data, root, committed=True)`",
 ])
 
 _GOOD_LEDGER = "\n".join([
@@ -380,6 +395,7 @@ def _behavior_fixtures() -> list[str]:
 _MUTANTS = {
     "completeness reconciliation removed": ("if consumed != expected or set(records) != consumed:",
                                             "if set(records) != consumed:"),
+    "journal/inventory id-set equality removed": ("if seen != {row['id'] for row in data['invocations']}:", "if False:"),
     "journal dropped from signed bytes": ("'journal': journal, 'records': records}", "'records': records}"),
     "record digests dropped from signed bytes": (
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],",
@@ -387,6 +403,8 @@ _MUTANTS = {
         "    return json.dumps({'run_id': data['run_id'], 'artifact_hash': data['artifact_hash'],"),
     "gated dropped from signed bytes": ("                       'gated': data['gated'],\n", ""),
     "roster dropped from signed bytes": ("                       'roster': data['roster'],\n", ""),
+    "row kinds dropped from signed bytes": (
+        "                       'kinds': {row['id']: row.get('kind') for row in data['invocations']},\n", ""),
     "unprivileged reviewer check removed": (" or not _unprivileged_reviewer():", ":"),
     "turn equals request check removed": ("any(not isinstance(turn, dict) or any(turn.get(key) != request[key]",
                                           "any(not isinstance(turn, dict) or any(False"),
@@ -404,6 +422,21 @@ _MUTANTS = {
                                            "if False:"),
     "expected_gated non-empty requirement removed": ("    if not expected_gated:\n        return False",
                                                      "    if False:\n        return False"),
+    "committed-tree revalidation removed": ("    if committed and gated['mode'] == 'manifest' and _git(",
+                                            "    if False and _git("),
+    "clean-tree exemption dropped from freeze": (
+        "for code, name in zip(status[0::2], status[1::2]) if name not in CLEAN_TREE_EXEMPT]",
+        "for code, name in zip(status[0::2], status[1::2])]"),
+    "gate-start untracked snapshot ignored": ("    skip = CLEAN_TREE_EXEMPT | set(untracked_at_start)",
+                                              "    skip = CLEAN_TREE_EXEMPT"),
+    "untracked_at_start argument check removed": (
+        "    if (not isinstance(untracked_at_start, (list, tuple, set, frozenset))\n"
+        "            or any(not isinstance(name, str) or not name for name in untracked_at_start)):",
+        "    if False:"),
+    "empty manifest revalidation guard removed": (
+        "    if committed and gated['mode'] == 'manifest' and not gated['paths']:", "    if False:"),
+    "committed_paths base check removed": ("    if not _commit_id(base):\n        raise ValueError('base must",
+                                           "    if False:\n        raise ValueError('base must"),
     "roster PASS check removed": ("if any(value != 'PASS' for value in data['roster']['terminal'].values()):",
                                   "if False:"),
 }
@@ -474,6 +507,11 @@ def selftest() -> int:
         ("row labels never feed verified", "QG", "a row's `assurance` label is never an input to `verified`"),
         ("kind required on every row", "QG", "a required non-empty `kind`"),
         ("consensus rows carry kind", "QG", "`kind: consensus-member` / `consensus-synthesis`"),
+        ("caller expected_gated from persisted base", "QG", "`committed_paths(root, gated.base)`"),
+        ("caller expected_gated from persisted base (gate)", "gate", "`committed_paths(root, gated.base)`"),
+        ("freeze enumeration helper", "QG", "`freeze_gated(root, base, untracked_at_start=...)`"),
+        ("QG committed-tree revalidation", "QG", "`gated_hash(..., committed=True)`"),
+        ("committed-tree revalidation", "gate", "`gated_hash(data, root, committed=True)`"),
         ("manifest writer rule for opt-in line", "pipeline", "every handoff manifest carries the `**RequiredModelAssurance:** qg-verified` header line"),
     ]
     for label, target, needle in mutations:

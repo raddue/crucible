@@ -109,9 +109,13 @@ class ArtifactHashTest(unittest.TestCase):
         self.assertNotEqual(artifact_hash(self.root, ['run']), plain)
 
     def test_symlink_to_outside_is_hashed_not_followed(self):
+        # #750 SIEGE2-L2 (design call): a link binds its target string, never the target's content (git semantics).
+        bound = artifact_hash(self.root, ['link'])
+        (self.root / 'a.txt').write_bytes(b'target content changed')
+        self.assertEqual(artifact_hash(self.root, ['link']), bound)
         (self.root / 'link').unlink()
         (self.root / 'link').symlink_to('../outside')
-        self.assertIsInstance(artifact_hash(self.root, ['link']), str)
+        self.assertNotEqual(artifact_hash(self.root, ['link']), bound)
         with tempfile.TemporaryDirectory() as outside:
             Path(outside, 'secret').write_text('outside')
             (self.root / 'escape').symlink_to(outside, target_is_directory=True)
@@ -154,6 +158,20 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(assurance_state(self.data, policy), 'configured')
         self.data['invocations'][0]['assurance'] = 'verified'
         self.assertEqual(assurance_state(self.data, policy), 'unknown')
+
+    def test_persisted_base_and_untracked_snapshot_schema(self):
+        # #750: the freeze base and the gate-start untracked snapshot are persisted, shape-checked fields.
+        for gated_base in ('0' * 40, '0' * 64):
+            self.data['gated'] = {**GATED, 'base': gated_base}
+            self.data['untracked_at_start'] = ['.orchestrator-status.md']
+            write_inventory(self.path, self.data, terminal=True)
+        for bad in ({**GATED, 'base': 'HEAD'}, {**GATED, 'base': '-x'},
+                    {'paths': ['a.txt'], 'deleted': [], 'mode': 'document', 'base': '0' * 40}):
+            with self.subTest(gated=bad), self.assertRaises(ValueError):
+                write_inventory(self.path, {**self.data, 'gated': bad}, terminal=True)
+        for bad in ('x.md', [1], None):
+            with self.subTest(untracked=bad), self.assertRaises(ValueError):
+                write_inventory(self.path, {**self.data, 'gated': GATED, 'untracked_at_start': bad})
 
     def test_marker_assurance_ignores_row_labels(self):
         # Rows self-labelled verified with hex attestations and no host adapter: never verified.
@@ -244,11 +262,20 @@ class InventoryTest(unittest.TestCase):
         manifest = {**data, 'gated': {**data['gated'], 'mode': 'manifest'}}
         self.assertNotEqual(gated_hash(manifest, root), gated_hash(data, root))
 
-    def test_read_inventory_size_cap_and_none_requires_pass(self):
+    def test_read_inventory_size_cap(self):
         self.path.write_bytes(b' ' * (qma.MAX_INVENTORY_BYTES + 1))
         with self.assertRaises(ValueError):
             read_inventory(self.path, None, 'run-1', 'a' * 64, None)
-        self.assertFalse(action_allowed('none', {'Verdict': 'ESCALATED'}, self.path, 'x', 'x'))
+
+    def test_none_requirement_agrees_across_predicates(self):
+        # #750 LH-M6: `none`/absent requires nothing in both exported predicates; artifact closure
+        # (`Status: PASS`) is the ordinary phase gate's job, never this opt-in predicate's.
+        for requirement in (None, '', 'none'):
+            for marker in ({'Verdict': 'PASS'}, {'Verdict': 'ESCALATED'}, {}):
+                with self.subTest(requirement=requirement, marker=marker):
+                    self.assertEqual(action_allowed(requirement, marker, self.path, 'x', 'x'),
+                                     caller_allowed(requirement, marker, self.path, 'x', 'x'))
+                    self.assertTrue(action_allowed(requirement, marker, self.path, 'x', 'x'))
 
     def test_weakest_state_over_consumed_rows(self):
         policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
@@ -457,6 +484,9 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
                 else ({**self.data['gated'], 'paths': ['other.md']} if key == 'gated' else {**self.data['roster'], 'terminal': {}})
             self.assertNotEqual(canonical_evidence(other, self.journal, self.records), base, key)
             other[key] = self.data[key]
+        relabeled = {**self.data, 'invocations': [dict(self.data['invocations'][0], kind='fix'),
+                                                  *self.data['invocations'][1:]]}
+        self.assertNotEqual(canonical_evidence(relabeled, self.journal, self.records), base, 'row kinds')
         self.assertNotEqual(canonical_evidence(self.data, self.journal[:-1], self.records), base, 'journal')
         for name in self.records:
             for field in ('digest', 'path'):
@@ -649,6 +679,29 @@ class EvidenceReconciliationTest(EvidenceFixture, unittest.TestCase):
         path.write_text(json.dumps({'id': 'ghost', 'result_digest': '4' * 64, 'turns': [self.TURN]}))
         records = {**self.records, 'ghost': {'path': str(path), 'digest': hashlib.sha256(path.read_bytes()).hexdigest()}}
         self.assertEqual(self.reconcile(evidence=self.signed(journal=self.journal + [ghost], records=records)), 'unknown')
+
+    def test_journal_and_inventory_id_sets_equal(self):
+        # #750 SIEGE2-L1: missing or extra ids are unknown, unused ones included.
+        extra = self.journal + [{'id': 'stray', 'run_id': 'run-1', 'disposition': 'unused', 'result_digest': '6' * 64}]
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=extra)), 'unknown')
+        missing = [line for line in self.journal if line['id'] != 'failed-member']
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=missing)), 'unknown')
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
+
+    def test_journal_consumed_but_inventory_unused_unknown(self):
+        # Same id set, but the journal consumed a result the inventory calls unused (with its record).
+        consumed = [dict(line, disposition='consumed') if line['id'] == 'failed-member' else line for line in self.journal]
+        path = self.dir / 'failed-member.json'
+        path.write_text(json.dumps({'id': 'failed-member', 'result_digest': '3' * 64, 'turns': [self.TURN]}))
+        records = {**self.records, 'failed-member': {'path': str(path), 'digest': hashlib.sha256(path.read_bytes()).hexdigest()}}
+        self.assertEqual(self.reconcile(evidence=self.signed(journal=consumed, records=records)), 'unknown')
+
+    def test_row_kind_relabel_after_signing_unknown(self):
+        # #750 SIEGE2-L3: the cap must not hinge on an unsigned inventory label.
+        evidence = self.signed()
+        self.data['invocations'][0]['kind'] = 'fix'
+        self.assertEqual(self.reconcile(evidence=evidence), 'unknown')
+        self.assertEqual(self.reconcile(evidence=self.signed()), 'verified')
 
     def test_journal_edited_after_signing(self):
         evidence = self.signed()
@@ -974,6 +1027,104 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                       ModelAssuranceInventory=f'{self.path} sha256:{digest}')
         self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, self.data['final_artifact_hash'],
                                         expected_gated=expected, **{**self.trusted, 'evidence': self.signed()}))
+
+    def _fix_repo(self):
+        # base commit, one implementation commit, then an uncommitted QG fix loop (edit, add, delete)
+        repo, git = self._git_repo('helperrepo')
+        (repo / 'src').mkdir()
+        (repo / 'docs').mkdir()
+        (repo / 'src/a.py').write_text('a = 1\n')
+        (repo / 'src/gone.py').write_text('gone = 1\n')
+        (repo / 'docs/memory.md').write_text('- [rule] old\n')
+        git('add', '-A')
+        git('commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD').decode().strip()
+        (repo / 'src/a.py').write_text('a = 2\n')
+        git('add', '-A')
+        git('commit', '-qm', 'impl')
+        (repo / 'src/test_a.py').write_text('import a\n')
+        (repo / 'src/gone.py').unlink()
+        (repo / 'src/a.py').write_text('a = 3\n')
+        return repo, git, base
+
+    def test_freeze_gated_and_committed_paths_helpers(self):
+        # #750 r9 M4: the documented enumerations as code; the resolved base is persisted in `gated`.
+        repo, git, base = self._fix_repo()
+        gated = qma.freeze_gated(repo, base)
+        self.assertEqual((sorted(gated['paths']), gated['deleted'], gated['mode'], gated['base']),
+                         (['src/a.py', 'src/gone.py', 'src/test_a.py'], ['src/gone.py'], 'manifest', base))
+        self.assertEqual(qma.freeze_gated(repo, 'HEAD~1')['base'], base)  # a ref resolves to the commit id
+        git('add', '-A')
+        git('commit', '-qm', 'warden commits the QG residual')
+        self.assertEqual(sorted(qma.committed_paths(repo, gated['base'])), sorted(gated['paths']))
+        for bad in ('HEAD', '--stat', '0' * 39):
+            with self.subTest(base=bad), self.assertRaises(ValueError):
+                qma.committed_paths(repo, bad)  # only a persisted commit id, never a caller-chosen ref
+        with self.assertRaises(ValueError):
+            qma.freeze_gated(repo, '--stat')
+        with self.assertRaises(ValueError):
+            qma.freeze_gated(Path(self.tmp.name), base)  # not a git worktree
+
+    def test_clean_tree_exemption_and_preexisting_untracked_excluded(self):
+        # #750 r11 M2 + LH-M1: docs/memory.md (the clean-tree exemption) and files untracked at gate start
+        # never enter the gated set, and a later memory commit does not push the range outside it.
+        repo, git, base = self._fix_repo()
+        (repo / 'docs/memory.md').write_text('- [rule] new\n')
+        (repo / '.orchestrator-status.md').write_text('STATE: WORKING\n')
+        gated = qma.freeze_gated(repo, base, untracked_at_start=['.orchestrator-status.md'])
+        self.assertEqual(sorted(gated['paths']), ['src/a.py', 'src/gone.py', 'src/test_a.py'])
+        self.assertIn('.orchestrator-status.md', qma.freeze_gated(repo, base)['paths'])  # without the snapshot
+        git('add', 'src')
+        git('commit', '-qm', 'residual')
+        git('add', 'docs/memory.md')
+        git('commit', '-qm', 'end-of-session memory')
+        self.assertEqual(sorted(qma.committed_paths(repo, base)), sorted(gated['paths']))
+
+    def test_untracked_at_start_argument_shape_checked(self):
+        # #750 round 2 M1: a bare string would be split into characters, silently gating the snapshot file.
+        repo, _, base = self._fix_repo()
+        (repo / 'orch_status.md').write_text('STATE: WORKING\n')
+        for bad in ('orch_status.md', None, ['orch_status.md', 1], [''], {'orch_status.md': 1}):
+            with self.subTest(untracked_at_start=bad), self.assertRaises(ValueError):
+                qma.freeze_gated(repo, base, untracked_at_start=bad)
+        for good in (['orch_status.md'], ('orch_status.md',), {'orch_status.md'}, frozenset({'orch_status.md'})):
+            with self.subTest(untracked_at_start=good):
+                self.assertNotIn('orch_status.md', qma.freeze_gated(repo, base, untracked_at_start=good)['paths'])
+
+    def test_committed_revalidation_rejects_empty_manifest(self):
+        # #750 round 2 M2: `-- <no paths>` would scope git status to the whole tree; an empty set raises its own error.
+        repo, git, base = self._fix_repo()
+        git('add', '-A')
+        git('commit', '-qm', 'clean tree')
+        empty = {'gated': {'paths': [], 'deleted': [], 'mode': 'manifest', 'base': base}}
+        with self.assertRaisesRegex(ValueError, 'empty gated set'):
+            gated_hash(empty, repo, committed=True)
+        (repo / 'unrelated.txt').write_text('x\n')
+        with self.assertRaisesRegex(ValueError, 'empty gated set'):
+            gated_hash(empty, repo, committed=True)
+
+    def test_committed_revalidation_rejects_divergent_head(self):
+        # #750 r11 M1 / SIEGE2-M2: unreviewed bytes committed to HEAD with the tree restored to the reviewed bytes.
+        repo, git, base = self._fix_repo()
+        self.data['gated'] = qma.freeze_gated(repo, base)
+        final = gated_hash(self.data, repo)
+        with self.assertRaises(ValueError):
+            gated_hash(self.data, repo, committed=True)  # the fixes are not committed yet
+        git('add', '-A')
+        git('commit', '-qm', 'residual')
+        self.assertEqual(gated_hash(self.data, repo, committed=True), final)
+        (repo / 'src/a.py').write_text('unreviewed = True\n')
+        git('add', '-A')
+        git('commit', '-qm', 'post-gate change')
+        (repo / 'src/a.py').write_text('a = 3\n')
+        self.assertEqual(gated_hash(self.data, repo), final)  # the working tree alone is fooled
+        with self.assertRaises(ValueError):
+            gated_hash(self.data, repo, committed=True)
+        doc_root = Path(self.tmp.name, 'plain')  # document mode needs no git, committed or not
+        doc_root.mkdir()
+        (doc_root / 'design.md').write_bytes(b'd')
+        doc = {'gated': {'paths': ['design.md'], 'deleted': [], 'mode': 'document'}}
+        self.assertEqual(gated_hash(doc, doc_root, committed=True), hashlib.sha256(b'd').hexdigest())
 
     def test_gated_set_rewrite_after_signing_is_refused(self):
         # r9 S1 class: the authenticated bytes name the gated set, so re-pointing it breaks the signature.
