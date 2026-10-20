@@ -447,6 +447,71 @@ completed live A/B.
 
 Test-coverage was absorbed into verify in #720; no post-merge A/B run was performed.
 
+## Quality-gate behavioral evals after #746 (2026-10-19)
+
+Measured the post-#746 `skills/quality-gate` (base `d136648`) against its 34 defined evals (240 expectations) with a blind with-skill vs without-skill A/B. **Not comparable to the Opus 4.8 table above** (different model, harness and eval set); this is a fresh baseline for the portable-assurance change, not a delta against it. The skill was measured, not tuned.
+
+**Overall: with-skill 193/240 (80%), without-skill 147/240 (61%), +19 points.** Per-eval: with-skill higher in 26, tied in 3 (evals 1, 17, 31), lower in 5 (evals 4, 5, 6, 8, 9).
+
+| Group | With skill | Without skill |
+|---|---|---|
+| Evals 1-10, end-to-end "run a gate on X" | 58/100 (58%) | 57/100 (57%) |
+| Evals 11-30, orchestrator scoring/recovery scenarios | 98/99 (99%) | 58/99 (59%) |
+| Evals 31-34, red-team tasks | 37/41 (90%) | 32/41 (78%) |
+
+The gain is almost entirely in evals 11-30 (loop.md score-source and recovery rules), where the baseline had no access to the skill's weights and hedged. End-to-end gate runs (1-10) show no measurable lift, and the baseline won evals 5, 6 and 9.
+
+<details><summary>Per-eval pass counts</summary>
+
+| Eval | With skill | Without skill |
+|---|---|---|
+| 1 | 4/12 | 4/12 |
+| 2 | 9/12 | 5/12 |
+| 3 | 10/12 | 6/12 |
+| 4 | 4/9 | 5/9 |
+| 5 | 6/9 | 8/9 |
+| 6 | 5/9 | 9/9 |
+| 7 | 6/9 | 3/9 |
+| 8 | 4/9 | 5/9 |
+| 9 | 2/10 | 5/10 |
+| 10 | 8/9 | 7/9 |
+| 11 | 4/4 | 3/4 |
+| 12 | 4/4 | 3/4 |
+| 13 | 5/5 | 2/5 |
+| 14 | 5/5 | 4/5 |
+| 15 | 6/6 | 2/6 |
+| 16 | 6/6 | 2/6 |
+| 17 | 5/5 | 5/5 |
+| 18 | 5/5 | 2/5 |
+| 19 | 5/5 | 3/5 |
+| 20 | 5/5 | 3/5 |
+| 21 | 5/5 | 4/5 |
+| 22 | 4/5 | 3/5 |
+| 23 | 5/5 | 3/5 |
+| 24 | 7/7 | 5/7 |
+| 25 | 5/5 | 1/5 |
+| 26 | 5/5 | 1/5 |
+| 27 | 5/5 | 4/5 |
+| 28 | 4/4 | 2/4 |
+| 29 | 4/4 | 3/4 |
+| 30 | 4/4 | 3/4 |
+| 31 | 8/11 | 8/11 |
+| 32 | 11/11 | 10/11 |
+| 33 | 10/10 | 9/10 |
+| 34 | 8/9 | 5/9 |
+
+</details>
+
+**Method (actual commands/steps).** No CLI runner exists for the anvil A/B; it is orchestrated by subagents (`skills/anvil/SKILL.md`). Each eval's raw prompt from `skills/quality-gate/evals/evals.json` was run once per arm in a fresh subagent (default model Sonnet 5.5; with-skill agents were pointed at `skills/quality-gate/SKILL.md`, baselines were not). One blind grader subagent per eval (guidance: `skills/anvil/agents/grader.md`) scored both arms against the eval's expectations on anonymized, deterministically shuffled copies of the outputs; the A/B-to-arm map was kept out of the graders' view. Totals were summed from the 68 grading JSONs with a small local script. `skills/anvil/scripts/aggregate_benchmark.py` was not used, and per-run timing/token data was not captured.
+
+**Caveats.**
+- Single run per arm per eval, Sonnet 5.5 (not Opus 4.8), single grader per eval: expect noise of a few expectations per eval.
+- Prompts were not neutralized (no neutralizer script exists in the repo), so baselines could see the methodology name and many ran the loop manually. This biases the delta downward on evals 1-10.
+- Baselines in evals 11-30 were not shown the skill files, so part of their loss is missing rubric knowledge (e.g. hedging on severity weights), not worse reasoning.
+- With-skill runs were degraded versions of the full gate: several skipped the receipt linter, ledger emit, cairn bookkeeping, stagnation judge and fix-verifier, condensed dispatch templates, or reviewed inline when dispatch hit the 20-concurrent-subagent limit. In eval 8 the red-team subagent could not write its findings file, and in eval 7 the agent reported `shared/` missing from the worktree. These runs measure how the skill performs under a constrained harness, which is likely why it did not beat the baseline on evals 1-10.
+- Eval 31's first with-skill grading was discarded (outputs were blinded before the run finished, so the grader saw no answer) and redone.
+- Evals 8-10 contain an embedded "note to evaluator"; the with-skill runs treated it as untrusted artifact content.
+
 ## Running Evals
 
 Eval definitions live in `skills/<skill>/evals/evals.json`. Execution evals use the standard `prompt`/`expected_output`/`expectations` schema. Sequence evals extend this with `boundary`, `pressure_type`, `expected_sequence` metadata and categorized expectations (`sequence_compliance`, `pressure_resistance`, `correctness`) for per-axis grading.
