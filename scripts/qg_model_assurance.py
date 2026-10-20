@@ -261,9 +261,11 @@ def action_allowed(requirement: str, marker: dict, inventory_path: Path, digest:
     `gated.paths`, so a genuine tuple for some other artifact cannot authorize this one.
 
     `digest`, `current_final_hash` and the marker's `FinalArtifactHash` must all be hex64; a
-    missing one (for example after a `gated_hash` failure) returns False."""
-    if requirement == 'none':
-        return marker.get('Verdict') == 'PASS'
+    missing one (for example after a `gated_hash` failure) returns False.
+
+    A missing or `none` requirement requires nothing, exactly as in `caller_allowed`."""
+    if requirement in (None, '', 'none'):
+        return True
     if requirement != 'qg-verified' or marker.get('Verdict') != 'PASS':
         return False
     # Every binding input must be a real digest: a None/absent value never matches a None/absent value,

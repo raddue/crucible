@@ -244,11 +244,20 @@ class InventoryTest(unittest.TestCase):
         manifest = {**data, 'gated': {**data['gated'], 'mode': 'manifest'}}
         self.assertNotEqual(gated_hash(manifest, root), gated_hash(data, root))
 
-    def test_read_inventory_size_cap_and_none_requires_pass(self):
+    def test_read_inventory_size_cap(self):
         self.path.write_bytes(b' ' * (qma.MAX_INVENTORY_BYTES + 1))
         with self.assertRaises(ValueError):
             read_inventory(self.path, None, 'run-1', 'a' * 64, None)
-        self.assertFalse(action_allowed('none', {'Verdict': 'ESCALATED'}, self.path, 'x', 'x'))
+
+    def test_none_requirement_agrees_across_predicates(self):
+        # #750 LH-M6: `none`/absent requires nothing in both exported predicates; artifact closure
+        # (`Status: PASS`) is the ordinary phase gate's job, never this opt-in predicate's.
+        for requirement in (None, '', 'none'):
+            for marker in ({'Verdict': 'PASS'}, {'Verdict': 'ESCALATED'}, {}):
+                with self.subTest(requirement=requirement, marker=marker):
+                    self.assertEqual(action_allowed(requirement, marker, self.path, 'x', 'x'),
+                                     caller_allowed(requirement, marker, self.path, 'x', 'x'))
+                    self.assertTrue(action_allowed(requirement, marker, self.path, 'x', 'x'))
 
     def test_weakest_state_over_consumed_rows(self):
         policy = {'provider/model': {'effort': 'high', 'route': 'fixed'}}
