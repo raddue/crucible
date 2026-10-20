@@ -155,6 +155,20 @@ class InventoryTest(unittest.TestCase):
         self.data['invocations'][0]['assurance'] = 'verified'
         self.assertEqual(assurance_state(self.data, policy), 'unknown')
 
+    def test_persisted_base_and_untracked_snapshot_schema(self):
+        # #750: the freeze base and the gate-start untracked snapshot are persisted, shape-checked fields.
+        for gated_base in ('0' * 40, '0' * 64):
+            self.data['gated'] = {**GATED, 'base': gated_base}
+            self.data['untracked_at_start'] = ['.orchestrator-status.md']
+            write_inventory(self.path, self.data, terminal=True)
+        for bad in ({**GATED, 'base': 'HEAD'}, {**GATED, 'base': '-x'},
+                    {'paths': ['a.txt'], 'deleted': [], 'mode': 'document', 'base': '0' * 40}):
+            with self.subTest(gated=bad), self.assertRaises(ValueError):
+                write_inventory(self.path, {**self.data, 'gated': bad}, terminal=True)
+        for bad in ('x.md', [1], None):
+            with self.subTest(untracked=bad), self.assertRaises(ValueError):
+                write_inventory(self.path, {**self.data, 'gated': GATED, 'untracked_at_start': bad})
+
     def test_marker_assurance_ignores_row_labels(self):
         # Rows self-labelled verified with hex attestations and no host adapter: never verified.
         row = self.data['invocations'][0]
@@ -1009,6 +1023,81 @@ class CallerOptInTest(EvidenceFixture, unittest.TestCase):
                       ModelAssuranceInventory=f'{self.path} sha256:{digest}')
         self.assertFalse(caller_allowed('qg-verified', marker, self.path, digest, self.data['final_artifact_hash'],
                                         expected_gated=expected, **{**self.trusted, 'evidence': self.signed()}))
+
+    def _fix_repo(self):
+        # base commit, one implementation commit, then an uncommitted QG fix loop (edit, add, delete)
+        repo, git = self._git_repo('helperrepo')
+        (repo / 'src').mkdir()
+        (repo / 'docs').mkdir()
+        (repo / 'src/a.py').write_text('a = 1\n')
+        (repo / 'src/gone.py').write_text('gone = 1\n')
+        (repo / 'docs/memory.md').write_text('- [rule] old\n')
+        git('add', '-A')
+        git('commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD').decode().strip()
+        (repo / 'src/a.py').write_text('a = 2\n')
+        git('add', '-A')
+        git('commit', '-qm', 'impl')
+        (repo / 'src/test_a.py').write_text('import a\n')
+        (repo / 'src/gone.py').unlink()
+        (repo / 'src/a.py').write_text('a = 3\n')
+        return repo, git, base
+
+    def test_freeze_gated_and_committed_paths_helpers(self):
+        # #750 r9 M4: the documented enumerations as code; the resolved base is persisted in `gated`.
+        repo, git, base = self._fix_repo()
+        gated = qma.freeze_gated(repo, base)
+        self.assertEqual((sorted(gated['paths']), gated['deleted'], gated['mode'], gated['base']),
+                         (['src/a.py', 'src/gone.py', 'src/test_a.py'], ['src/gone.py'], 'manifest', base))
+        self.assertEqual(qma.freeze_gated(repo, 'HEAD~1')['base'], base)  # a ref resolves to the commit id
+        git('add', '-A')
+        git('commit', '-qm', 'warden commits the QG residual')
+        self.assertEqual(sorted(qma.committed_paths(repo, gated['base'])), sorted(gated['paths']))
+        for bad in ('HEAD', '--stat', '0' * 39):
+            with self.subTest(base=bad), self.assertRaises(ValueError):
+                qma.committed_paths(repo, bad)  # only a persisted commit id, never a caller-chosen ref
+        with self.assertRaises(ValueError):
+            qma.freeze_gated(repo, '--stat')
+        with self.assertRaises(ValueError):
+            qma.freeze_gated(Path(self.tmp.name), base)  # not a git worktree
+
+    def test_clean_tree_exemption_and_preexisting_untracked_excluded(self):
+        # #750 r11 M2 + LH-M1: docs/memory.md (the clean-tree exemption) and files untracked at gate start
+        # never enter the gated set, and a later memory commit does not push the range outside it.
+        repo, git, base = self._fix_repo()
+        (repo / 'docs/memory.md').write_text('- [rule] new\n')
+        (repo / '.orchestrator-status.md').write_text('STATE: WORKING\n')
+        gated = qma.freeze_gated(repo, base, untracked_at_start=['.orchestrator-status.md'])
+        self.assertEqual(sorted(gated['paths']), ['src/a.py', 'src/gone.py', 'src/test_a.py'])
+        self.assertIn('.orchestrator-status.md', qma.freeze_gated(repo, base)['paths'])  # without the snapshot
+        git('add', 'src')
+        git('commit', '-qm', 'residual')
+        git('add', 'docs/memory.md')
+        git('commit', '-qm', 'end-of-session memory')
+        self.assertEqual(sorted(qma.committed_paths(repo, base)), sorted(gated['paths']))
+
+    def test_committed_revalidation_rejects_divergent_head(self):
+        # #750 r11 M1 / SIEGE2-M2: unreviewed bytes committed to HEAD with the tree restored to the reviewed bytes.
+        repo, git, base = self._fix_repo()
+        self.data['gated'] = qma.freeze_gated(repo, base)
+        final = gated_hash(self.data, repo)
+        with self.assertRaises(ValueError):
+            gated_hash(self.data, repo, committed=True)  # the fixes are not committed yet
+        git('add', '-A')
+        git('commit', '-qm', 'residual')
+        self.assertEqual(gated_hash(self.data, repo, committed=True), final)
+        (repo / 'src/a.py').write_text('unreviewed = True\n')
+        git('add', '-A')
+        git('commit', '-qm', 'post-gate change')
+        (repo / 'src/a.py').write_text('a = 3\n')
+        self.assertEqual(gated_hash(self.data, repo), final)  # the working tree alone is fooled
+        with self.assertRaises(ValueError):
+            gated_hash(self.data, repo, committed=True)
+        doc_root = Path(self.tmp.name, 'plain')  # document mode needs no git, committed or not
+        doc_root.mkdir()
+        (doc_root / 'design.md').write_bytes(b'd')
+        doc = {'gated': {'paths': ['design.md'], 'deleted': [], 'mode': 'document'}}
+        self.assertEqual(gated_hash(doc, doc_root, committed=True), hashlib.sha256(b'd').hexdigest())
 
     def test_gated_set_rewrite_after_signing_is_refused(self):
         # r9 S1 class: the authenticated bytes name the gated set, so re-pointing it breaks the signature.
