@@ -349,7 +349,9 @@ def _read_protected(path, owners, parent_checked: dict) -> bytes:
     path = Path(path)
     parent = path.parent
     if parent not in parent_checked:
-        info = parent.lstat()
+        # os.lstat, not Path.lstat: Path.lstat bypasses attribute-patched os.lstat on
+        # Python <=3.13, silently vacuating the owner-check tests there (CI runs 3.12).
+        info = os.lstat(parent)
         parent_checked[parent] = (not stat.S_ISLNK(info.st_mode) and not info.st_mode & 0o022
                                   and info.st_uid in owners)
     if not parent_checked[parent]:
