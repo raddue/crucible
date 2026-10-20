@@ -109,9 +109,13 @@ class ArtifactHashTest(unittest.TestCase):
         self.assertNotEqual(artifact_hash(self.root, ['run']), plain)
 
     def test_symlink_to_outside_is_hashed_not_followed(self):
+        # #750 SIEGE2-L2 (design call): a link binds its target string, never the target's content (git semantics).
+        bound = artifact_hash(self.root, ['link'])
+        (self.root / 'a.txt').write_bytes(b'target content changed')
+        self.assertEqual(artifact_hash(self.root, ['link']), bound)
         (self.root / 'link').unlink()
         (self.root / 'link').symlink_to('../outside')
-        self.assertIsInstance(artifact_hash(self.root, ['link']), str)
+        self.assertNotEqual(artifact_hash(self.root, ['link']), bound)
         with tempfile.TemporaryDirectory() as outside:
             Path(outside, 'secret').write_text('outside')
             (self.root / 'escape').symlink_to(outside, target_is_directory=True)

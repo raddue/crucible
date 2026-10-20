@@ -293,6 +293,10 @@ def assurance_state(data: dict, policy: dict | None = None) -> str:
 
     Total: any malformed inventory, request or policy reads `unknown`, never raises, so it
     can never block marker emit for an ordinary PASS.
+
+    A row's own `assurance` label can only lower the result, never raise it: `configured` needs
+    both the label and a policy-approved `request`, so a row the orchestrator recorded `unknown`
+    (for example a failed protected write) stays `unknown` even when its request matches.
     """
     try:
         _validate_inventory(data, terminal=True)
@@ -480,6 +484,10 @@ def reconcile_evidence(data: dict, evidence: dict | None, allowlist: dict | None
     with consensus membership, or a consumed row or journal line whose `kind` starts `consensus`, is
     capped at `unknown` until the consensus API exposes stable member identity). With no adapter (the portable
     default) this is always `unknown`: a key a same-uid child can read authenticates nothing.
+
+    A turn's `model`/`effort`/`route` must be what the provider or endpoint reported, never an echo of
+    the requested selector (design stop condition): an echo equals the request by construction, and this
+    module cannot tell it from an observation, so that is an allowlisted-adapter contract requirement.
     """
     try:
         if host_adapter is None:
