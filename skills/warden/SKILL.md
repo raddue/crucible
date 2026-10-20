@@ -528,14 +528,16 @@ So:
   in two advisory fields of warden's aggregate marker, `QGLegModelAssurance:` and
   `QGLegProofTuple:` (same tuple format as build's `QGProofTuple`; build's marker
   verification never reads them, they are the push handoff's persistence and build
-  Phase 4's tuple source), and status display names it `QG-leg model
+  Phase 4's tuple source), written beside `RequiredModelAssurance: <none|qg-verified>` in the same marker
+  — the persistence site of the dispatch-context opt-in (#750; absent reads `none`), which the
+  push handoff and recovery read back instead of re-deriving it — and status display names it `QG-leg model
   assurance: <state>`. Warden's aggregate PASS keeps its ordinary label — warden
   can never claim whole-run `verified` from QG evidence alone, and whole-Warden
   opt-in (`warden-verified`) stays unavailable until a distinct durable
   Warden-wide proof object and expected-leg roster cover every used temper,
   delve, and warden-owned siege/inquisitor leg. A persisted
   `RequiredModelAssurance: qg-verified` gates the push handoff through the
-  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`, with `expected_gated` from `git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD` split on NUL dropping empty entries, repo-relative POSIX paths) against
+  shared predicate (`caller_allowed` in `scripts/qg_model_assurance.py`, with `expected_gated` from `git -C <root> diff --no-renames --no-relative --name-only -z <base>..HEAD` via `committed_paths(root, gated.base)` — the QG leg's persisted base only, split on NUL dropping empty entries and `docs/memory.md`, repo-relative POSIX paths — and the hash recomputed by `gated_hash(..., committed=True)`, which refuses a gated path whose tree or index differs from HEAD) against
   the QG leg only, revalidated on push and recovery; `warden-verified` found in
   persisted state blocks that opted-in action pending explicit user resolution
   and is never treated as `none`.

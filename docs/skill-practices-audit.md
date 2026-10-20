@@ -58,6 +58,6 @@ Warn-only snapshot for #719; violations do not fail CI. Refresh with `python3 sc
 - `spec` Frontmatter (1): description should use third-person, not first/second-person voice
 - `temper` Contents (3): skills/shared/delve-engine.md: >100 lines, no contents list in first 20; skills/shared/ledger-append.md: >100 lines, no contents list in first 20; skills/shared/severity-verdict-contract.md: >100 lines, no contents list in first 20
 - `verify` Contents (1): skills/shared/ledger-append.md: >100 lines, no contents list in first 20
-- `warden` Body (1): 961 body lines (max 500)
+- `warden` Body (1): 963 body lines (max 500)
 - `warden` Contents (1): skills/shared/change-bundling-convention.md: >100 lines, no contents list in first 20
 - `warden` Frontmatter (1): description should use third-person, not first/second-person voice
