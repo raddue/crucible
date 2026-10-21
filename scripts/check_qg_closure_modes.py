@@ -9,6 +9,7 @@ from qg_source import read_runbook
 from build_source import read_runbook as read_build_runbook
 
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -21,7 +22,63 @@ TARGETS = {
 }
 
 
-def check_qg(text: str) -> list[str]:
+_HEDGE = re.compile(r"\b(may|might|can|could|should|optional|optionally|not|never)\b", re.I)
+_GUARD_HEAD = "### Run-completeness guard (#755)"
+
+def _flat(s: str) -> str:
+    return " ".join(re.sub(r"<!--.*?-->", " ", s, flags=re.S).split())
+
+def _operative(scope: str, needle: str) -> bool:
+    """True iff every occurrence of needle in scope is un-hedged: the text between the
+    previous sentence boundary and the needle must not contain may/can/not/never.
+    Mirrors the _negates() polarity idea in check_qg_second_pass_score.py (#755 F2)."""
+    scope, needle = _flat(scope), _flat(needle)
+    hits = [m.start() for m in re.finditer(re.escape(needle), scope)]
+    if not hits:
+        return False
+    for i in hits:
+        prefix = re.split(r"(?<=[.;:!?])\s", scope[:i])[-1]
+        if _HEDGE.search(prefix):
+            return False
+    return True
+
+def check_guard(text: str) -> list[str]:
+    """Behavioral pins for #755: operative guard clauses (polarity + section scoped),
+    Exit Precedence slot, pre-threshold list, terminal-only ledger, second PASS site."""
+    flat = _flat(text)
+    errs: list[str] = []
+    i = flat.find(_flat(_GUARD_HEAD))
+    section = flat[i:flat.find("**Artifact-type-aware", i) if "**Artifact-type-aware" in flat[i:] else None] if i >= 0 else ""
+    if not section:
+        return ["QG: missing Run-completeness guard section"]
+    for label, needle in {
+        "emit incomplete-run": "emit `Verdict: ESCALATED`, `Reason: incomplete-run`",
+        "no PASS publication": "Do not publish PASS in the marker, ledger, or summary.",
+        "remediate before closing": "complete it and any dependent reverify before closing",
+        "no verifier substitution": "A fresh red-team review cannot substitute for the fix verifier",
+        "applies to chunk milestones": "applies to chunk-milestone PASSes as well as the final integration",
+        "terminal-only ledger": "terminal marker only",
+        "co-fire recorded": "recording `incomplete-run` under `CoFiredExits`",
+    }.items():
+        if not _operative(section, needle):
+            errs.append(f"QG: guard clause not operative (missing/hedged/negated/out of section): {label}")
+    pre = re.search(r"The only pre-threshold exits are:(.{0,1800})", flat)
+    if not pre or "`incomplete-run`" not in pre.group(1):
+        errs.append("QG: pre-threshold exit list omits incomplete-run (#755 F1)")
+    prec = re.search(r"### Exit Precedence(.*?)## Red Flags", flat)
+    prec_t = prec.group(1) if prec else ""
+    if not re.search(r"\b10\. \*\*Incomplete-run ESCALATED", prec_t) or "reason `incomplete-run`" not in prec_t:
+        errs.append("QG: Exit Precedence lacks incomplete-run slot #10 (#755 F1)")
+    if "Run-completeness guard is satisfied" not in prec_t or "slot #1 does not match" not in prec_t:
+        errs.append("QG: Exit Precedence slot #1 not reconciled with Run-completeness guard (#755 F6)")
+    if "the Run-completeness guard is not one" not in prec_t:
+        errs.append("QG: siege-demotion 'ONLY post-precedence modification' not reconciled (#755 F6)")
+    pf = re.search(r"\(4\) apply the Run-completeness guard.{0,200}", flat)
+    if not pf or "only if satisfied write `Verdict: PASS, Reason: clean-pass`" not in pf.group(0):
+        errs.append("QG: artifact-preflight clean-round PASS write not gated by Run-completeness guard (#755 F5)")
+    return errs
+
+def check_qg(text: str, guard: bool = True) -> list[str]:
     required = {
         "mode argument": "| `mode` | enum: `standard` \\| `full` | `standard` |",
         "default standard": "Absent `mode` means",
@@ -65,7 +122,7 @@ def check_qg(text: str) -> list[str]:
         "completeness precedes clean-pass": "Run completeness is a prerequisite to clean-pass",
 
     }
-    return [f"QG: missing {label}" for label, needle in required.items() if needle not in text]
+    return [f"QG: missing {label}" for label, needle in required.items() if needle not in text] + (check_guard(text) if guard else [])
 
 
 def check_parent(name: str, text: str) -> list[str]:
@@ -96,8 +153,8 @@ def check_parent(name: str, text: str) -> list[str]:
     return [f"{name}: missing {label}" for label, needle in required.items() if needle not in text]
 
 
-def check_files(texts: dict[str, str]) -> list[str]:
-    errors = check_qg(texts["quality-gate"])
+def check_files(texts: dict[str, str], guard: bool = True) -> list[str]:
+    errors = check_qg(texts["quality-gate"], guard)
     for name in ("build", "spec", "migrate", "warden"):
         errors.extend(check_parent(name, texts[name]))
     return errors
@@ -165,7 +222,7 @@ quality-gate red-team leg uses mode: full
 
 def selftest() -> int:
     errors: list[str] = []
-    errors.extend(check_files(_GOOD))
+    errors.extend(check_files(_GOOD, guard=False))
     mutations = [
         ("mode row", "| `mode` | enum: `standard` \\| `full` | `standard` |", "quality-gate"),
         ("standard predicate", "reverify may close at `0 Fatal`", "quality-gate"),
@@ -188,8 +245,36 @@ def selftest() -> int:
     for label, needle, target in mutations:
         broken = dict(_GOOD)
         broken[target] = broken[target].replace(needle, "")
-        if not check_files(broken):
+        if not check_files(broken, guard=False):
             errors.append(f"selftest: removing {label!r} did not fail")
+    # Behavioral guard (#755 F2): mutate the REAL runbook; each semantic inversion,
+    # hidden-in-comment, or contract-removal must trip check_guard.
+    real = read_runbook()
+    if check_guard(real):
+        errors.append(f"selftest: real runbook fails check_guard: {check_guard(real)}")
+    guard_mutations = [
+        ("MAY emit incomplete-run", "emit `Verdict: ESCALATED`, `Reason: incomplete-run`; name", "MAY emit `Verdict: ESCALATED`, `Reason: incomplete-run`; name"),
+        ("PASS publication allowed", "Do not publish PASS in the marker, ledger, or summary.", "It may publish PASS in the marker, ledger, or summary."),
+        ("verifier substitution allowed", "A fresh red-team review cannot substitute for the fix verifier.", "A fresh red-team review can substitute for the fix verifier."),
+        ("chunk milestones exempt", "applies to chunk-milestone PASSes as well as the final integration", "does not apply to chunk-milestone PASSes as well as the final integration"),
+        ("milestone ledger emit", "terminal marker only", "every marker"),
+        ("co-fire record dropped", "recording `incomplete-run` under `CoFiredExits`", "recording nothing"),
+        ("pre-threshold list", "run-completeness closure (`incomplete-run`", "run-completeness closure (`x`"),
+        ("exit precedence slot", "10. **Incomplete-run ESCALATED", "10. **Other ESCALATED"),
+        ("slot #1 reconcile", "AND the Run-completeness guard is satisfied", "AND nothing else"),
+        ("siege-demotion sentence", "the Run-completeness guard is not one", "nothing else is one"),
+        ("preflight PASS ungated", "only if satisfied write `Verdict: PASS, Reason: clean-pass`", "write `Verdict: PASS, Reason: clean-pass`"),
+    ]
+    for label, old, new in guard_mutations:
+        if old not in real:
+            errors.append(f"selftest: mutation anchor missing in real runbook: {label!r}")
+        elif not check_guard(real.replace(old, new)):
+            errors.append(f"selftest: guard mutation {label!r} not caught")
+    head = "### Run-completeness guard (#755)"
+    if head in real:
+        i = real.index(head); j = real.index("**Artifact-type-aware", i)
+        if not check_guard(real[:i] + "<!--\n" + real[i:j] + "\n-->\n" + real[j:]):
+            errors.append("selftest: HTML-commented guard section not caught")
     if errors:
         print("SELFTEST FAILED:")
         for error in errors:

@@ -53,7 +53,9 @@ script="$plugin_root/scripts/ledger_append.py"
 #      ~/.claude/plugins/*/scripts/ledger_append.py
 #      realpath of ~/.claude/skills/*/../../scripts/ledger_append.py
 # 3. Still unresolved → emit a one-line stderr warning and SKIP. The ledger is
-#    advisory; a missing emit must NEVER block or fail the gate.
+#    advisory; a failed or unresolvable emit must NEVER block or fail the gate.
+#    (Deliberately omitting the attempt is a different matter: quality-gate treats
+#    that as an incomplete run — see skills/quality-gate/verdict.md.)
 
 # 4. Emit. '-' means the central default path; the CLI dedups, auto-fills
 #    `repo` + `schema_version`, and appends. Pure stdlib + absolute path ⇒ no
