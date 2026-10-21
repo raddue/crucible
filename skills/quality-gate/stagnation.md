@@ -13,6 +13,12 @@ A single stagnation pipeline with three optional model tiers, all gated by `supp
 
 The three tiers share the same trigger (same-or-higher weighted score, no Fatal improvement) but produce distinct signals at different cost points. The orchestrator first-pass is the always-on rail; the judge adds semantic recurring/new classification; consensus adds cross-model unanimity weighting. Each tier's verdict is reflected in `round-N-score.md` and `round-N-comparison.md` regardless of whether it escalates.
 
+Suppression of escalation does not waive a triggered judge dispatch. Apply the
+existing Judge Dispatch conditions, including silent-seed rounds and documented
+consensus replacement/fallback; do not invent a judge dispatch when those conditions
+are absent. A required judge that never ran leaves the run incomplete under
+`loop.md` › Run-completeness guard, even if a later review reaches mode-clean.
+
 ### First-Pass Check (orchestrator — runs every round)
 
 Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count tracking**. Fatal count is counted over the same population the Score source rule defines (step 7), including `### Second Pass Findings`.

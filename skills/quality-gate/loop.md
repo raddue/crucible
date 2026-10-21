@@ -64,6 +64,37 @@ convergence log, and return summary record `Mode`, `ResidualSignificant`, and
 set: required reverify plus any confirming look-harder receipt, unioned by normalized
 finding identity; full PASS always records `ResidualSignificant: 0`).
 
+### Run-completeness guard (#755)
+
+Before any PASS, reconcile every completed round and chunk, plus the pending terminal
+round, against the stages required by this run's mode and actual triggers. Use the
+persisted dispatch receipts, lint results, round files, and cairn as evidence. This
+applies to chunk-milestone PASSes as well as the final integration and non-chunked
+verdict. Missing completion evidence counts as incomplete; a clean severity count
+or a prose disclaimer that the run was abbreviated cannot supply that evidence.
+
+Check all applicable stages: fresh red-team review, fix agent and distinct fix
+verifier, required fresh reverify, triggered stagnation judge, look-harder, siege,
+persistence/fix-generated checks, receipt-linter execution and acceptance for every receipt-bearing dispatch,
+cairn reconciliation and tripwire processing, and the ledger-emit obligation in
+`verdict.md`. Apply each stage's existing trigger and evidence contract; this guard
+adds no dispatch on a path where that stage is not required.
+
+Documented conditional skips and fallbacks remain valid when their preconditions
+and outcomes are recorded (for example unavailable optional consensus, mechanical
+look-harder skips, explicit siege opt-out, and checker fail-open outcomes).
+Model-assurance evidence retains its separate downgrade rules in `verdict.md`.
+Neither standard mode nor a time budget authorizes a new skip or substitution.
+A fresh red-team review cannot substitute for the fix verifier.
+
+Run completeness is a prerequisite to clean-pass, not a new score-based exit. If a
+required stage was omitted, substituted without a documented fallback, or remains
+unverified, complete it and any dependent reverify before closing. If the run stops
+without doing so, emit `Verdict: ESCALATED`, `Reason: incomplete-run`; name each
+missing/substituted stage and its round/chunk in the verdict explanation and return
+summary. Do not publish PASS in the marker, ledger, or summary. Preserve any other
+already-triggered non-PASS exit and disclose the incomplete stages alongside it.
+
 **Artifact-type-aware default for `suppression_threshold`:**
 
 | Artifact Type | Default Threshold | Rationale |
@@ -115,7 +146,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
       Look-harder does NOT increment the gate's round counter (INV-A2). It is a verification step within slot #1; if it confirms, slot #1 stands; if it demotes, slot #1 is invalidated.
 
    5. Proceed to **Minor Issue Handling** (quick-fix pass on consolidated minors). Minor Issue Handling does not re-trigger siege — it operates on a known-passed artifact.
-   6. After Minor Issue Handling: execute **Phase 3** of the write-ordering protocol (below) — the post-gate Minor quick-fix pass is in the linted set (see the Receipt Linter section's quality-gate-specific obligations), it is dispatched *after* Phase 2, and Phase 3 is the only write that carries its coverage key into `round-N-flags.md`. Then write final artifact to scratch directory, write verdict marker with `Verdict: PASS, Reason: clean-pass`, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
+   6. After Minor Issue Handling: execute **Phase 3** of the write-ordering protocol (below) — the post-gate Minor quick-fix pass is in the linted set (see the Receipt Linter section's quality-gate-specific obligations), it is dispatched *after* Phase 2, and Phase 3 is the only write that carries its coverage key into `round-N-flags.md`. Then write final artifact to scratch directory, apply the Run-completeness guard before publishing PASS (including the ledger-emit obligation in `verdict.md`), and only if satisfied write verdict marker with `Verdict: PASS, Reason: clean-pass`, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
 
    **Write-ordering protocol (three-phase) for `round-N-flags.md` on candidate-clean rounds where look-harder fires:**
 

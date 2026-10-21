@@ -48,6 +48,22 @@ def check_qg(text: str) -> list[str]:
         "mode convergence residual": '"residual_significant"',
         "return mode summary": "On gate termination (any verdict), the orchestrator emits structured summary lines",
         "return residual summary": "ResidualSignificant: <int>",
+        "run-wide completeness": "Before any PASS, reconcile every completed round and chunk",
+        "incomplete closure": "emit `Verdict: ESCALATED`, `Reason: incomplete-run`",
+        "unknown completion blocks": "Missing completion evidence counts as incomplete",
+        "no verifier substitution (eval 9)": "A fresh red-team review cannot substitute for the fix verifier",
+        "judge suppression (eval 6)": "Suppression of escalation does not waive a triggered judge dispatch",
+        "required receipt lint": "receipt-linter execution and acceptance for every receipt-bearing dispatch",
+        "required cairn": "cairn reconciliation and tripwire processing",
+        "ledger omission blocks": "Deliberately omitting the emit attempt is an incomplete run",
+        "ledger failure exception": "An attempted emit that fails remains non-blocking",
+        "ledger before PASS publication": "before publishing a PASS marker or return summary",
+        "documented exemptions": "Documented conditional skips and fallbacks remain valid",
+        "clean path completeness guard": "apply the Run-completeness guard before publishing PASS",
+        "incomplete reason mapping": "`incomplete-run` — Verdict: ESCALATED",
+        "PASS completeness semantics": "and satisfied the Run-completeness guard",
+        "completeness precedes clean-pass": "Run completeness is a prerequisite to clean-pass",
+
     }
     return [f"QG: missing {label}" for label, needle in required.items() if needle not in text]
 
@@ -109,6 +125,20 @@ ResidualMinor: <count>
 deduplicated by finding identity
 `PASS`: gate exited cleanly under active mode
 {"mode":"standard","residual_significant":0}
+Before any PASS, reconcile every completed round and chunk.
+Missing completion evidence counts as incomplete; emit `Verdict: ESCALATED`, `Reason: incomplete-run`.
+A fresh red-team review cannot substitute for the fix verifier.
+Suppression of escalation does not waive a triggered judge dispatch.
+Require receipt-linter execution and acceptance for every receipt-bearing dispatch,
+cairn reconciliation and tripwire processing.
+Deliberately omitting the emit attempt is an incomplete run.
+An attempted emit that fails remains non-blocking.
+Attempt emit before publishing a PASS marker or return summary.
+Documented conditional skips and fallbacks remain valid.
+apply the Run-completeness guard before publishing PASS.
+`incomplete-run` — Verdict: ESCALATED.
+PASS also means: and satisfied the Run-completeness guard.
+Run completeness is a prerequisite to clean-pass.
 """,
     "build": """
 The gate is only complete after a mode-clean fresh reverify (`0 Fatal` in default `standard`; `0 Fatal, 0 Significant` when the caller passes `mode: full`).
@@ -145,6 +175,15 @@ def selftest() -> int:
         ("invalid mode", "Any value other than `standard` or `full` is rejected before round 1.", "quality-gate"),
         ("look-harder residual gate", "pre-fix look-harder receipt", "quality-gate"),
         ("warden explicit full", "mode: full", "warden"),
+        ("eval 6 judge skip", "Suppression of escalation does not waive a triggered judge dispatch", "quality-gate"),
+        ("eval 9 verifier substitution", "A fresh red-team review cannot substitute for the fix verifier", "quality-gate"),
+        ("receipt-linter omission", "receipt-linter execution and acceptance for every receipt-bearing dispatch", "quality-gate"),
+        ("ledger omission", "Deliberately omitting the emit attempt is an incomplete run", "quality-gate"),
+        ("ledger failure compatibility", "An attempted emit that fails remains non-blocking", "quality-gate"),
+        ("missing completion evidence", "Missing completion evidence counts as incomplete", "quality-gate"),
+        ("incomplete exit", "emit `Verdict: ESCALATED`, `Reason: incomplete-run`", "quality-gate"),
+        ("clean-path bypass", "apply the Run-completeness guard before publishing PASS", "quality-gate"),
+        ("conditional skip compatibility", "Documented conditional skips and fallbacks remain valid", "quality-gate"),
     ]
     for label, needle, target in mutations:
         broken = dict(_GOOD)
