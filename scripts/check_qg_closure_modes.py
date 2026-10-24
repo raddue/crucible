@@ -25,6 +25,14 @@ TARGETS = {
 _HEDGE = re.compile(r"\b(may|might|can|could|should|optional|optionally|not|never)\b", re.I)
 _GUARD_HEAD = "### Run-completeness guard (#755)"
 
+_SIEGE_PHRASE = "demotes only a local PASS"
+_SIEGE_SITES = (
+    ("loop.md candidate-clean step 2", "2. If `SiegeVerdict != PASS`", True),
+    ("artifact-preflight ordering (2)", "(2) if `SiegeVerdict != PASS`", True),
+    ("artifact-preflight verdict mapping", "**Verdict mapping:**", False),
+    ("verdict.md siege-blocked reason", "- `siege-blocked` —", False),
+)
+
 def _flat(s: str) -> str:
     return " ".join(re.sub(r"<!--.*?-->", " ", s, flags=re.S).split())
 
@@ -76,6 +84,16 @@ def check_guard(text: str) -> list[str]:
     pf = re.search(r"\(4\) apply the Run-completeness guard.{0,200}", flat)
     if not pf or "only if satisfied write `Verdict: PASS, Reason: clean-pass`" not in pf.group(0):
         errs.append("QG: artifact-preflight clean-round PASS write not gated by Run-completeness guard (#755 F5)")
+    # S1: siege-blocked demotes only a local PASS; incomplete-run (slot #10) stands over it.
+    for label, anchor, need_incomplete in _SIEGE_SITES:
+        j = flat.find(anchor)
+        win = flat[j:j + 700] if j >= 0 else ""
+        if _SIEGE_PHRASE not in win or (need_incomplete and "incomplete-run" not in win):
+            errs.append(f"QG: siege-blocked/incomplete-run precedence diverges at {label} (S1)")
+    if re.search(r"write (?:the |a )?(?:verdict marker )?(?:with )?`Verdict: ESCALATED, Reason: siege-blocked`", flat):
+        errs.append("QG: early unconditional siege-blocked Reason before Exit Precedence (S1)")
+    if "`ledger-emitted` defaults to `false`" not in flat:
+        errs.append("QG: recovery.md ledger-emitted default contradicts terminal-only emit (M3)")
     return errs
 
 def check_qg(text: str, guard: bool = True) -> list[str]:
@@ -263,6 +281,11 @@ def selftest() -> int:
         ("exit precedence slot", "10. **Incomplete-run ESCALATED", "10. **Other ESCALATED"),
         ("slot #1 reconcile", "AND the Run-completeness guard is satisfied", "AND nothing else"),
         ("siege-demotion sentence", "the Run-completeness guard is not one", "nothing else is one"),
+        ("loop siege early Reason", "skip look-harder + Minor Issue Handling, surface siege findings in", "skip look-harder + Minor Issue Handling, write verdict marker `Verdict: ESCALATED, Reason: siege-blocked`, surface siege findings in"),
+        ("preflight siege early Reason", "resolve the local verdict by Exit Precedence; `siege-blocked` demotes only a local PASS", "write `Verdict: ESCALATED, Reason: siege-blocked`; `siege-blocked` demotes only a local PASS"),
+        ("preflight mapping unqualified", "cannot be `PASS`: `siege-blocked` demotes only a local PASS", "cannot be `PASS`: `siege-blocked` demotes every verdict"),
+        ("verdict.md reason unqualified", "ESCALATED; demotes only a local PASS", "ESCALATED; demotes every verdict"),
+        ("ledger default true", "`ledger-emitted` defaults to `false`", "`ledger-emitted` defaults to `true`"),
         ("preflight PASS ungated", "only if satisfied write `Verdict: PASS, Reason: clean-pass`", "write `Verdict: PASS, Reason: clean-pass`"),
     ]
     for label, old, new in guard_mutations:

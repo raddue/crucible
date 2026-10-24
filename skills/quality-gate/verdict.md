@@ -329,7 +329,7 @@ The convergence-log mirrors this stamp via `marker_version` (see Convergence Tel
 **Reason token mapping (which exit-path writes which token):**
 - `clean-pass` — Verdict: PASS. The only valid Reason for PASS.
 - `incomplete-run` — Verdict: ESCALATED, when the run stops with required stages omitted, substituted without a documented fallback, or unverified and no other non-PASS exit already determines the verdict. List those stages with round/chunk coordinates in the verdict explanation and return summary. This outcome cannot satisfy a caller's PASS requirement.
-- `siege-blocked` — Verdict: ESCALATED, from the Siege verdict-mapping rule (`SiegeDispatched: true AND SiegeVerdict != PASS`).
+- `siege-blocked` — Verdict: ESCALATED; demotes only a local PASS (a non-PASS local verdict such as `incomplete-run` stands, siege findings stay in `SiegeVerdict` / `SiegeFindings`), from the Siege verdict-mapping rule (`SiegeDispatched: true AND SiegeVerdict != PASS`).
 - `consensus-stagnation-pre-threshold` — Verdict: ESCALATED, from the Pre-Threshold Consensus Carve-Out.
 - `sustained-regression` — Verdict: SUSTAINED_REGRESSION, from the sustained-regression hard exit.
 - `no-op-fix` — Verdict `ESCALATED`. The fix agent returned a byte-identical artifact, OR the verifier marked every targeted finding Unresolved, AND no architectural-candidate flag was set from a prior round. Distinct from `no-op-with-architectural-candidate`, which applies when the architectural-candidates list is non-empty.
