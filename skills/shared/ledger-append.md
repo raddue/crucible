@@ -14,8 +14,12 @@ version: 1
 ## When to emit
 
 Emit one JSONL line to the **central ledger** at terminal verdict emission
-(after the verdict marker has been written; the two writes are independent —
-marker durability and ledger durability are not interlocked).
+(default is marker-first: after the verdict marker has been written; the two
+writes are independent — marker durability and ledger durability are not
+interlocked). Exception, quality-gate only: a terminal PASS attempts the emit
+before publishing the PASS marker (`skills/quality-gate/verdict.md` › Ledger
+emit), so a deliberately omitted emit cannot yield PASS; a failed attempt stays
+non-blocking. Every other skill, and every non-PASS verdict, stays marker-first.
 
 Read in-process verdict state directly. Do **not** re-parse the on-disk marker
 file: parse-roundtrip drift is a real failure mode and the dedup check makes
@@ -53,7 +57,9 @@ script="$plugin_root/scripts/ledger_append.py"
 #      ~/.claude/plugins/*/scripts/ledger_append.py
 #      realpath of ~/.claude/skills/*/../../scripts/ledger_append.py
 # 3. Still unresolved → emit a one-line stderr warning and SKIP. The ledger is
-#    advisory; a missing emit must NEVER block or fail the gate.
+#    advisory; a failed or unresolvable emit must NEVER block or fail the gate.
+#    (Deliberately omitting the attempt is a different matter: quality-gate treats
+#    that as an incomplete run — see skills/quality-gate/verdict.md.)
 
 # 4. Emit. '-' means the central default path; the CLI dedups, auto-fills
 #    `repo` + `schema_version`, and appends. Pure stdlib + absolute path ⇒ no
@@ -250,7 +256,7 @@ anyway).
 
 ### `model_assurance` shape (#746, additive optional)
 
-Tier-A quality-gate rows may carry `"model_assurance": {"state": "verified|configured|unknown", "inventory": "<path>", "digest": "<sha256 hex>"}` sourced from the terminal marker's `ModelAssurance` and `ModelAssuranceInventory` fields. Additive and display-only: `schema_version` stays 2, `append()` preserves the extra key, and the inventory file, not the ledger row, is the proof of record — this field's emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the central ledger may be disabled (`CRUCIBLE_CALIBRATION_DISABLED=1`) without affecting assurance. Never archive raw provider transcripts or credentials in it. The terminal-round-only `model_resolution` field keeps its original shape and scope.
+Tier-A quality-gate rows may carry `"model_assurance": {"state": "verified|configured|unknown", "inventory": "<path>", "digest": "<sha256 hex>"}` sourced from the values destined for the terminal marker's `ModelAssurance` and `ModelAssuranceInventory` fields (on a terminal PASS the marker is not yet written at emit time). Additive and display-only: `schema_version` stays 2, `append()` preserves the extra key, and the inventory file, not the ledger row, is the proof of record — this field's emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the central ledger may be disabled (`CRUCIBLE_CALIBRATION_DISABLED=1`) without affecting assurance. Never archive raw provider transcripts or credentials in it. The terminal-round-only `model_resolution` field keeps its original shape and scope.
 
 ### `predicted_falsifier` protocol (predicted-falsifier prediction market, Phase 7)
 
