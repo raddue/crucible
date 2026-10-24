@@ -14,8 +14,12 @@ version: 1
 ## When to emit
 
 Emit one JSONL line to the **central ledger** at terminal verdict emission
-(after the verdict marker has been written; the two writes are independent —
-marker durability and ledger durability are not interlocked).
+(default is marker-first: after the verdict marker has been written; the two
+writes are independent — marker durability and ledger durability are not
+interlocked). Exception, quality-gate only: a terminal PASS attempts the emit
+before publishing the PASS marker (`skills/quality-gate/verdict.md` › Ledger
+emit), so a deliberately omitted emit cannot yield PASS; a failed attempt stays
+non-blocking. Every other skill, and every non-PASS verdict, stays marker-first.
 
 Read in-process verdict state directly. Do **not** re-parse the on-disk marker
 file: parse-roundtrip drift is a real failure mode and the dedup check makes

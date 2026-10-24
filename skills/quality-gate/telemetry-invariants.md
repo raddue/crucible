@@ -13,7 +13,7 @@ The pre-threshold suppression rule rests on a quantitative claim: "most artifact
 
 **Path:** `convergence-log.jsonl` under the quality-gate memory directory (sibling to `gate-verdict-*.md`, NOT under `scratch/<run-id>/` which is deleted on terminal exit).
 
-**When written:** Once per gate run, immediately after the verdict marker is written and before scratch cleanup.
+**When written:** Once per gate run, after the verdict marker is written and before scratch cleanup. Order at run end: terminal PASS: ledger emit attempt, PASS marker, convergence log; non-PASS: marker, ledger emit, convergence log (ledger emit rules: `verdict.md` › Ledger emit).
 
 **Tool:** Write tool (not Bash, since the path is under `.claude/`). Append-only — read existing file, append one line, write back.
 

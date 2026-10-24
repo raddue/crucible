@@ -19,6 +19,7 @@ TARGETS = {
     "spec": ROOT / "skills/spec/SKILL.md",
     "migrate": ROOT / "skills/build/references/migration.md",
     "warden": ROOT / "skills/warden/SKILL.md",
+    "ledger-append": ROOT / "skills/shared/ledger-append.md",
 }
 
 
@@ -31,6 +32,17 @@ _SIEGE_SITES = (
     ("artifact-preflight ordering (2)", "(2) if `SiegeVerdict != PASS`", True),
     ("artifact-preflight verdict mapping", "**Verdict mapping:**", False),
     ("verdict.md siege-blocked reason", "- `siege-blocked` —", False),
+)
+
+_LEDGER_SITES = (
+    ("verdict.md emit scope", "**Ledger emit at verdict-emit.**", 3000, (
+        "exactly once per run", "chunked early non-PASS exit", "before publishing a PASS marker or return summary",
+        "for any non-PASS verdict, the marker is written first", "never emits and never requires a ledger row")),
+    ("loop.md guard parenthetical", "ledger-emit obligation in `verdict.md`", 700, ("chunked early non-PASS exit",)),
+    ("telemetry-invariants order", "**When written:** Once per gate run", 600, (
+        "terminal PASS: ledger emit attempt, PASS marker, convergence log", "non-PASS: marker, ledger emit, convergence log")),
+    ("recovery ledger-emitted", "`ledger-emitted` defaults to `false`", 700, (
+        "run-terminal verdict", "The key is informational", "post-emit rewrite")),
 )
 
 def _flat(s: str) -> str:
@@ -65,7 +77,7 @@ def check_guard(text: str) -> list[str]:
         "remediate before closing": "complete it and any dependent reverify before closing",
         "no verifier substitution": "A fresh red-team review cannot substitute for the fix verifier",
         "applies to chunk milestones": "applies to chunk-milestone PASSes as well as the final integration",
-        "terminal-only ledger": "terminal marker only",
+        "run-terminal ledger": "run-terminal verdict only",
         "co-fire recorded": "recording `incomplete-run` under `CoFiredExits`",
     }.items():
         if not _operative(section, needle):
@@ -94,7 +106,24 @@ def check_guard(text: str) -> list[str]:
         errs.append("QG: early unconditional siege-blocked Reason before Exit Precedence (S1)")
     if "`ledger-emitted` defaults to `false`" not in flat:
         errs.append("QG: recovery.md ledger-emitted default contradicts terminal-only emit (M3)")
+    # #755 round-2 S1/S2: one emit per run-terminal verdict (incl. chunked early non-PASS exits),
+    # QG terminal PASS emits pre-marker, others marker-first. ponytail: substring pins in anchored windows;
+    # upgrade to a parsed contract if wording churns.
+    for label, anchor, size, needles in _LEDGER_SITES:
+        j = flat.find(anchor)
+        win = flat[j:j + size] if j >= 0 else ""
+        for n in needles:
+            if n not in win:
+                errs.append(f"QG: ledger contract pin missing at {label}: {n!r} (S1/S2)")
     return errs
+
+def check_ledger_doc(text: str) -> list[str]:
+    """shared/ledger-append.md must carry the QG-scoped PASS pre-marker carve-out (S1)."""
+    flat = _flat(text)
+    j = flat.find("## When to emit")
+    win = flat[j:j + 1200] if j >= 0 else ""
+    need = ("quality-gate only", "terminal PASS", "before publishing the PASS marker", "marker-first")
+    return [f"ledger-append.md: When-to-emit lacks {n!r} (S1)" for n in need if n not in win]
 
 def check_qg(text: str, guard: bool = True) -> list[str]:
     required = {
@@ -173,6 +202,8 @@ def check_parent(name: str, text: str) -> list[str]:
 
 def check_files(texts: dict[str, str], guard: bool = True) -> list[str]:
     errors = check_qg(texts["quality-gate"], guard)
+    if guard:
+        errors.extend(check_ledger_doc(texts["ledger-append"]))
     for name in ("build", "spec", "migrate", "warden"):
         errors.extend(check_parent(name, texts[name]))
     return errors
@@ -275,7 +306,16 @@ def selftest() -> int:
         ("PASS publication allowed", "Do not publish PASS in the marker, ledger, or summary.", "It may publish PASS in the marker, ledger, or summary."),
         ("verifier substitution allowed", "A fresh red-team review cannot substitute for the fix verifier.", "A fresh red-team review can substitute for the fix verifier."),
         ("chunk milestones exempt", "applies to chunk-milestone PASSes as well as the final integration", "does not apply to chunk-milestone PASSes as well as the final integration"),
-        ("milestone ledger emit", "terminal marker only", "every marker"),
+        ("milestone ledger emit", "run-terminal verdict only", "every marker"),
+        ("early chunked exit dropped (loop)", "or a chunked early non-PASS exit that ends the run before integration", "or nothing"),
+        ("early chunked exit dropped (verdict)", "or a chunked early non-PASS exit (", "or nothing ("),
+        ("emit once", "Attempt this emit exactly once per run", "Attempt this emit"),
+        ("non-PASS marker-first dropped", "for any non-PASS verdict, the marker is written first", "for any non-PASS verdict, nothing"),
+        ("milestone requires row", "never emits and never requires a ledger row", "emits and requires a ledger row"),
+        ("convergence PASS order", "terminal PASS: ledger emit attempt, PASS marker, convergence log", "marker, convergence log"),
+        ("convergence non-PASS order", "non-PASS: marker, ledger emit, convergence log", "non-PASS: marker, convergence log"),
+        ("ledger-emitted informational", "The key is informational", "gates recovery"),
+        ("ledger-emitted post-emit rewrite", "post-emit rewrite", "pre-emit write"),
         ("co-fire record dropped", "recording `incomplete-run` under `CoFiredExits`", "recording nothing"),
         ("pre-threshold list", "run-completeness closure (`incomplete-run`", "run-completeness closure (`x`"),
         ("exit precedence slot", "10. **Incomplete-run ESCALATED", "10. **Other ESCALATED"),
@@ -293,6 +333,18 @@ def selftest() -> int:
             errors.append(f"selftest: mutation anchor missing in real runbook: {label!r}")
         elif not check_guard(real.replace(old, new)):
             errors.append(f"selftest: guard mutation {label!r} not caught")
+    ledger_real = TARGETS["ledger-append"].read_text(encoding="utf-8")
+    if check_ledger_doc(ledger_real):
+        errors.append(f"selftest: real ledger-append.md fails: {check_ledger_doc(ledger_real)}")
+    for label, old, new in (
+        ("ledger-append QG carve-out dropped", "quality-gate only", "all skills"),
+        ("ledger-append PASS pre-marker dropped", "before publishing the PASS marker", "after the PASS marker"),
+        ("ledger-append marker-first dropped", "marker-first", "nothing-first"),
+    ):
+        if old not in ledger_real:
+            errors.append(f"selftest: ledger anchor missing: {label!r}")
+        elif not check_ledger_doc(ledger_real.replace(old, new)):
+            errors.append(f"selftest: ledger mutation {label!r} not caught")
     head = "### Run-completeness guard (#755)"
     if head in real:
         i = real.index(head); j = real.index("**Artifact-type-aware", i)

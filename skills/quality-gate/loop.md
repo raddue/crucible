@@ -77,7 +77,7 @@ Check all applicable stages: fresh red-team review, fix agent and distinct fix
 verifier, required fresh reverify, triggered stagnation judge, look-harder, siege,
 persistence/fix-generated checks, receipt-linter execution and acceptance for every receipt-bearing dispatch,
 cairn reconciliation and tripwire processing, and the ledger-emit obligation in
-`verdict.md` (terminal marker only: the non-chunked verdict or the chunked final integration; a chunk-milestone PASS checks every other stage here but neither emits nor requires a ledger row, because the ledger dedups by `(run_id, skill)` and a milestone row would permanently shadow the terminal verdict). Apply each stage's existing trigger and evidence contract; this guard
+`verdict.md` (run-terminal verdict only: the non-chunked verdict, the chunked final integration, or a chunked early non-PASS exit that ends the run before integration; a chunk-milestone PASS checks every other stage here but neither emits nor requires a ledger row, because the ledger dedups by `(run_id, skill)` and a milestone row would permanently shadow the terminal verdict). Apply each stage's existing trigger and evidence contract; this guard
 adds no dispatch on a path where that stage is not required.
 
 Documented conditional skips and fallbacks remain valid when their preconditions
