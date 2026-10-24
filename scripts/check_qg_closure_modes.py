@@ -43,6 +43,13 @@ _LEDGER_SITES = (
         "terminal PASS: ledger emit attempt, PASS marker, convergence log", "non-PASS: marker, ledger emit, convergence log")),
     ("recovery ledger-emitted", "`ledger-emitted` defaults to `false`", 700, (
         "run-terminal verdict", "The key is informational", "post-emit rewrite")),
+    ("recovery sentinel order", "- `round-N-complete.md`: per-round completion sentinel", 1800, (
+        "The emit never precedes the sentinel", "PASS: emit, then marker", "non-PASS: marker, then emit",
+        "`ledger-emitted` rewrite is the one write allowed after it")),
+    ("recovery run-end tail replay", "If `round-N-complete.md` includes `terminal:", 1800, (
+        "replay the run-end tail idempotently", "PASS: if the marker is missing or partial, attempt the emit",
+        "A dedup counts as already emitted", "Non-PASS: write the marker if missing or partial, then attempt the emit even when the marker already exists",
+        "A chunk-milestone sentinel that does not end the run replays the marker only and never emits")),
 )
 
 def _flat(s: str) -> str:
@@ -314,6 +321,15 @@ def selftest() -> int:
         ("milestone requires row", "never emits and never requires a ledger row", "emits and requires a ledger row"),
         ("convergence PASS order", "terminal PASS: ledger emit attempt, PASS marker, convergence log", "marker, convergence log"),
         ("convergence non-PASS order", "non-PASS: marker, ledger emit, convergence log", "non-PASS: marker, convergence log"),
+        ("recovery emit before sentinel", "The emit never precedes the sentinel", "The emit may precede the sentinel"),
+        ("recovery PASS order", "PASS: emit, then marker", "PASS: marker, then emit"),
+        ("recovery non-PASS order", "non-PASS: marker, then emit", "non-PASS: emit, then marker"),
+        ("recovery ledger-emitted exemption", "`ledger-emitted` rewrite is the one write allowed after it", "sentinel is always last"),
+        ("recovery marker-only replay", "replay the run-end tail idempotently", "replay only the verdict-marker write step"),
+        ("recovery PASS replay emit dropped", "PASS: if the marker is missing or partial, attempt the emit", "PASS: if the marker is missing or partial, write the marker"),
+        ("recovery dedup not recorded", "A dedup counts as already emitted", "A dedup is an error"),
+        ("recovery non-PASS emit replay dropped", "then attempt the emit even when the marker already exists", "then stop when the marker already exists"),
+        ("recovery milestone replay emits", "replays the marker only and never emits", "replays the marker only and emits"),
         ("ledger-emitted informational", "The key is informational", "gates recovery"),
         ("ledger-emitted post-emit rewrite", "post-emit rewrite", "pre-emit write"),
         ("co-fire record dropped", "recording `incomplete-run` under `CoFiredExits`", "recording nothing"),

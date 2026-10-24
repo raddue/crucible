@@ -256,7 +256,7 @@ anyway).
 
 ### `model_assurance` shape (#746, additive optional)
 
-Tier-A quality-gate rows may carry `"model_assurance": {"state": "verified|configured|unknown", "inventory": "<path>", "digest": "<sha256 hex>"}` sourced from the terminal marker's `ModelAssurance` and `ModelAssuranceInventory` fields. Additive and display-only: `schema_version` stays 2, `append()` preserves the extra key, and the inventory file, not the ledger row, is the proof of record — this field's emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the central ledger may be disabled (`CRUCIBLE_CALIBRATION_DISABLED=1`) without affecting assurance. Never archive raw provider transcripts or credentials in it. The terminal-round-only `model_resolution` field keeps its original shape and scope.
+Tier-A quality-gate rows may carry `"model_assurance": {"state": "verified|configured|unknown", "inventory": "<path>", "digest": "<sha256 hex>"}` sourced from the values destined for the terminal marker's `ModelAssurance` and `ModelAssuranceInventory` fields (on a terminal PASS the marker is not yet written at emit time). Additive and display-only: `schema_version` stays 2, `append()` preserves the extra key, and the inventory file, not the ledger row, is the proof of record — this field's emit may be skipped, deduplicated, or fail without changing the durable inventory or the verdict, and the central ledger may be disabled (`CRUCIBLE_CALIBRATION_DISABLED=1`) without affecting assurance. Never archive raw provider transcripts or credentials in it. The terminal-round-only `model_resolution` field keeps its original shape and scope.
 
 ### `predicted_falsifier` protocol (predicted-falsifier prediction market, Phase 7)
 
