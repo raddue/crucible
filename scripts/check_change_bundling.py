@@ -20,7 +20,7 @@ cannot self-match — see `scripts/CHECKER_CONVENTIONS.md`):
       bundle rules, and the no-silent-skip guarantee (a file that is neither
       bundled nor explicitly skipped is a defect).
 
-  skills/warden/SKILL.md and skills/orchestrator/SKILL.md — each carries the
+  skills/warden/SKILL.md — carries the
       canonical link and a dispatch clause: one review worker per bundle, every
       changed file covered exactly once.
 
@@ -36,7 +36,6 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "scripts/change_bundling.py"
 CONVENTION = ROOT / "skills/shared/change-bundling-convention.md"
 WARDEN = ROOT / "skills/warden/SKILL.md"
-ORCHESTRATOR = ROOT / "skills/orchestrator/SKILL.md"
 
 # label -> literal substring that MUST appear in scripts/change_bundling.py.
 ENGINE_REQUIRED: dict[str, str] = {
@@ -63,8 +62,7 @@ CONVENTION_REQUIRED: dict[str, str] = {
     "machine-enforced coverage": "raises",
 }
 
-# label -> literal substring that MUST appear in BOTH warden + orchestrator
-# SKILL.md (the integration clause).
+# label -> literal substring that MUST appear in warden SKILL.md (the integration clause).
 DISPATCH_REQUIRED: dict[str, str] = {
     "canonical link": "<!-- CANONICAL: shared/change-bundling-convention.md -->",
     "per-bundle worker": "bundle",
@@ -101,8 +99,6 @@ def selftest() -> int:
             "convention must cite the engine module by name"
         assert "warden" in convention.lower(), \
             "convention must name warden as a consumer"
-        assert "orchestrator" in convention.lower(), \
-            "convention must name orchestrator as a consumer"
 
     print("selftest OK — GOOD passes; removing a clause flags exactly that "
           "clause; engine/convention wiring consistent.")
@@ -123,7 +119,7 @@ def main() -> int:
         else:
             errs += check_required(path.read_text(encoding="utf-8"), required)
 
-    for path, what in ((WARDEN, "warden"), (ORCHESTRATOR, "orchestrator")):
+    for path, what in ((WARDEN, "warden"),):
         if not path.is_file():
             errs.append(f"missing file: {path.relative_to(ROOT)}")
         else:
@@ -139,7 +135,7 @@ def main() -> int:
             print(f"  - {e}")
         return 1
     print("OK — deterministic change-bundling engine + convention present; "
-          "warden and orchestrator both carry the per-bundle dispatch clause.")
+          "warden carries the per-bundle dispatch clause.")
     return 0
 
 

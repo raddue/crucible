@@ -57,7 +57,7 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "Maintenance & Meta": [
         "stocktake", "merge-pr", "skill-creator", "getting-started", "handoff",
-        "workshop", "orchestrator",
+        "workshop",
     ],
     "Unity UI (Domain-Specific)": [
         "mockup-builder", "mock-to-unity", "ui-verify",
