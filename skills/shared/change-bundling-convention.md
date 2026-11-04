@@ -5,7 +5,7 @@ version: 1
 # Change-Bundling Convention
 
 > Canonical reference for deterministic changed-file selection + bundling across
-> all orchestrator/review dispatch. `warden` and `orchestrator` reference this
+> all orchestrator/review dispatch. `warden` references this
 > file via `<!-- CANONICAL: shared/change-bundling-convention.md -->`.
 >
 > **This is a shared skill reference, not a CLAUDE.md directive.** CLAUDE.md
@@ -109,9 +109,6 @@ have risked skips; there it guarantees coverage that prompt-following cannot.
 
 - **warden** — the standalone pre-push gate (:acceptance on a many-file diff →
   fan review legs per bundle, so every changed file is covered exactly once).
-- **orchestrator** — Herdr team-boss dispatch (:bundle review work per
-  `change-bundling` bundle, one worker per bundle, concurrent).
 
-Each consumer's SKILL.md carries the same canonical link and the dispatch
-protocol above; neither re-implements the bundling rules — they call
-`scripts/change_bundling.py`.
+The warden SKILL.md carries the canonical link and dispatch protocol above;
+it calls `scripts/change_bundling.py` rather than re-implementing the rules.
